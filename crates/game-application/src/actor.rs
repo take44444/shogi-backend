@@ -249,6 +249,10 @@ impl Actor {
                 if let Some(acceptance) = state.replay(&pending)? {
                     return Ok(acceptance);
                 }
+                // This conflict occurs if another writer advances this game's version
+                // between refresh and append; a single-writer setup prevents it.
+                // With exclusive ownership enforced by lease/fencing, this would
+                // indicate a violation of the single-writer invariant.
                 if matches!(error, ApplicationError::SequenceMismatch { .. }) {
                     return Err(ApplicationError::SequenceMismatch {
                         expected: pending.expected_seq,
