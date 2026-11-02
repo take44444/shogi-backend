@@ -1,7 +1,7 @@
 # 大規模将棋アプリ サーバーサイドアーキテクチャ設計書
 
-- バージョン: 1.4（現行実装と将来設計）
-- 更新日: 2026-11-02
+- バージョン: 1.5（現行実装と将来設計）
+- 更新日: 2026-11-03
 - 対象: Web / iOS / Android
 - 設計目標: 最大同時接続 100,000人
 
@@ -42,11 +42,13 @@ flowchart LR
 
 ### 0.2 確定・再送・復旧
 
-- 1対局につきサービスの共有レジストリ内に1つのActorを置き、bounded `mpsc`と`oneshot`で逐次処理する。Snapshot取得時と変更前にはDBのversionを確認する。
-- `seq`は0から始まり、受理した着手・投了ごとに1増える。変更には`expected_seq`と`request_id`が必要で、参加者以外の変更は拒否する。
+- 1対局につき`GameService`の共有レジストリ内に1つのActorを置き、容量64のbounded `mpsc`と要求ごとの`oneshot`で逐次処理する。`GameService`のcloneはレジストリを共有するが、別途生成したサービス間でActorの一意性を保証する仕組みやLease・Fencingはない。
+- Snapshot取得時と変更前にはDBのversionを確認し、キャッシュが未復元・無効、またはversionが異なる場合に履歴を再読込する。キャッシュがあってもDB読込エラーは返す。
+- `seq`は0から始まり、受理した着手・投了ごとに1増える。上限は`i64::MAX`である。変更には`expected_seq`と`request_id`が必要で、参加者以外の変更は拒否する。
 - 受理済み要求だけが対局内の`request_id`を予約する。同じ種別・ユーザー・期待連番・着手内容での再送には元の結果を返し、内容が違えば拒否する。ユーザー作成・対局作成はこの再送契約の対象外である。
 - 局面のコピーで変更を検証し、versionの条件付き更新、結果、受理記録を同一トランザクションで保存してからActorへ反映する。保存エラー時は履歴を再読込して照合し、結果を確認できない場合は成功・ロールバックを断定しない。応答喪失時は同じ要求を再送する。
 - 再起動後は平手初期局面から受理済み履歴を再実行し、連番・参加者・合法性・各応答・最終結果を検証して復元する。DBに局面Snapshotを保存する方式ではない。
+- キュー投入後の呼出元のキャンセルや返信先の破棄では処理を取り消さない。メッセージ契約は[6.2節](#62-game-actorのメッセージ契約)を参照する。
 
 ### 0.3 DB・実行環境
 
@@ -148,6 +150,8 @@ Game RouterはGateway内のRustモジュールとして実装する。**Shard Ma
 
 ## 4. Pod・Virtual Shard・Game Actorの関係
 
+本章と第5章は将来の分散配置設計である。現行のActorレジストリは0.2節の範囲に限られる。
+
 ```text
 Kubernetes Cluster
   ├─ Game Server Pod A（Rustプロセス）
@@ -212,6 +216,8 @@ Shard Managerは**独立Deployment（通常2 Podを初期候補）**として実
 
 ## 6. 着手の確定と観戦イベント配信
 
+以下の図と6.1節は将来設計である。現在はgRPCの要求・応答のみを提供し、Gateway、時計、Outbox、NATSによる配信は実装していない。現行のメッセージ契約は6.2節に示す。
+
 ```mermaid
 sequenceDiagram
   participant P as Player
@@ -232,7 +238,7 @@ sequenceDiagram
   A->>A: 時計・手番・合法手・バージョン検証
   A->>DB: 着手+時計+次手番+Outboxを同一TXで確定
   DB-->>A: COMMIT
-  A-->>GS: oneshot MoveAccepted(seq)
+  A-->>GS: oneshot Acceptance(seq, in_check, result)
   GS-->>GW: gRPC成功応答
   GW-->>P: 確定応答
   PUB->>DB: 未送信Outboxを取得
@@ -259,11 +265,16 @@ sequenceDiagram
 
 ### 6.2 Game Actorのメッセージ契約
 
-- **Command**: `GetSnapshot`、`MakeMove`、`Resign`、`CheckTimeout`（内部再評価用。通常はActor自身のタイマー）、将来`Ready`。gRPC HandlerからActorへbounded `mpsc`で送る。
-- **Reply**: Commandごとに用意した`oneshot`へ返す。`MoveAccepted`、投了成功、Snapshot、エラーなど。`mpsc.send().await`成功は処理成功ではない。
-- **Domain Event**: `MoveCommitted`、`GameFinished`等を着手・結果と同一のDBトランザクションでOutboxへ書き込み、Core NATSからGateway経由で通知する。
-- 成功ReplyとDomain Eventは**同じDB Commitに根拠を持つが到着順・到着可否は独立**。クライアントの盤面反映はEvent/Snapshotに一本化し、Replyは操作の送信状態とエラー管理に使う。
-- `expected_seq`、`request_id`、Shard fencingを検証し、確定済み同一`request_id`には同じ結果を返す。
+以下は現行実装の契約である。時計・イベント配信・Shard Fencingは将来設計として区別する。
+
+- `GameService`は、Snapshot取得を`Command::Snapshot`、着手・投了を`Command::Mutate`へ変換し、bounded `mpsc`で対象Actorへ送る。
+- Actorは要求を逐次処理し、要求ごとの`oneshot`へ`Snapshot`または`Acceptance`、失敗時は`ApplicationError`を返す。着手・投了に共通の`Acceptance`は、受理時の連番・王手状態・対局結果を持つ。
+- `mpsc`への投入成功は処理成功を意味しない。投入後に呼出元がキャンセルされても処理は続き、送信側がすべて閉じた後も投入済み要求を処理して終了する。
+- 変更要求は参加者、`expected_seq`、`request_id`、対局ルールを検証する。受理済み要求の同一内容での再送には元の応答を返し、同じ`request_id`で内容が異なる要求は拒否する。
+- 成功応答は永続化の確定を根拠とする。応答喪失や保存結果が不明な場合は、元の`expected_seq`を含む同一内容・同一`request_id`で再送する。確定・復旧の方針は0.2節に示す。
+- `CheckTimeout`、`Ready`、Domain Eventは未実装である。将来のイベントは変更と同じDBトランザクションでOutboxへ保存し、NATS経由で通知する。応答とイベントの到着順・到着可否は独立とする。
+
+実装の定義は[Actor](crates/game-application/src/actor.rs)、[要求・応答型](crates/game-application/src/types.rs)、[gRPC定義](proto/game.proto)を参照する。
 
 ## 7. 対局時計（Game Clock）— 将来実装時の採用方針（未実装）
 
@@ -312,7 +323,9 @@ Actorは1対局につき1つのTokio Taskで、Commandを逐次実行する。`t
 
 競技性・負荷試験の要件が高まれば、GatewayまたはGame Serverでの受信時刻を正式受付とする方式を再検討する。ただしその場合は**未処理の期限内要求の追跡、期限確定との原子的競合制御、時計同期、Pod障害時の保証**が必要となる。現時点で`received_at`をGatewayから受け取って勝敗判定に使う設計や固定猶予だけの方式は採用しない。
 
-## 8. Pod停止・再起動時の復旧
+## 8. Pod停止・再起動時の復旧（将来の分散構成）
+
+本章はShard・Lease・時計・永続Snapshotを導入した後の設計である。現行の復旧は0.2節のとおり、平手初期局面から受理済み履歴を再実行する。
 
 ```mermaid
 flowchart TD
@@ -321,7 +334,7 @@ flowchart TD
   C --> D[DBトランザクションでPod CがLease取得・世代更新]
   D --> E[Pod CがSnapshot + 着手履歴を取得]
   E --> F[Game Actor / Clock / Timeoutを復元]
-  F --> G[ShardをREADYに変更]
+  F --> G[ShardをACTIVEに変更]
   G --> H[Game Routerが新Ownerへ配送]
   H --> I[Clientへ盤面・時計・seqを再同期]
 ```
@@ -331,10 +344,12 @@ flowchart TD
 - 旧世代からのDB更新はFencing Tokenで拒否する。
 - 移動中は着手を即時確定しない。安全に再試行させるか、短時間保留する。
 - 応答を失った着手がすでに確定している可能性があるため、`request_id`と`seq`で重複実行を防ぐ。
-- Pod全体のReadyとShardごとの`RECOVERING / READY / DRAINING`は分けて扱う。
+- Pod全体のReadinessとShardごとの`ACTIVE / RECOVERING / DRAINING`は分けて扱う。
 - 計画停止ではDrain処理とLease引き継ぎを試みる。突然の障害ではLease失効後に復旧する。
 
 ## 9. Valkey / Core NATS / JetStream / PostgreSQLの使い分け
+
+本章は将来構成での役割分担を示す。現在の正本はSQLiteであり、現行スキーマは11.1節に示す。
 
 | 技術 | 役割 | 主な利用例 |
 |---|---|---|
@@ -514,7 +529,7 @@ flowchart TB
 
 - **Valkey採用**: Presence、Token Bucket / Fixed Window、キャッシュ、Sorted Setによるマッチングに利用する。イベント配信・ジョブキューは引き続きCore NATS / JetStreamを使い、Valkey Pub/Sub / Streamsへの依存は初期設計では持たない。
 - **Valkey本番**: AWSならAmazon ElastiCache for Valkey、Google CloudならMemorystore for Valkeyなど、Kubernetes基盤と同一クラウド・同一リージョンのマネージドサービスを優先する。互換コマンド・Lua・クラスタのキースロット制約を検証する。
-- **Valkeyローカル**: Docker ComposeでValkeyを起動。RustではRedisプロトコルに対応する`redis` crate等を利用可能。
+- **Valkeyローカル**: 導入時にDocker ComposeへValkeyを追加する。現行の`compose.yaml`は`game-server`とSQLite用Volumeのみを定義する。RustではRedisプロトコルに対応する`redis` crate等を利用可能。
 - **PostgreSQL本番**: RDS / Cloud SQL / Azure Database for PostgreSQL等のマネージドHAを優先。Lease・FencingのトランザクションはPrimaryへ送る。
 - **自前Kubernetes運用の代替**: ValkeyやPostgreSQLをStatefulSet / Operatorで動かすことも可能だが、初期は運用負担を抑えるため採用しない。
 
@@ -602,11 +617,11 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 
 ### Phase 2: リアルタイム分離
 
-Realtime Gatewayを独立させ、WebSocket購読、Core NATS、ValkeyによるPresence/マッチングを導入。Snapshot + Sequence再同期を実装。
+Realtime Gatewayを独立させ、WebSocket購読、Core NATS、ValkeyによるPresence/マッチングを導入。確定イベントの配信開始に合わせてTransactional OutboxとOutbox Publisherを導入し、変更とイベントの原子的な保存を保証する。Snapshot + Sequence再同期を実装。
 
 ### Phase 3: AIと非同期処理
 
-JetStream、Outbox Publisher、AI Worker、解析ジョブ共有、自然言語解説を追加。
+JetStream、AI Worker、解析ジョブ共有、自然言語解説を追加。OutboxとPublisherを解析ジョブ・完了通知にも拡張する。
 
 ### Phase 4: 10万人規模
 
@@ -656,7 +671,7 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 
 ## 16. 今後の未決定事項
 
-1. **時計の公平性の将来改善**: MVPはActorがmpscから取得した時点を正式受付とする。サーバー内キュー待ち・転送遅延が競技性に与える影響、通知遅延補正、障害時の時計補償は負荷試験後に再検討する。
+1. **時計の公平性の将来改善**: 時計導入時はActorがmpscから取得した時点を正式受付とする方針である。サーバー内キュー待ち・転送遅延が競技性に与える影響、通知遅延補正、障害時の時計補償は負荷試験後に再検討する。
 2. **Shard Leaseパラメータ**: 更新間隔、期限、Failover時間目標、DB負荷、所有者切替方式。
 3. **サービス負荷の実測**: 1 Gateway PodあたりWebSocket数、1 Game PodあたりActor数、fan-out帯域。
 4. **追加ルールの導入範囲**: 現在対象外の時計、千日手、連続王手の千日手、入玉宣言勝ち等を導入する時期と判定詳細。
