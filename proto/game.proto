@@ -1,0 +1,92 @@
+syntax = "proto3";
+package shogi.v1;
+
+service GameService {
+  rpc CreateGame(CreateGameRequest) returns (Snapshot);
+  rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
+  rpc MakeMove(MakeMoveRequest) returns (Acceptance);
+  rpc Resign(ResignRequest) returns (Acceptance);
+}
+
+message CreateGameRequest { string game_id = 1; }
+message GetSnapshotRequest { string game_id = 1; }
+message MakeMoveRequest {
+  string game_id = 1;
+  string request_id = 2;
+  optional uint64 expected_seq = 3;
+  Player player = 4;
+  string usi = 5;
+}
+message ResignRequest {
+  string game_id = 1;
+  string request_id = 2;
+  optional uint64 expected_seq = 3;
+  Player player = 4;
+}
+message Acceptance {
+  uint64 seq = 1;
+  bool in_check = 2;
+  GameResult result = 3;
+}
+message Snapshot {
+  string game_id = 1;
+  uint64 seq = 2;
+  repeated BoardPiece board = 3;
+  repeated HandCount hands = 4;
+  Player turn = 5;
+  bool in_check = 6;
+  GameResult result = 7;
+  repeated string legal_moves = 8;
+}
+message BoardPiece {
+  uint32 file = 1;
+  uint32 rank = 2;
+  Player owner = 3;
+  PieceKind kind = 4;
+}
+message HandCount {
+  Player player = 1;
+  HandPiece piece = 2;
+  uint32 count = 3;
+}
+message GameResult {
+  Player winner = 1;
+  FinishReason reason = 2;
+}
+enum Player {
+  PLAYER_UNSPECIFIED = 0;
+  PLAYER_BLACK = 1;
+  PLAYER_WHITE = 2;
+}
+enum PieceKind {
+  PIECE_KIND_UNSPECIFIED = 0;
+  PIECE_KIND_PAWN = 1;
+  PIECE_KIND_LANCE = 2;
+  PIECE_KIND_KNIGHT = 3;
+  PIECE_KIND_SILVER = 4;
+  PIECE_KIND_GOLD = 5;
+  PIECE_KIND_BISHOP = 6;
+  PIECE_KIND_ROOK = 7;
+  PIECE_KIND_KING = 8;
+  PIECE_KIND_PROMOTED_PAWN = 9;
+  PIECE_KIND_PROMOTED_LANCE = 10;
+  PIECE_KIND_PROMOTED_KNIGHT = 11;
+  PIECE_KIND_PROMOTED_SILVER = 12;
+  PIECE_KIND_HORSE = 13;
+  PIECE_KIND_DRAGON = 14;
+}
+enum HandPiece {
+  HAND_PIECE_UNSPECIFIED = 0;
+  HAND_PIECE_PAWN = 1;
+  HAND_PIECE_LANCE = 2;
+  HAND_PIECE_KNIGHT = 3;
+  HAND_PIECE_SILVER = 4;
+  HAND_PIECE_GOLD = 5;
+  HAND_PIECE_BISHOP = 6;
+  HAND_PIECE_ROOK = 7;
+}
+enum FinishReason {
+  FINISH_REASON_UNSPECIFIED = 0;
+  FINISH_REASON_CHECKMATE = 1;
+  FINISH_REASON_RESIGNATION = 2;
+}
