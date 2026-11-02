@@ -21,7 +21,8 @@ pub(crate) fn application_status(error: ApplicationError) -> Status {
             status.metadata_mut().insert("actual-seq", actual.into());
             status
         }
-        ApplicationError::Domain(CommandError::RulesFailure)
+        ApplicationError::Internal
+        | ApplicationError::Domain(CommandError::RulesFailure)
         | ApplicationError::SequenceExhausted => Status::internal(message),
         ApplicationError::Domain(_) => Status::failed_precondition(message),
     }
@@ -153,6 +154,7 @@ mod tests {
             (ApplicationError::RequestConflict, Code::AlreadyExists),
             (ApplicationError::NotFound, Code::NotFound),
             (ApplicationError::Unavailable, Code::Unavailable),
+            (ApplicationError::Internal, Code::Internal),
             (ApplicationError::SequenceExhausted, Code::Internal),
             (
                 ApplicationError::Domain(CommandError::RulesFailure),

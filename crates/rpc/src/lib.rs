@@ -24,7 +24,7 @@
 //! | Wrong turn, illegal move, or finished game | `FailedPrecondition` |
 //! | Storage failure or uncertain commit | `Unavailable` |
 //! | Corrupt history or incompatible schema | `DataLoss` |
-//! | Rules failure or sequence exhaustion | `Internal` |
+//! | Internal invariant violation, rules failure, or sequence exhaustion | `Internal` |
 //!
 //! This client example compiles without connecting during documentation tests.
 //! It assumes a running server and a fresh user ID. User creation is not idempotent.

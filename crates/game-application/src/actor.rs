@@ -169,7 +169,7 @@ impl Actor {
 
     async fn snapshot(&mut self) -> Result<Snapshot, ApplicationError> {
         self.refresh().await?;
-        let state = self.state.as_ref().ok_or(ApplicationError::Unavailable)?;
+        let state = self.state.as_ref().ok_or(ApplicationError::Internal)?;
         Ok(Snapshot {
             game_id: self.id.clone(),
             participants: state.participants.clone(),
@@ -204,7 +204,7 @@ impl Actor {
     /// `Unavailable` with invalid state; absence of a receipt does not prove rollback.
     async fn apply(&mut self, pending: Pending) -> Result<Acceptance, ApplicationError> {
         self.refresh().await?;
-        let state = self.state.as_ref().ok_or(ApplicationError::Unavailable)?;
+        let state = self.state.as_ref().ok_or(ApplicationError::Internal)?;
         if let Some(acceptance) = state.replay(&pending)? {
             return Ok(acceptance);
         }
@@ -235,7 +235,7 @@ impl Actor {
         };
         match self.repository.append(&self.id, &receipt).await {
             Ok(()) => {
-                let state = self.state.as_mut().ok_or(ApplicationError::Unavailable)?;
+                let state = self.state.as_mut().ok_or(ApplicationError::Internal)?;
                 state.game = candidate;
                 state.seq = seq;
                 state
@@ -245,7 +245,7 @@ impl Actor {
             }
             Err(error) => {
                 self.reload().await?;
-                let state = self.state.as_ref().ok_or(ApplicationError::Unavailable)?;
+                let state = self.state.as_ref().ok_or(ApplicationError::Internal)?;
                 if let Some(acceptance) = state.replay(&pending)? {
                     return Ok(acceptance);
                 }

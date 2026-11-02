@@ -167,6 +167,8 @@ pub enum ApplicationError {
     /// Storage or an actor is unavailable, or the commit outcome is uncertain.
     /// Retry mutations with identical contents and the same request ID.
     Unavailable,
+    /// An internal implementation invariant was violated.
+    Internal,
     /// The command's required version differs from the durable version.
     SequenceMismatch {
         /// The sequence supplied by the caller.
@@ -194,6 +196,7 @@ impl fmt::Display for ApplicationError {
             Self::Unavailable => {
                 f.write_str("storage or actor unavailable; retry the same request ID because the command may have committed")
             }
+            Self::Internal => f.write_str("internal application invariant violated"),
             Self::SequenceMismatch { expected, actual } => {
                 write!(f, "sequence mismatch: expected {expected}, actual {actual}")
             }

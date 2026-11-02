@@ -40,7 +40,7 @@ Exact retries return the original acceptance, including after restart or finish.
 | Wrong turn, illegal move, or finished game | `FailedPrecondition` |
 | Storage failure or uncertain outcome | `Unavailable` |
 | Corrupt durable history or incompatible schema | `DataLoss` |
-| Rules implementation failure or sequence exhaustion | `Internal` |
+| Internal invariant violation, rules implementation failure, or sequence exhaustion | `Internal` |
 
 After `Unavailable` or a lost response, retry the same request ID with identical
 contents. Cancellation after enqueue does not cancel a durable command.
