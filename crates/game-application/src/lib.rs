@@ -1,10 +1,11 @@
-//! Durable shogi commands coordinated through the asynchronous [`Store`] port.
+//! User and game use cases backed by [`UserRepository`] and [`GameRepository`].
 //!
-//! [`GameService`] binds two existing users to a game and derives their sides
-//! from [`Participants`]. User IDs are caller claims, not authentication credentials.
+//! [`UserService`] registers and looks up users. [`GameService`] binds two existing
+//! users to a game and derives their sides from [`Participants`]. User IDs are caller
+//! claims, not authentication credentials.
 //! The application contains no database types and has no default in-memory store.
 //!
-//! Each service registry runs one actor per game with a 64-command mailbox.
+//! Each game service registry runs one actor per game with a 64-command mailbox.
 //! Clones share that registry. Registry locks do not span database or channel waits.
 //! Unknown games do not retain actors; closed actors reload durable state on demand.
 //! Before each snapshot or mutation, the actor checks the durable version and
@@ -22,13 +23,13 @@
 //! Rejected request IDs remain reusable. Creating a user or game is not idempotent.
 //!
 //! A command stages a cloned game and receipt. The actor publishes that candidate
-//! only after [`Store::append`] confirms a commit. Every failed append triggers a
-//! durable reload. A matching receipt yields its original acceptance; changed
+//! only after [`GameRepository::append`] confirms a commit. Every failed append
+//! triggers a durable reload. A matching receipt yields its original acceptance; changed
 //! contents yield [`ApplicationError::RequestConflict`]. If append reported a version
 //! conflict and no matching receipt exists, the actor returns
 //! [`ApplicationError::SequenceMismatch`] with the reloaded version. Other append
-//! failures without a receipt
-//! yields [`ApplicationError::Unavailable`] and invalidates local state. Failed
+//! failures without a receipt yield [`ApplicationError::Unavailable`] and invalidate
+//! local state. Failed
 //! reconciliation also leaves state invalid; a later successful refresh can recover.
 //!
 //! Cancellation after enqueue does not cancel the actor's transaction. A lost
@@ -37,17 +38,19 @@
 #![warn(missing_docs)]
 
 mod actor;
-mod store;
+mod repository;
 mod types;
+mod user;
 
 use actor::{Actor, Command, Pending};
+pub use repository::*;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-pub use store::*;
 use tokio::sync::{mpsc, oneshot};
 pub use types::*;
+pub use user::UserService;
 
 const MAILBOX_CAPACITY: usize = 64;
 
@@ -56,36 +59,18 @@ const MAILBOX_CAPACITY: usize = 64;
 /// See the [crate documentation](crate) for cancellation and retry contracts.
 #[derive(Clone)]
 pub struct GameService {
-    store: Arc<dyn Store>,
+    repository: Arc<dyn GameRepository>,
     games: Arc<Mutex<HashMap<GameId, mpsc::Sender<Command>>>>,
 }
 
 impl GameService {
-    /// Creates a service with an empty actor registry and the supplied durable store.
+    /// Creates a service with an empty actor registry and the supplied game repository.
     /// No database access occurs until an operation is called.
-    pub fn new(store: Arc<dyn Store>) -> Self {
+    pub fn new(repository: Arc<dyn GameRepository>) -> Self {
         Self {
-            store,
+            repository,
             games: Arc::default(),
         }
-    }
-
-    /// Creates a user with the supplied internal ID. This does not authenticate anyone.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate ID, or a store error.
-    pub async fn create_user(&self, id: UserId) -> Result<User, ApplicationError> {
-        self.store.create_user(id).await
-    }
-
-    /// Loads an existing user.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::UserNotFound`] for an unknown user, or a store error.
-    pub async fn get_user(&self, id: &UserId) -> Result<User, ApplicationError> {
-        self.store.get_user(id).await
     }
 
     /// Creates a standard game with permanent side bindings, then reads its snapshot.
@@ -109,7 +94,9 @@ impl GameService {
         if participants.black == participants.white {
             return Err(ApplicationError::InvalidParticipants);
         }
-        self.store.create_game(id.clone(), participants).await?;
+        self.repository
+            .create_game(id.clone(), participants)
+            .await?;
         self.snapshot(&id).await
     }
 
@@ -206,7 +193,7 @@ impl GameService {
                 return Ok(sender.clone());
             }
         }
-        self.store.version(id).await?;
+        self.repository.version(id).await?;
         let mut games = self
             .games
             .lock()
@@ -215,7 +202,7 @@ impl GameService {
             return Ok(sender.clone());
         }
         let (sender, receiver) = mpsc::channel(MAILBOX_CAPACITY);
-        let actor = Actor::new(id.clone(), self.store.clone());
+        let actor = Actor::new(id.clone(), self.repository.clone());
         games.insert(id.clone(), sender.clone());
         tokio::spawn(actor.run(receiver));
         Ok(sender)

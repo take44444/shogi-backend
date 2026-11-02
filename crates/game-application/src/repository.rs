@@ -1,4 +1,4 @@
-//! Durable port and journal values. Adapters persist receipts; the application validates replay.
+//! Repository contracts and durable journal values. Adapters persist receipts; the application validates replay.
 
 use async_trait::async_trait;
 use shogi_domain::{GameResult, Move};
@@ -46,7 +46,7 @@ pub struct GameRecord {
 
 /// Asynchronous durable operations required by [`crate::GameService`].
 ///
-/// Implementors preserve immutable participant bindings, unique user and game IDs,
+/// Implementors preserve immutable participant bindings, unique game IDs,
 /// and per-game uniqueness of accepted request IDs and sequence numbers. New games
 /// have version zero, no result, and an empty journal. Durable versions are bounded
 /// by `i64::MAX`. Reads must not fabricate a successful empty record for an unknown ID.
@@ -56,25 +56,23 @@ pub struct GameRecord {
 /// result confirms durability. An error can follow a commit; callers must reconcile
 /// by loading durable history before publishing a candidate or accepting another mutation.
 /// The application stages legal commands and validates replay rather than trusting
-/// stored position strings. Store implementations still enforce storage constraints
+/// stored position strings. Repository implementations still enforce storage constraints
 /// and membership independently of the actor cache.
+///
+/// A game repository cannot register users, even when its adapter also implements
+/// [`UserRepository`].
+///
+/// ```compile_fail,E0599
+/// use game_application::{GameRepository, UserId};
+///
+/// async fn register(repository: &dyn GameRepository, id: UserId) {
+///     repository.create_user(id).await;
+/// }
+/// ```
 #[async_trait]
-pub trait Store: Send + Sync {
-    /// Inserts a user without overwriting an existing user.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate ID, or
-    /// [`ApplicationError::Unavailable`] on a storage failure.
-    async fn create_user(&self, id: UserId) -> Result<User, ApplicationError>;
-    /// Reads a registered user.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::UserNotFound`] for an unknown user, or
-    /// [`ApplicationError::Unavailable`] on a storage failure.
-    async fn get_user(&self, id: &UserId) -> Result<User, ApplicationError>;
+pub trait GameRepository: Send + Sync {
     /// Atomically creates version-zero metadata with two distinct existing users.
+    /// Checks participant existence in the same transaction as game insertion.
     /// Participant bindings cannot subsequently change.
     ///
     /// # Errors
@@ -125,4 +123,24 @@ pub trait Store: Send + Sync {
     /// [`ApplicationError::Unavailable`] for storage failures, including constraint
     /// or uncertain commit failures. An error does not prove rollback.
     async fn append(&self, id: &GameId, receipt: &Receipt) -> Result<(), ApplicationError>;
+}
+
+/// Durable user registration and lookup required by [`crate::UserService`].
+/// Implementors preserve unique user IDs and never overwrite an existing user.
+#[async_trait]
+pub trait UserRepository: Send + Sync {
+    /// Inserts a user without overwriting an existing user.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate ID, or
+    /// [`ApplicationError::Unavailable`] on a storage failure.
+    async fn create_user(&self, id: UserId) -> Result<User, ApplicationError>;
+    /// Reads a registered user.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApplicationError::UserNotFound`] for an unknown user, or
+    /// [`ApplicationError::Unavailable`] on a storage failure.
+    async fn get_user(&self, id: &UserId) -> Result<User, ApplicationError>;
 }

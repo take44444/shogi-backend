@@ -1,6 +1,7 @@
 //! gRPC transport for durable shogi commands, with generated [`proto`] clients and servers.
 //!
-//! [`GameRpc`] adapts [`game_application::GameService`] to `shogi.v1.GameService`.
+//! [`GameRpc`] adapts [`game_application::UserService`] and
+//! [`game_application::GameService`] to `shogi.v1.GameService`.
 //! The schema lives in `proto/game.proto`; vendored protoc generates Rust at build
 //! time. The supplied server uses plaintext gRPC. User IDs are supplied claims,
 //! not authentication credentials.

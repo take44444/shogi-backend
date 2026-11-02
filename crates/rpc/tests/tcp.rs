@@ -1,4 +1,4 @@
-use game_application::{GameService, UserId};
+use game_application::{GameService, UserId, UserService};
 use persistence::SeaOrmStore;
 use rpc::{
     GameRpc,
@@ -23,20 +23,21 @@ struct TestServer {
 impl TestServer {
     async fn start() -> Self {
         let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await.unwrap());
+        let users = UserService::new(store.clone());
         let games = GameService::new(store);
         for name in ["black", "white"] {
-            games.create_user(UserId::new(name).unwrap()).await.unwrap();
+            users.create_user(UserId::new(name).unwrap()).await.unwrap();
         }
-        Self::start_service(games).await
+        Self::start_service(users, games).await
     }
 
-    async fn start_service(games: GameService) -> Self {
+    async fn start_service(users: UserService, games: GameService) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (stop, stopped) = oneshot::channel();
         let task = tokio::spawn(
             Server::builder()
-                .add_service(GameServiceServer::new(GameRpc::new(games)))
+                .add_service(GameServiceServer::new(GameRpc::new(users, games)))
                 .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
                     let _ = stopped.await;
                 }),
@@ -571,7 +572,11 @@ async fn generated_tcp_client_restores_file_database_across_two_server_restarts(
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite://{}?mode=rwc", dir.path().join("tcp.db").display());
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(GameService::new(store.clone())).await;
+    let server = TestServer::start_service(
+        UserService::new(store.clone()),
+        GameService::new(store.clone()),
+    )
+    .await;
     let mut client = server.client().await;
     for name in ["black", "white"] {
         client
@@ -589,7 +594,11 @@ async fn generated_tcp_client_restores_file_database_across_two_server_restarts(
     server.shutdown().await;
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(GameService::new(store.clone())).await;
+    let server = TestServer::start_service(
+        UserService::new(store.clone()),
+        GameService::new(store.clone()),
+    )
+    .await;
     let mut client = server.client().await;
     assert_eq!(snapshot(&mut client, "restart").await, ongoing);
     assert_eq!(
@@ -618,7 +627,8 @@ async fn generated_tcp_client_restores_file_database_across_two_server_restarts(
     server.shutdown().await;
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(GameService::new(store)).await;
+    let server =
+        TestServer::start_service(UserService::new(store.clone()), GameService::new(store)).await;
     let mut client = server.client().await;
     assert_eq!(snapshot(&mut client, "restart").await, finished);
     assert_eq!(

@@ -1,4 +1,4 @@
-//! SQLite persistence for the application-owned [`Store`] contract through SeaORM.
+//! SQLite persistence for [`UserRepository`] and [`GameRepository`] through SeaORM.
 //!
 //! [`SeaOrmStore::connect`] opens a pool and migrates or validates the schema before
 //! returning. SQLite is the only compiled and tested driver. Other adapters or
@@ -18,18 +18,19 @@
 //! are outside the mutation API.
 //!
 //! ```
-//! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId};
+//! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId, UserService};
 //! use persistence::SeaOrmStore;
 //! use std::sync::Arc;
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await?);
+//! let users = UserService::new(store.clone());
 //! let service = GameService::new(store.clone());
 //! let black = UserId::new("black")?;
 //! let white = UserId::new("white")?;
-//! service.create_user(black.clone()).await?;
-//! service.create_user(white.clone()).await?;
+//! users.create_user(black.clone()).await?;
+//! users.create_user(white.clone()).await?;
 //! let id = GameId::new("example")?;
 //! assert_eq!(service.create(id.clone(), Participants { black: black.clone(), white }).await?.seq, 0);
 //! let command = MakeMove {
@@ -50,8 +51,8 @@ mod schema;
 
 use async_trait::async_trait;
 use game_application::{
-    Acceptance, Action, ApplicationError as Error, GameId, GameRecord, Participants, Receipt,
-    RequestId, Store, User, UserId,
+    Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository,
+    Participants, Receipt, RequestId, User, UserId, UserRepository,
 };
 use schema::a;
 use sea_orm::sea_query::{Expr, ExprTrait, JoinType, Order, Query, Value};
@@ -62,8 +63,8 @@ use sea_orm::{
 use shogi_domain::{FinishReason, GameResult, Player};
 use std::time::Duration;
 
-/// A migrated SQLite connection pool implementing [`Store`].
-/// Share through `Arc` when multiple services use the same pool.
+/// A migrated SQLite connection pool implementing [`UserRepository`] and [`GameRepository`].
+/// Clone one concrete `Arc<SeaOrmStore>` into both services to share the exact same pool.
 pub struct SeaOrmStore {
     db: DatabaseConnection,
 }
@@ -165,7 +166,7 @@ fn result(row: &QueryResult, prefix: &str) -> Result<Option<GameResult>, Error> 
 }
 
 #[async_trait]
-impl Store for SeaOrmStore {
+impl UserRepository for SeaOrmStore {
     async fn create_user(&self, id: UserId) -> Result<User, Error> {
         match self
             .db
@@ -202,7 +203,10 @@ impl Store for SeaOrmStore {
             .ok_or(Error::UserNotFound)?;
         Ok(User { id: id.clone() })
     }
+}
 
+#[async_trait]
+impl GameRepository for SeaOrmStore {
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
         if participants.black == participants.white {
             return Err(Error::InvalidParticipants);

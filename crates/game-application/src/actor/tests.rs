@@ -1,5 +1,5 @@
 use super::*;
-use crate::{GameService, MAILBOX_CAPACITY, MakeMove, User, UserId};
+use crate::{GameService, MAILBOX_CAPACITY, MakeMove, UserId};
 use async_trait::async_trait;
 use std::sync::Mutex;
 
@@ -15,7 +15,7 @@ fn receipt() -> Pending {
         action: Action::Move("7g7f".parse().unwrap()),
     }
 }
-fn store() -> Arc<dyn Store> {
+fn store() -> Arc<dyn GameRepository> {
     Arc::new(RecordStore(Mutex::new(GameRecord {
         id: id(),
         participants: Participants {
@@ -28,13 +28,7 @@ fn store() -> Arc<dyn Store> {
     })))
 }
 #[async_trait]
-impl Store for RecordStore {
-    async fn create_user(&self, _: UserId) -> Result<User, ApplicationError> {
-        unreachable!()
-    }
-    async fn get_user(&self, _: &UserId) -> Result<User, ApplicationError> {
-        unreachable!()
-    }
+impl GameRepository for RecordStore {
     async fn create_game(&self, _: GameId, _: Participants) -> Result<(), ApplicationError> {
         unreachable!()
     }

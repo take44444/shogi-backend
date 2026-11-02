@@ -1,10 +1,12 @@
 //! Validates wire input and delegates to the application, mapping outcomes to gRPC status.
 
 use crate::{conversion::application_status, proto};
-use game_application::{GameId, GameService, MakeMove, Participants, RequestId, Resign, UserId};
+use game_application::{
+    GameId, GameService, MakeMove, Participants, RequestId, Resign, UserId, UserService,
+};
 use tonic::{Request, Response, Status};
 
-/// Cloneable gRPC facade for [`GameService`].
+/// Cloneable gRPC facade for [`UserService`] and [`GameService`].
 ///
 /// Implements [`proto::game_service_server::GameService`] for use with
 /// [`proto::game_service_server::GameServiceServer`]. IDs and move syntax are
@@ -12,14 +14,16 @@ use tonic::{Request, Response, Status};
 /// the [crate documentation](crate) for status mapping and retry contracts.
 #[derive(Clone)]
 pub struct GameRpc {
+    users: UserService,
     games: GameService,
 }
 
 impl GameRpc {
-    /// Wraps an application service, sharing its actor registry through clones.
+    /// Wraps the user and game services.
+    /// Clones share their repositories and game actor registry.
     /// Construction performs no I/O and does not start a listener.
-    pub fn new(games: GameService) -> Self {
-        Self { games }
+    pub fn new(users: UserService, games: GameService) -> Self {
+        Self { users, games }
     }
 }
 
@@ -31,7 +35,7 @@ impl proto::game_service_server::GameService for GameRpc {
     ) -> Result<Response<proto::User>, Status> {
         let id = UserId::new(request.into_inner().user_id).map_err(invalid)?;
         let user = self
-            .games
+            .users
             .create_user(id)
             .await
             .map_err(application_status)?;
@@ -45,7 +49,7 @@ impl proto::game_service_server::GameService for GameRpc {
         request: Request<proto::GetUserRequest>,
     ) -> Result<Response<proto::User>, Status> {
         let id = UserId::new(request.into_inner().user_id).map_err(invalid)?;
-        let user = self.games.get_user(&id).await.map_err(application_status)?;
+        let user = self.users.get_user(&id).await.map_err(application_status)?;
         Ok(Response::new(proto::User {
             user_id: user.id.as_str().to_owned(),
         }))

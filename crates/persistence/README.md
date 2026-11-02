@@ -1,6 +1,9 @@
 # persistence
 
-`SeaOrmStore::connect(&str).await` connects and migrates before returning a Store.
+`SeaOrmStore::connect(&str).await` connects and migrates before returning the shared adapter.
+`SeaOrmStore` implements `UserRepository` and `GameRepository` separately. Both
+implementations use the same connection pool; application services receive only
+the repository trait they need.
 SeaORM 2.0.4 is pinned with default features disabled. SQLite is the only compiled
 and tested database driver. No PostgreSQL service or driver is required.
 The port is backend neutral; another adapter or driver needs its own validation.
@@ -14,8 +17,9 @@ bindings. Composite uniqueness protects game sequence and game request ID.
 Explicit result-pair checks reject either missing half of a terminal result.
 All durable sequence conversions check the signed 64-bit range.
 
-Each SQLite connection enables foreign keys, WAL, full synchronization, and a
-five-second busy timeout. In-memory databases use one pooled connection.
+Each SQLite connection enables foreign keys, full synchronization, and a
+five-second busy timeout. File databases use WAL; in-memory databases use memory
+journaling. In-memory databases use one pooled connection.
 File databases use up to five. SQLite settings live only in this adapter.
 Database errors return `Unavailable`; an incompatible schema version returns
 `Corrupt`.

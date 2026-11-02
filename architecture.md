@@ -16,17 +16,20 @@
 | 実装単位 | 現在の責務 |
 |---|---|
 | `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
-| `game-application` | ユーザー登録・取得、対局者の固定、対局ごとのActor、コマンド処理、永続化用`Store` Trait |
-| `persistence` | SeaORMによる`Store`実装、SQLite保存、スキーマ初期化・検証 |
+| `game-application` | `UserService`でユーザー操作、`GameService`とActorで対局操作。永続化は`UserRepository` / `GameRepository`で分離 |
+| `persistence` | SeaORMによる両Repositoryの実装、共有接続プール、SQLite保存、スキーマ初期化・検証 |
 | `rpc` / `game-server` | gRPCでユーザー作成・取得、対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
 
 ```mermaid
 flowchart LR
   C[gRPC Client] --> RPC[rpc / game-server]
-  RPC --> APP[game-application / Game Actor]
+  RPC --> USERS[UserService]
+  RPC --> APP[GameService / Game Actor]
   APP --> DOMAIN[shogi-domain / rsshogi adapter]
-  APP --> STORE[Store Trait]
-  STORE --> PERSIST[persistence / SeaORM]
+  USERS --> UR[UserRepository]
+  APP --> GR[GameRepository]
+  UR --> PERSIST[persistence / SeaORM]
+  GR --> PERSIST
   PERSIST --> DB[(SQLite)]
 ```
 
@@ -47,7 +50,7 @@ flowchart LR
 
 ### 0.3 DB・実行環境
 
-Domain層とApplication層はSQL・ORMに依存せず、Application層が定義する`Store`を注入する。現行の永続化アダプターで組み込み・検証しているDBドライバーはSQLiteのみであり、PostgreSQL対応を実装済みとはしない。将来のDB変更はアダプター側で対応・検証する。
+Domain層とApplication層はSQL・ORMに依存せず、Application層が定義する`UserRepository` / `GameRepository`を注入する。Actorには`GameRepository`のみを渡し、ユーザー作成・取得の操作を公開しない。`SeaOrmStore`は両Traitを実装し、同じ接続プールを共有する。対局作成時のユーザー存在確認はDB内の同一トランザクションで行う。現行の永続化アダプターで組み込み・検証しているDBドライバーはSQLiteのみであり、PostgreSQL対応を実装済みとはしない。将来のDB変更はアダプター側で対応・検証する。
 
 ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`とSQLite用の名前付きVolumeを使い、コンテナ再作成後も対局を復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](README.md)を参照する。
 

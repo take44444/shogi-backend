@@ -1,12 +1,15 @@
 # game-application
 
-`GameService::new(Arc<dyn Store>)` uses the application-owned async `Store` port.
+`UserService::new(Arc<dyn UserRepository>)` owns user use cases.
+`GameService::new(Arc<dyn GameRepository>)` owns game use cases and actors.
+Actors receive only `GameRepository`, so they cannot call user operations.
 The application and domain contain no SQL or ORM types. Production composition
-injects `persistence::SeaOrmStore`. There is no default in-memory store.
+injects the same `Arc<persistence::SeaOrmStore>` through the two repository traits,
+sharing one connection pool. There is no default in-memory store.
 
-`create_user(UserId)` returns `User { id }`; a duplicate ID returns `AlreadyExists`.
-`get_user(&UserId)` returns `UserNotFound` for an unknown user.
-`create(GameId, Participants { black, white })` binds two distinct existing users
+`UserService::create_user(UserId)` returns `User { id }`; a duplicate ID returns `AlreadyExists`.
+`UserService::get_user(&UserId)` returns `UserNotFound` for an unknown user.
+`GameService::create(GameId, Participants { black, white })` binds two distinct existing users
 permanently to the game's sides. Equal users return `InvalidParticipants` and
 missing users return `UserNotFound`. A duplicate game returns `AlreadyExists`.
 
@@ -36,7 +39,7 @@ ordered journal from `Game::new()` and validates contiguous sequence numbers,
 request uniqueness, participant binding, legality, every receipt, and final
 metadata. Invalid history returns `Corrupt`.
 
-A command stages a cloned `Game` and one accepted receipt. `Store::append`
+A command stages a cloned `Game` and one accepted receipt. `GameRepository::append`
 atomically compares the version, advances metadata, and writes the receipt.
 The actor publishes the candidate only after a confirmed commit. A failed append
 reloads durable history. A matching receipt returns its durable acceptance;

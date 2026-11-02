@@ -2,8 +2,8 @@
 //! Candidates become cached state only after commit confirmation or durable receipt lookup.
 
 use crate::{
-    Acceptance, Action, ApplicationError, GameId, GameRecord, Participants, Receipt, RequestId,
-    Snapshot, Store, UserId,
+    Acceptance, Action, ApplicationError, GameId, GameRecord, GameRepository, Participants,
+    Receipt, RequestId, Snapshot, UserId,
 };
 use shogi_domain::Game;
 use std::{collections::HashMap, sync::Arc};
@@ -132,15 +132,15 @@ impl State {
 
 pub(crate) struct Actor {
     id: GameId,
-    store: Arc<dyn Store>,
+    repository: Arc<dyn GameRepository>,
     state: Option<State>,
 }
 
 impl Actor {
-    pub(crate) fn new(id: GameId, store: Arc<dyn Store>) -> Self {
+    pub(crate) fn new(id: GameId, repository: Arc<dyn GameRepository>) -> Self {
         Self {
             id,
-            store,
+            repository,
             state: None,
         }
     }
@@ -149,7 +149,7 @@ impl Actor {
     /// A failed read or replay leaves state invalid so a later refresh can recover.
     async fn reload(&mut self) -> Result<(), ApplicationError> {
         self.state = None;
-        let record = self.store.load_game(&self.id).await?;
+        let record = self.repository.load_game(&self.id).await?;
         if record.id != self.id {
             return Err(ApplicationError::Corrupt);
         }
@@ -160,7 +160,7 @@ impl Actor {
     /// Reads the durable version before every query or mutation.
     /// Reloads missing or changed state. Read errors propagate even with a cached game.
     async fn refresh(&mut self) -> Result<(), ApplicationError> {
-        let version = self.store.version(&self.id).await?;
+        let version = self.repository.version(&self.id).await?;
         if self.state.as_ref().is_none_or(|state| state.seq != version) {
             self.reload().await?;
         }
@@ -233,7 +233,7 @@ impl Actor {
                 result: candidate.result(),
             },
         };
-        match self.store.append(&self.id, &receipt).await {
+        match self.repository.append(&self.id, &receipt).await {
             Ok(()) => {
                 let state = self.state.as_mut().ok_or(ApplicationError::Unavailable)?;
                 state.game = candidate;

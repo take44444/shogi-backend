@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use game_application::{
-    Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameService, MakeMove,
-    Participants, Receipt, RequestId, Resign, Store, User, UserId,
+    Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, GameService,
+    MakeMove, Participants, Receipt, RequestId, Resign, UserId, UserService,
 };
 use persistence::SeaOrmStore;
 use sea_orm::{ConnectionTrait, Database};
@@ -43,38 +43,59 @@ fn file_url(dir: &tempfile::TempDir) -> String {
 }
 async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
+    let users = UserService::new(store.clone());
     let service = GameService::new(store.clone());
     for name in ["black", "white", "outsider"] {
-        service.create_user(user(name)).await.unwrap();
+        users.create_user(user(name)).await.unwrap();
     }
     service.create(id(), participants()).await.unwrap();
     (store, service)
 }
 
 #[tokio::test]
+async fn user_and_game_services_share_one_pool_including_shutdown() {
+    let (store, games) = setup("sqlite::memory:").await;
+    let users = UserService::new(store.clone());
+    assert_eq!(
+        users.get_user(&user("black")).await.unwrap().id,
+        user("black")
+    );
+    assert_eq!(games.snapshot(&id()).await.unwrap().seq, 0);
+
+    store.close().await.unwrap();
+
+    assert_eq!(
+        users.get_user(&user("black")).await,
+        Err(Error::Unavailable)
+    );
+    assert_eq!(games.snapshot(&id()).await, Err(Error::Unavailable));
+}
+
+#[tokio::test]
 async fn user_constraints_and_immutable_participants() {
     for url in ["sqlite::memory:", &file_url(&tempfile::tempdir().unwrap())] {
         let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
+        let users = UserService::new(store.clone());
         let service = GameService::new(store);
         assert_eq!(
-            service.get_user(&user("black")).await,
+            users.get_user(&user("black")).await,
             Err(Error::UserNotFound)
         );
         assert_eq!(
-            service.create_user(user("black")).await.unwrap().id,
+            users.create_user(user("black")).await.unwrap().id,
             user("black")
         );
         assert_eq!(
-            service.create_user(user("black")).await,
+            users.create_user(user("black")).await,
             Err(Error::AlreadyExists)
         );
         assert_eq!(
             service.create(id(), participants()).await,
             Err(Error::UserNotFound)
         );
-        service.create_user(user("white")).await.unwrap();
+        users.create_user(user("white")).await.unwrap();
         assert_eq!(
-            service.get_user(&user("white")).await.unwrap().id,
+            users.get_user(&user("white")).await.unwrap().id,
             user("white")
         );
         assert_eq!(
@@ -145,11 +166,12 @@ async fn file_restart_restores_position_hands_promotion_and_receipts_even_after_
     drop(service);
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
+    let users = UserService::new(store.clone());
     let service = GameService::new(store.clone());
     assert_eq!(service.snapshot(&id()).await.unwrap(), ongoing);
     assert_eq!(service.make_move(&id(), first.clone()).await, Ok(receipt));
     assert_eq!(
-        service.get_user(&user("black")).await.unwrap().id,
+        users.get_user(&user("black")).await.unwrap().id,
         user("black")
     );
     let finish = service.resign(&id(), resign()).await.unwrap();
@@ -309,13 +331,7 @@ struct FaultStore {
     unreadable: AtomicBool,
 }
 #[async_trait]
-impl Store for FaultStore {
-    async fn create_user(&self, id: UserId) -> Result<User, Error> {
-        self.inner.create_user(id).await
-    }
-    async fn get_user(&self, id: &UserId) -> Result<User, Error> {
-        self.inner.get_user(id).await
-    }
+impl GameRepository for FaultStore {
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
         self.inner.create_game(id, participants).await
     }

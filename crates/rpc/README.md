@@ -2,7 +2,8 @@
 
 The generated `shogi.v1.GameService` API uses plaintext gRPC. The schema is
 [`proto/game.proto`](../../proto/game.proto). Vendored protoc builds Rust clients
-and servers. `GameRpc::new(GameService)` exposes the application service.
+and servers. `GameRpc::new(UserService, GameService)` dispatches user and game operations
+to their respective application services. The protobuf service remains unified.
 
 | Method | Required request fields | Response |
 |---|---|---|
