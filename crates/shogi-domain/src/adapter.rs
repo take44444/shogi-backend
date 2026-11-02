@@ -1,3 +1,6 @@
+//! Isolates rsshogi construction, move generation, atomic application, and snapshot conversion.
+//! No rules-library types escape this module.
+
 use crate::{CommandError, HandPiece, Move, Piece, PieceKind, Player, PositionView, Square};
 use rsshogi::{
     board::{self, Move32List, Position},
@@ -5,6 +8,7 @@ use rsshogi::{
     types::{Color, HandPiece as RulesHandPiece, Move32, PieceType, Square as RulesSquare},
 };
 
+#[derive(Clone)]
 pub(crate) struct Rules {
     position: Position,
 }

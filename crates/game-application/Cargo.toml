@@ -1,0 +1,13 @@
+[package]
+name = "game-application"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+shogi-domain = { path = "../shogi-domain" }
+tokio.workspace = true
+async-trait = "0.1"
+
+[lints]
+workspace = true

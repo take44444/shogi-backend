@@ -1,4 +1,31 @@
-#![doc = include_str!("../README.md")]
+//! Standard shogi rules with owned domain types and strict USI notation.
+//!
+//! [`Game`] starts with Black to move. [`Move`] and [`Square`] parse and display
+//! USI syntax. Parsing checks syntax only; [`Game::play`] checks position legality.
+//! [`PositionView`] provides an owned snapshot without a position editor or importer.
+//!
+//! Rules include promotion, capture and demotion into hand, drops, nifu,
+//! king safety, check evasion, and pawn-drop mate rejection. A checked player
+//! without legal moves loses. A player without moves who is not checked does
+//! not automatically lose. Repetition, perpetual check, entering king,
+//! declaration, and time controls are not adjudicated.
+//!
+//! ```
+//! use shogi_domain::{Game, Piece, PieceKind, Player, Square};
+//!
+//! let mut game = Game::new();
+//! assert_eq!(game.legal_moves().len(), 30);
+//! let outcome = game.play(Player::Black, "7g7f".parse()?)?;
+//! assert!(!outcome.in_check);
+//! assert_eq!(game.turn(), Player::White);
+//! assert_eq!(game.position().piece_at(Square::new(7, 6)?),
+//!     Some(Piece { owner: Player::Black, kind: PieceKind::Pawn }));
+//! let result = game.resign(Player::Black)?; // Resignation is allowed off turn.
+//! assert_eq!(result.winner, Player::White);
+//! assert!(game.legal_moves().is_empty());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+#![warn(missing_docs)]
 
 mod adapter;
 mod notation;
@@ -9,6 +36,7 @@ pub use types::*;
 
 /// A standard shogi game. Only accepted moves and resignation mutate it.
 /// No clock, persistence, repetition, or declaration adjudication is performed.
+#[derive(Clone)]
 pub struct Game {
     rules: adapter::Rules,
     result: Option<GameResult>,
@@ -21,6 +49,7 @@ impl Default for Game {
 }
 
 impl Game {
+    /// Creates the standard initial position with Black to move and no result.
     pub fn new() -> Self {
         Self {
             rules: adapter::Rules::new(),
@@ -28,8 +57,14 @@ impl Game {
         }
     }
 
-    /// Rejects finished games before checking the player or move.
-    /// Every error leaves the entire game unchanged.
+    /// Applies a legal move and returns the resulting check status and result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandError::GameFinished`] before checking turn or legality,
+    /// [`CommandError::WrongTurn`] for the other side, [`CommandError::IllegalMove`]
+    /// for an illegal move, or [`CommandError::RulesFailure`] if the rules engine
+    /// cannot apply the move. Every error preserves the entire game.
     pub fn play(&mut self, player: Player, mv: Move) -> Result<MoveOutcome, CommandError> {
         if self.result.is_some() {
             return Err(CommandError::GameFinished);
@@ -52,6 +87,11 @@ impl Game {
     }
 
     /// Either player may resign during an ongoing game, including off turn.
+    /// Ends the game with the opponent as winner, retaining the position and turn.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandError::GameFinished`] if a result already exists.
     pub fn resign(&mut self, player: Player) -> Result<GameResult, CommandError> {
         if self.result.is_some() {
             return Err(CommandError::GameFinished);
@@ -68,6 +108,7 @@ impl Game {
     pub fn turn(&self) -> Player {
         self.rules.turn()
     }
+    /// Returns the terminal result, or `None` while play continues.
     pub fn result(&self) -> Option<GameResult> {
         self.result
     }
@@ -75,6 +116,7 @@ impl Game {
     pub fn in_check(&self) -> bool {
         self.rules.in_check()
     }
+    /// Copies the current board and hands into an owned snapshot.
     pub fn position(&self) -> PositionView {
         self.rules.position()
     }

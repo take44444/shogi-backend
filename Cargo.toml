@@ -2,7 +2,14 @@
 resolver = "3"
 members = [
   "crates/*",
+  "apps/*",
 ]
+
+[workspace.dependencies]
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "net", "signal"] }
+tonic = "0.14.9"
+tonic-prost = "0.14.9"
+prost = "0.14.4"
 
 [workspace.package]
 version = "0.1.0"

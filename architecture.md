@@ -1,13 +1,58 @@
 # 大規模将棋アプリ サーバーサイドアーキテクチャ設計書
 
-- バージョン: 1.3（設計案）
+- バージョン: 1.4（現行実装と将来設計）
 - 更新日: 2026-11-02
 - 対象: Web / iOS / Android
 - 設計目標: 最大同時接続 100,000人
 
-> **設計方針**: Rustを中心に、対局処理・リアルタイム配信・AI解析を分離する。KubernetesはPodの運用に集中させ、Virtual Shardの配置・Lease・FencingはRustとPostgreSQLで管理する。
+> **設計方針**: Rustを中心に、対局処理・リアルタイム配信・AI解析を分離する。KubernetesはPodの運用に集中させ、将来のVirtual Shardの配置・Lease・FencingはアプリケーションとDBで管理する。対局処理は特定のDB製品に依存させず、開発・テストではSQLiteを基本とする。
 >
 > 本文中の台数、Shard数、スループット、遅延などは**検証前の設計仮定**であり、保証性能ではない。
+
+## 0. 現在の実装範囲
+
+現在は、単一の`game-server`をTonic / gRPCで利用する構成である。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
+
+| 実装単位 | 現在の責務 |
+|---|---|
+| `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
+| `game-application` | `UserService`でユーザー操作、`GameService`とActorで対局操作。永続化は`UserRepository` / `GameRepository`で分離 |
+| `persistence` | SeaORMによる両Repositoryの実装、共有接続プール、SQLite保存、スキーマ初期化・検証 |
+| `rpc` / `game-server` | gRPCでユーザー作成・取得、対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
+
+```mermaid
+flowchart LR
+  C[gRPC Client] --> RPC[rpc / game-server]
+  RPC --> USERS[UserService]
+  RPC --> APP[GameService / Game Actor]
+  APP --> DOMAIN[shogi-domain / rsshogi adapter]
+  USERS --> UR[UserRepository]
+  APP --> GR[GameRepository]
+  UR --> PERSIST[persistence / SeaORM]
+  GR --> PERSIST
+  PERSIST --> DB[(SQLite)]
+```
+
+### 0.1 対局・ユーザーの仕様
+
+- 平手初期局面から開始し、通常の駒移動、成り、持ち駒、王手回避、詰み、投了を扱う。二歩・打ち歩詰め・王手放置などの不正着手はエラーとして拒否し、対局は継続する。
+- 詰みは「王手され、合法手がない」場合のみ。王手でない合法手なし局面、千日手、連続王手の千日手、入玉宣言勝ち等の判定は対象外。タイマー・時間切れも未実装である。
+- 対局作成時に、登録済みの異なる2ユーザーを先手・後手へ固定する。着手側は`user_id`とこの紐付けから決める。投了は手番によらず可能である。
+- ユーザーIDは呼出元の申告値であり、認証は未実装である。マッチング、Shard管理、メッセージ配信も現在のスコープに含めない。
+
+### 0.2 確定・再送・復旧
+
+- 1対局につきサービスの共有レジストリ内に1つのActorを置き、bounded `mpsc`と`oneshot`で逐次処理する。Snapshot取得時と変更前にはDBのversionを確認する。
+- `seq`は0から始まり、受理した着手・投了ごとに1増える。変更には`expected_seq`と`request_id`が必要で、参加者以外の変更は拒否する。
+- 受理済み要求だけが対局内の`request_id`を予約する。同じ種別・ユーザー・期待連番・着手内容での再送には元の結果を返し、内容が違えば拒否する。ユーザー作成・対局作成はこの再送契約の対象外である。
+- 局面のコピーで変更を検証し、versionの条件付き更新、結果、受理記録を同一トランザクションで保存してからActorへ反映する。保存エラー時は履歴を再読込して照合し、結果を確認できない場合は成功・ロールバックを断定しない。応答喪失時は同じ要求を再送する。
+- 再起動後は平手初期局面から受理済み履歴を再実行し、連番・参加者・合法性・各応答・最終結果を検証して復元する。DBに局面Snapshotを保存する方式ではない。
+
+### 0.3 DB・実行環境
+
+Domain層とApplication層はSQL・ORMに依存せず、Application層が定義する`UserRepository` / `GameRepository`を注入する。Actorには`GameRepository`のみを渡し、ユーザー作成・取得の操作を公開しない。`SeaOrmStore`は両Traitを実装し、同じ接続プールを共有する。対局作成時のユーザー存在確認はDB内の同一トランザクションで行う。現行の永続化アダプターで組み込み・検証しているDBドライバーはSQLiteのみであり、PostgreSQL対応を実装済みとはしない。将来のDB変更はアダプター側で対応・検証する。
+
+ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`とSQLite用の名前付きVolumeを使い、コンテナ再作成後も対局を復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](README.md)を参照する。
 
 ## 1. 要件と負荷モデル
 
@@ -33,17 +78,20 @@
 
 同じ10万接続でも「対局が多い」場合はGame ActorとDB書き込み、「人気対局に観戦集中」する場合はGatewayのfan-outが主要負荷になる。AIの解析同時数は別枠で容量管理する。
 
-## 2. 技術スタック
+## 2. 技術スタック（現行と将来候補）
+
+Valkey、NATS、AI、Kubernetes、観測基盤は将来導入する構成であり、現行サーバーの実行には不要である。
 
 | 領域 | 採用技術 | 主な役割 |
 |---|---|---|
 | 言語 | **Rust** | サーバー実装 |
-| Web API | **Axum** | HTTP API / 認証・ユーザー管理 |
-| 非同期基盤 | **Tokio** | Game Actor、WebSocket、タイマー |
-| サービス間RPC | **Tonic / gRPC** | Gateway → Game Service等 |
-| ORM | **SeaORM** | 通常のCRUD、ユーザー・履歴等 |
-| SQL | **SQLxまたはパラメータ化SQL** | 重要なトランザクション、条件付き更新（必要時） |
-| RDBMS | **PostgreSQL** | 棋譜・対局・時計状態・Shard Leaseの正本 |
+| Web API | **Axum（将来）** | HTTP API / 認証 |
+| 非同期基盤 | **Tokio** | 現在はGame Actor。WebSocket・タイマーは将来 |
+| RPC | **Tonic / gRPC** | 現在の対局・ユーザー操作。Gateway接続は将来 |
+| 将棋ルール | **rsshogi** | 非公開アダプター経由で利用 |
+| ORM | **SeaORM** | ユーザー・対局・受理済み履歴の保存 |
+| SQL | **SeaQuery / SeaORM経由のSQLx** | スキーマ構築、トランザクション、versionの条件付き更新 |
+| RDBMS | **SQLite（現行） / PostgreSQL（将来候補）** | 現在の正本はSQLite。時計・Shard Leaseは未実装 |
 | 一時データ | **Valkey** | Presence、マッチング、キャッシュ、Token Bucketによるレート制限 |
 | 低遅延イベント | **Core NATS** | 確定した着手等をGatewayへ配信 |
 | 永続イベント/ジョブ | **NATS JetStream** | AI解析、統計、通知等の非同期ジョブ |
@@ -55,7 +103,7 @@
 
 **採用しないもの（初期）**: タイマー専用サービス、Shard管理専用Kubernetes Operator、Kubernetes LeaseによるShard所有権管理、独立Game Routerサービス、過剰なマイクロサービス分割。
 
-## 3. 全体構成
+## 3. 全体構成（将来設計）
 
 ```mermaid
 flowchart TB
@@ -217,7 +265,7 @@ sequenceDiagram
 - 成功ReplyとDomain Eventは**同じDB Commitに根拠を持つが到着順・到着可否は独立**。クライアントの盤面反映はEvent/Snapshotに一本化し、Replyは操作の送信状態とエラー管理に使う。
 - `expected_seq`、`request_id`、Shard fencingを検証し、確定済み同一`request_id`には同じ結果を返す。
 
-## 7. 対局時計（Game Clock）— MVP採用仕様（v1.3）
+## 7. 対局時計（Game Clock）— 将来実装時の採用方針（未実装）
 
 ### 7.1 責務・正式受付地点
 
@@ -352,7 +400,22 @@ flowchart LR
 - 対局者へのレーティング対局中のAI助言は禁止するなど権限制御を行う。
 - やねうら王等の採用時にはライセンス条件を確認する。
 
-## 11. PostgreSQLデータモデル（主なもの）
+## 11. 永続化データモデル
+
+### 11.1 現行のSQLiteスキーマ
+
+| テーブル | 内容 |
+|---|---|
+| `users` | 登録済みユーザーID |
+| `games` | 対局ID、固定された先後のユーザー、version、勝敗・終局理由 |
+| `journal` | 着手・投了を含む受理済みコマンドと元の応答。対局内の連番・request_idはそれぞれ一意 |
+| `schema_version` | スキーマ初期化・互換性検証用のバージョン |
+
+`games`のversion・結果と`journal`は原子的に更新する。新規DBは起動時に初期化し、既存DBはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Outbox、Leaseは保存していない。
+
+### 11.2 将来の拡張候補
+
+以下はPostgreSQL等で分散構成を導入する際の概念モデルであり、現行テーブル名や導入済み機能を示すものではない。
 
 | テーブル | 内容 |
 |---|---|
@@ -533,7 +596,9 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 
 ### Phase 1: 対局MVP
 
-Rust / Axum / Tokio / SeaORM / PostgreSQL。単一Game Service、Game Actor（bounded mpsc + oneshot）、合法手、Actor受付式時計、棋譜、再接続を実装。期限境界、mpsc待機、タイマー競合、Reply欠落、冪等再送をテストする。
+現在はRust / Tokio / Tonic / SeaORM / SQLiteで、単一Game Service、Game Actor（bounded mpsc + oneshot）、通常の合法手・詰み・投了、ユーザー登録・対局者固定、履歴永続化と再起動復元、受理済み要求の冪等再送まで実装済みである。
+
+次の拡張は認証、時計などを個別にスコープ決定して進める。時計の導入時には第7章の方針に従い、期限境界、mpsc待機、タイマー競合を検証する。AxumやPostgreSQLの導入は現行MVPの前提ではない。
 
 ### Phase 2: リアルタイム分離
 
@@ -547,7 +612,11 @@ JetStream、Outbox Publisher、AI Worker、解析ジョブ共有、自然言語�
 
 Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マルチAZ、復旧・負荷試験を実施。Pod数は接続数だけではなくCPU・RAM・ネットワーク帯域・DB性能で決定。
 
-## 15. Rustモノレポ構成案
+## 15. Rustモノレポ構成
+
+現行Workspaceの実装単位は`apps/game-server`と、`crates/shogi-domain`、`game-application`、`persistence`、`rpc`である。スキーマ処理は`crates/persistence/src/schema.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+
+以下は将来拡張を含む配置案であり、すべてのディレクトリが存在するわけではない。
 
 ```text
 shogi-backend/
@@ -561,7 +630,7 @@ shogi-backend/
 │   ├── ai-worker/
 │   └── background-worker/
 ├── crates/
-│   ├── shogi-domain/         # 局面・合法手・時計ルール
+│   ├── shogi-domain/         # 局面・合法手・詰み・投了（時計は未実装）
 │   ├── game-application/     # Game Actorとユースケース
 │   ├── shard-management/     # Shard / Lease / Fencing
 │   ├── game-routing/         # Game ID → 担当Pod
@@ -590,11 +659,11 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 1. **時計の公平性の将来改善**: MVPはActorがmpscから取得した時点を正式受付とする。サーバー内キュー待ち・転送遅延が競技性に与える影響、通知遅延補正、障害時の時計補償は負荷試験後に再検討する。
 2. **Shard Leaseパラメータ**: 更新間隔、期限、Failover時間目標、DB負荷、所有者切替方式。
 3. **サービス負荷の実測**: 1 Gateway PodあたりWebSocket数、1 Game PodあたりActor数、fan-out帯域。
-4. **対局ルール**: 秒読みの境界条件、切れ負け、フィッシャー、千日手、持将棋等の判定詳細。
+4. **追加ルールの導入範囲**: 現在対象外の時計、千日手、連続王手の千日手、入玉宣言勝ち等を導入する時期と判定詳細。
 5. **AI予算とSLO**: 解析深度、同時実行、課金/制限、エンジンのライセンス。
-6. **DB拡張**: レプリカ、パーティショニング、アーカイブの導入タイミング。
+6. **DB拡張**: SQLite以外のアダプター検証、本番DBの選定、レプリカ、パーティショニング、アーカイブの導入タイミング。
 
-## 17. 最終結論
+## 17. 設計方針のまとめ（将来構成）
 
 - **対局の権威**: Rust/TokioのGame Actor（mpsc + oneshot、Actor取出し時点で正式受付、Admission Gateなし）
 - **分散配置**: Virtual Shard + **独立DeploymentのRust Shard Manager（Leader / Standby）**
@@ -602,7 +671,7 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 - **リクエスト配送**: Gateway内のGame Router + gRPC
 - **観戦リアルタイム配信**: WebSocket + Core NATS + Snapshot/Sequence
 - **非同期AI**: JetStream + 専用AI Worker
-- **データの正本**: PostgreSQL
+- **データの正本**: 現在はSQLite。将来の分散構成ではPostgreSQLを候補とし、Domain / Application層はDB製品に依存させない
 - **一時状態・マッチング・Presence**: Valkey
 - **レート制限**: Valkey Token Bucketを基本、ログイン失敗等はカウンター方式を併用
 - **運用**: Kubernetes（アプリDeployment・NATSクラスタ）+ Managed Valkey / PostgreSQL
