@@ -319,6 +319,11 @@ async fn corrupt_history_and_metadata_fail_closed() {
             .await
             .unwrap();
         let raw = Database::connect(&url).await.unwrap();
+        if sql.starts_with("DELETE FROM journal") {
+            raw.execute_unprepared("DELETE FROM outbox_events")
+                .await
+                .unwrap();
+        }
         raw.execute_unprepared(sql).await.unwrap();
         let restored = GameService::new(Arc::new(SeaOrmStore::connect(&url).await.unwrap()));
         assert_eq!(restored.snapshot(&id()).await, Err(Error::Corrupt), "{sql}");

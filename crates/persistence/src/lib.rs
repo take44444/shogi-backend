@@ -8,7 +8,8 @@
 //! busy timeout. File databases use WAL; in-memory databases use memory journaling.
 //! In-memory databases use one pooled connection; file databases use
 //! up to five. Creation and append use immediate SQLite transactions. Append compares
-//! the version and writes metadata and the receipt atomically, checking membership
+//! the version and writes metadata, the receipt, and its frozen canonical events
+//! atomically, checking membership
 //! before commit. Failed append statements explicitly roll back. Commit errors can be
 //! uncertain; the application reconciles every append error through a fresh load.
 //!
@@ -47,7 +48,9 @@
 //! ```
 #![warn(missing_docs)]
 
+mod outbox;
 mod schema;
+pub use outbox::{OutboxOpenError, SqliteCursor, SqliteOutbox};
 
 use async_trait::async_trait;
 use game_application::{
@@ -359,6 +362,7 @@ impl GameRepository for SeaOrmStore {
         if seq != expected + 1 {
             return Err(Error::Corrupt);
         }
+        let events = receipt.events(id)?;
         let tx = self
             .db
             .begin_with_options(TransactionOptions {
@@ -448,6 +452,9 @@ impl GameRepository for SeaOrmStore {
             )
             .await
             .map_err(storage)?;
+            for event in &events {
+                outbox::enqueue(&tx, event).await?;
+            }
             Ok(())
         }
         .await;

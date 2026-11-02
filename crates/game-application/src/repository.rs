@@ -52,7 +52,8 @@ pub struct GameRecord {
 /// by `i64::MAX`. Reads must not fabricate a successful empty record for an unknown ID.
 ///
 /// [`Self::load_game`] must return one coherent view. [`Self::append`] must atomically
-/// compare the version, advance metadata, and insert exactly one receipt. An `Ok`
+/// compare the version, advance metadata, insert exactly one receipt, and enqueue
+/// exactly [`Receipt::events`] in canonical order. An `Ok`
 /// result confirms durability. An error can follow a commit; callers must reconcile
 /// by loading durable history before publishing a candidate or accepting another mutation.
 /// The application stages legal commands and validates replay rather than trusting
@@ -109,7 +110,8 @@ pub trait GameRepository: Send + Sync {
     /// Compares the current version with [`Receipt::expected_seq`], requires the
     /// acceptance sequence to be exactly one greater and within `i64::MAX`, verifies
     /// participant membership, and preserves per-game request and sequence uniqueness.
-    /// The updated version and result must commit with the receipt or not at all.
+    /// The updated version, result, receipt, and canonical [`Receipt::events`] must
+    /// commit together or not at all.
     /// This operation is not itself an exact-retry API; the application reconciles
     /// failures through [`Self::load_game`]. It supplies a legally staged receipt.
     ///

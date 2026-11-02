@@ -1,6 +1,8 @@
 # Shogi backend
 
 Run a durable shogi game over gRPC with SQLite and a generated Rust client.
+Committed moves and game results are stored in a transactional outbox. An
+independent publisher sends them to Core NATS.
 Rust and Cargo are required for the local commands. Cargo supplies vendored protoc.
 
 Start the server from the repository root.
@@ -33,8 +35,9 @@ cargo run -p rpc --example play -- http://127.0.0.1:50052 my-game
 
 ## Prove persistence across container recreation
 
-Build and start the server. Compose binds its port to the host loopback address
-and stores SQLite in the `shogi-data` named volume. Set `GAME_SERVER_PORT` to
+Build and start the services. Compose runs `game-server`, `outbox-publisher`, and
+NATS. The server and publisher share SQLite in the `shogi-data` named volume.
+Compose binds the gRPC port to the host loopback address. Set `GAME_SERVER_PORT` to
 change the host port. These commands assume the default port.
 
 ```sh
@@ -52,9 +55,70 @@ ID and proof directory for another run. The client stores protobuf snapshots and
 receipts in the proof directory, compares them after restart, continues play,
 and verifies both original receipts after a second restart of the finished game.
 
-`docker compose down` stops the server while retaining its database volume.
+`docker compose down` stops the services while retaining the database volume.
 The same seed, resume, and finished commands also work with a local server.
 Stop and restart the local server between phases with the same `DATABASE_URL`.
+
+## Publish committed game events
+
+The game server commits game metadata, the accepted command receipt, and its
+events in one SQLite transaction. A move produces `MoveCommitted`; resignation
+produces `GameFinished`. A mating move produces both at the same sequence.
+Exact command retries return their original acceptance without adding events.
+The game server accepts commands while the publisher or broker is unavailable.
+
+The publisher subscribes to the event's subject, sends the pending event, and
+waits for an echo with the exact payload on the same connection before recording
+it as published. It needs publish and subscribe access to game event subjects.
+A socket flush alone does not confirm server processing. Failed operations exit the worker,
+and Compose restarts it to retry pending rows. Transparent reconnection is
+disabled so an echo on a replacement connection cannot confirm an earlier send.
+A failed or uncertain operation can resend the same event.
+Consumers deduplicate the full event identity and use a game snapshot
+to recover missing sequences. Core NATS does not retain events for disconnected
+subscribers, and the publisher's echo does not acknowledge other subscribers' delivery.
+The echo confirms a matching event, rather than acknowledging a particular
+client's publish operation.
+
+The SQLite publisher supports one process per database on Linux local storage.
+It locks the actual database file, so a second publisher fails startup. Dispatch
+does not hold a database transaction across network calls. Published rows remain
+stored. The first pending failure blocks later events.
+
+For a local publisher, start NATS and use the same database URL as the server.
+
+```sh
+DATABASE_URL='sqlite://data/shogi.db?mode=rwc' NATS_URL='nats://127.0.0.1:4222' cargo run -p outbox-publisher
+```
+
+Events use the subject `shogi.games.<hex-game-id>.events`, where `<hex-game-id>`
+is lowercase hexadecimal of the game ID's UTF-8 bytes. This preserves IDs that
+contain dots, NATS wildcards, or Unicode. The JSON envelope has `schema_version`
+1, a stable `event_id`, `type`, original `game_id`, `seq`, `request_id`, and
+`user_id`. Move events also contain canonical USI `movement` and `in_check`.
+`result` is null for an ongoing game or contains `winner` and `reason`.
+Wire types are `move_committed` and `game_finished`; winners are `black` and
+`white`; finish reasons are `checkmate` and `resignation`. The event ID combines
+the hexadecimal game ID, sequence, and event type with colons.
+Pending rows preserve typed event fields rather than serialized JSON bytes.
+Future encoder changes must preserve this version-one wire mapping.
+
+Existing version 1 databases migrate to version 2 automatically. Their history
+is preserved, and the outbox starts empty. Event production begins with commands
+accepted after migration. There is no historical event backfill.
+
+Run the Compose proof from the repository root.
+
+```sh
+./scripts/prove-outbox.sh
+```
+
+It creates an isolated Compose project with a disposable SQLite volume. It
+checks actual NATS payloads, exact retries, backlog after publisher downtime,
+server recreation, commands during a NATS outage, and recovery without
+republishing marked rows. It uses host ports 55051 and 54222 unless overridden
+by `GAME_SERVER_PORT` and `NATS_PORT`. Cleanup removes only that proof project's
+containers and volume.
 
 ## Read the API documentation
 
@@ -102,6 +166,6 @@ schema startup. The [RPC reference](crates/rpc/README.md) covers wire fields and
 status codes. The [domain crate](crates/shogi-domain/README.md) owns shogi rules.
 
 User IDs are caller-supplied identity claims. This service has no authentication.
-It adds no matchmaking, shards, messaging, clocks, or new adjudication rules.
-The older [architecture proposal](architecture.md) describes future systems.
-It does not describe dependencies required to run this implementation.
+Matchmaking, shards, leases, game clocks, Game Router, and Realtime Gateway remain
+outside this implementation. The [architecture document](architecture.md)
+distinguishes this implementation from the proposed distributed system.

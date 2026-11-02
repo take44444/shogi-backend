@@ -1,6 +1,6 @@
 # 大規模将棋アプリ サーバーサイドアーキテクチャ設計書
 
-- バージョン: 1.5（現行実装と将来設計）
+- バージョン: 1.6（現行実装と将来設計）
 - 更新日: 2026-11-03
 - 対象: Web / iOS / Android
 - 設計目標: 最大同時接続 100,000人
@@ -11,13 +11,14 @@
 
 ## 0. 現在の実装範囲
 
-現在は、単一の`game-server`をTonic / gRPCで利用する構成である。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
+現在は、単一の`game-server`をTonic / gRPCで利用し、独立したOutbox PublisherからCore NATSへ確定イベントを配信する構成である。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
 
 | 実装単位 | 現在の責務 |
 |---|---|
 | `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
-| `game-application` | `UserService`でユーザー操作、`GameService`とActorで対局操作。永続化は`UserRepository` / `GameRepository`で分離 |
-| `persistence` | SeaORMによる両Repositoryの実装、共有接続プール、SQLite保存、スキーマ初期化・検証 |
+| `game-application` | ユーザー・対局操作、Actor、受理記録からのDomain Event導出、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
+| `persistence` | SeaORMによるRepository、共有接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
+| `messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
 | `rpc` / `game-server` | gRPCでユーザー作成・取得、対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
 
 ```mermaid
@@ -31,6 +32,9 @@ flowchart LR
   UR --> PERSIST[persistence / SeaORM]
   GR --> PERSIST
   PERSIST --> DB[(SQLite)]
+  DB --> OUT[Outbox Publisher]
+  OUT --> MSG[messaging / Core NATS adapter]
+  MSG --> NATS[Core NATS]
 ```
 
 ### 0.1 対局・ユーザーの仕様
@@ -38,7 +42,7 @@ flowchart LR
 - 平手初期局面から開始し、通常の駒移動、成り、持ち駒、王手回避、詰み、投了を扱う。二歩・打ち歩詰め・王手放置などの不正着手はエラーとして拒否し、対局は継続する。
 - 詰みは「王手され、合法手がない」場合のみ。王手でない合法手なし局面、千日手、連続王手の千日手、入玉宣言勝ち等の判定は対象外。タイマー・時間切れも未実装である。
 - 対局作成時に、登録済みの異なる2ユーザーを先手・後手へ固定する。着手側は`user_id`とこの紐付けから決める。投了は手番によらず可能である。
-- ユーザーIDは呼出元の申告値であり、認証は未実装である。マッチング、Shard管理、メッセージ配信も現在のスコープに含めない。
+- ユーザーIDは呼出元の申告値であり、認証は未実装である。マッチング、Shard管理、Lease、Game Router、Gateway、クライアントへの観戦配信は現在のスコープに含めない。
 
 ### 0.2 確定・再送・復旧
 
@@ -46,7 +50,7 @@ flowchart LR
 - Snapshot取得時と変更前にはDBのversionを確認し、キャッシュが未復元・無効、またはversionが異なる場合に履歴を再読込する。キャッシュがあってもDB読込エラーは返す。
 - `seq`は0から始まり、受理した着手・投了ごとに1増える。上限は`i64::MAX`である。変更には`expected_seq`と`request_id`が必要で、参加者以外の変更は拒否する。
 - 受理済み要求だけが対局内の`request_id`を予約する。同じ種別・ユーザー・期待連番・着手内容での再送には元の結果を返し、内容が違えば拒否する。ユーザー作成・対局作成はこの再送契約の対象外である。
-- 局面のコピーで変更を検証し、versionの条件付き更新、結果、受理記録を同一トランザクションで保存してからActorへ反映する。保存エラー時は履歴を再読込して照合し、結果を確認できない場合は成功・ロールバックを断定しない。応答喪失時は同じ要求を再送する。
+- 局面のコピーで変更を検証し、versionの条件付き更新、結果、受理記録、Domain Eventを同一トランザクションで保存してからActorへ反映する。保存エラー時は履歴を再読込して照合し、結果を確認できない場合は成功・ロールバックを断定しない。応答喪失時は同じ要求を再送する。
 - 再起動後は平手初期局面から受理済み履歴を再実行し、連番・参加者・合法性・各応答・最終結果を検証して復元する。DBに局面Snapshotを保存する方式ではない。
 - キュー投入後の呼出元のキャンセルや返信先の破棄では処理を取り消さない。メッセージ契約は[6.2節](#62-game-actorのメッセージ契約)を参照する。
 
@@ -54,7 +58,7 @@ flowchart LR
 
 Domain層とApplication層はSQL・ORMに依存せず、Application層が定義する`UserRepository` / `GameRepository`を注入する。Actorには`GameRepository`のみを渡し、ユーザー作成・取得の操作を公開しない。`SeaOrmStore`は両Traitを実装し、同じ接続プールを共有する。対局作成時のユーザー存在確認はDB内の同一トランザクションで行う。現行の永続化アダプターで組み込み・検証しているDBドライバーはSQLiteのみであり、PostgreSQL対応を実装済みとはしない。将来のDB変更はアダプター側で対応・検証する。
 
-ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`とSQLite用の名前付きVolumeを使い、コンテナ再作成後も対局を復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](README.md)を参照する。
+ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`、`outbox-publisher`、Core NATSを起動する。対局とOutboxは共有SQLite Volumeに保存し、コンテナ再作成後も復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](README.md)を参照する。
 
 ## 1. 要件と負荷モデル
 
@@ -216,7 +220,7 @@ Shard Managerは**独立Deployment（通常2 Podを初期候補）**として実
 
 ## 6. 着手の確定と観戦イベント配信
 
-以下の図と6.1節は将来設計である。現在はgRPCの要求・応答のみを提供し、Gateway、時計、Outbox、NATSによる配信は実装していない。現行のメッセージ契約は6.2節に示す。
+以下の図と6.1節のGateway、時計、分散構成は将来設計である。現在はgRPCの要求・応答と、SQLiteのTransactional OutboxからCore NATSへの配信を提供する。現行のメッセージ契約は6.2節、Publisherの契約は6.3節に示す。
 
 ```mermaid
 sequenceDiagram
@@ -265,16 +269,27 @@ sequenceDiagram
 
 ### 6.2 Game Actorのメッセージ契約
 
-以下は現行実装の契約である。時計・イベント配信・Shard Fencingは将来設計として区別する。
+以下は現行実装の契約である。時計・Gatewayへの配信・Shard Fencingは将来設計として区別する。
 
 - `GameService`は、Snapshot取得を`Command::Snapshot`、着手・投了を`Command::Mutate`へ変換し、bounded `mpsc`で対象Actorへ送る。
 - Actorは要求を逐次処理し、要求ごとの`oneshot`へ`Snapshot`または`Acceptance`、失敗時は`ApplicationError`を返す。着手・投了に共通の`Acceptance`は、受理時の連番・王手状態・対局結果を持つ。
 - `mpsc`への投入成功は処理成功を意味しない。投入後に呼出元がキャンセルされても処理は続き、送信側がすべて閉じた後も投入済み要求を処理して終了する。
 - 変更要求は参加者、`expected_seq`、`request_id`、対局ルールを検証する。受理済み要求の同一内容での再送には元の応答を返し、同じ`request_id`で内容が異なる要求は拒否する。
 - 成功応答は永続化の確定を根拠とする。応答喪失や保存結果が不明な場合は、元の`expected_seq`を含む同一内容・同一`request_id`で再送する。確定・復旧の方針は0.2節に示す。
-- `CheckTimeout`、`Ready`、Domain Eventは未実装である。将来のイベントは変更と同じDBトランザクションでOutboxへ保存し、NATS経由で通知する。応答とイベントの到着順・到着可否は独立とする。
+- `Receipt::events`が受理記録からDomain Eventを導出する。着手は`MoveCommitted`、投了は`GameFinished`、詰みの着手はその順で両方を生成する。対局作成・拒否・受理済み要求の再送・履歴復元では新しいイベントを生成しない。
+- `GameRepository::append`は変更・受理記録・イベントを同じDBトランザクションで保存する。ActorからNATSへ直接送信しない。応答とイベントの到着順・到着可否は独立とする。`CheckTimeout`と`Ready`は未実装である。
 
 実装の定義は[Actor](crates/game-application/src/actor.rs)、[要求・応答型](crates/game-application/src/types.rs)、[gRPC定義](proto/game.proto)を参照する。
+
+### 6.3 現行Outbox Publisherの契約
+
+- `game-application`が型付きイベントと配信ユースケース・Traitを所有する。`persistence`がイベント内容の固定、原子的保存、未配信行の取得、配信済み記録を担う。`messaging`がCore NATSのSubject・JSON変換と送信を担い、`outbox-publisher`が独立プロセスとして組み立てる。
+- イベント識別子は`(game_id, seq, event_kind)`である。詰みの着手では同じ`seq`の2イベントを種別で区別する。ペイロードには元の`request_id`と`user_id`も保持する。
+- Publisherは未配信行を挿入順に1件ずつ処理する。イベントのSubjectを購読してから送信し、同じ接続で同一ペイロードのechoを確認して、その行だけを配信済みとする。このためイベントSubjectへのPublishとSubscribeの権限が必要である。ソケットのflushだけをサーバー処理の確認に使わない。接続を自動で張り直さず、失敗時はプロセスを終了し、Composeの再起動で未配信行から再開する。送信成功後の記録失敗などでは同じ識別子を再送し得る。
+- SQLite版はLinuxのローカルファイルシステム上で単一Publisherを使う。`SqliteOutbox`が実DBファイルのOSロックを保持して二重起動を拒否する。配信待ちの間にDBトランザクションを保持せず、ShardやLeaseを導入しない。終了時は通信処理を停止してからロックを解放する。
+- Subjectは`shogi.games.<game_idのUTF-8バイト列の小文字hex>.events`である。JSONの`schema_version`は1、`type`は`move_committed`または`game_finished`で、`game_id`は元の値を保持する。
+- Publisher自身のecho受信は、他の購読者の受信・永続化の確認ではない。購読者不在や切断中の配信は失われる。購読者は完全なイベント識別子で重複を排除し、欠落時はSnapshotで再同期する。接続障害をまたぐ遅延重複や到着順の逆転も許容する。
+- 配信済み行は削除しない。先頭行が失敗すると後続行も待機する。複数ホスト間のPublisher排他、Outboxの掃除、Gatewayによる再同期は今後の対象である。
 
 ## 7. 対局時計（Game Clock）— 将来実装時の採用方針（未実装）
 
@@ -424,9 +439,10 @@ flowchart LR
 | `users` | 登録済みユーザーID |
 | `games` | 対局ID、固定された先後のユーザー、version、勝敗・終局理由 |
 | `journal` | 着手・投了を含む受理済みコマンドと元の応答。対局内の連番・request_idはそれぞれ一意 |
+| `outbox_events` | 確定時に固定した型付きイベント、符号化バージョン、対局・連番・種別の一意性、配信済み状態 |
 | `schema_version` | スキーマ初期化・互換性検証用のバージョン |
 
-`games`のversion・結果と`journal`は原子的に更新する。新規DBは起動時に初期化し、既存DBはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Outbox、Leaseは保存していない。
+`games`のversion・結果、`journal`、`outbox_events`は原子的に更新する。スキーマバージョンは2であり、新規DBの初期化とv1からの更新は同一トランザクション内で行う。v1の既存履歴を保ち、Outboxは空で開始する。イベントは更新後に受理した操作から生成し、既存履歴を遡って配信しない。起動時にはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Leaseは保存していない。
 
 ### 11.2 将来の拡張候補
 
@@ -529,7 +545,7 @@ flowchart TB
 
 - **Valkey採用**: Presence、Token Bucket / Fixed Window、キャッシュ、Sorted Setによるマッチングに利用する。イベント配信・ジョブキューは引き続きCore NATS / JetStreamを使い、Valkey Pub/Sub / Streamsへの依存は初期設計では持たない。
 - **Valkey本番**: AWSならAmazon ElastiCache for Valkey、Google CloudならMemorystore for Valkeyなど、Kubernetes基盤と同一クラウド・同一リージョンのマネージドサービスを優先する。互換コマンド・Lua・クラスタのキースロット制約を検証する。
-- **Valkeyローカル**: 導入時にDocker ComposeへValkeyを追加する。現行の`compose.yaml`は`game-server`とSQLite用Volumeのみを定義する。RustではRedisプロトコルに対応する`redis` crate等を利用可能。
+- **Valkeyローカル**: 導入時にDocker ComposeへValkeyを追加する。現行の`compose.yaml`は`game-server`、`outbox-publisher`、Core NATS、SQLite用Volumeを定義する。RustではRedisプロトコルに対応する`redis` crate等を利用可能。
 - **PostgreSQL本番**: RDS / Cloud SQL / Azure Database for PostgreSQL等のマネージドHAを優先。Lease・FencingのトランザクションはPrimaryへ送る。
 - **自前Kubernetes運用の代替**: ValkeyやPostgreSQLをStatefulSet / Operatorで動かすことも可能だが、初期は運用負担を抑えるため採用しない。
 
@@ -617,7 +633,7 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 
 ### Phase 2: リアルタイム分離
 
-Realtime Gatewayを独立させ、WebSocket購読、Core NATS、ValkeyによるPresence/マッチングを導入。確定イベントの配信開始に合わせてTransactional OutboxとOutbox Publisherを導入し、変更とイベントの原子的な保存を保証する。Snapshot + Sequence再同期を実装。
+Transactional Outboxと独立Outbox Publisher、Core NATSへの確定イベント配信は実装済みである。次にRealtime Gateway、WebSocket購読、ValkeyによるPresence/マッチング、Snapshot + Sequence再同期を個別に導入する。
 
 ### Phase 3: AIと非同期処理
 
@@ -629,7 +645,7 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 
 ## 15. Rustモノレポ構成
 
-現行Workspaceの実装単位は`apps/game-server`と、`crates/shogi-domain`、`game-application`、`persistence`、`rpc`である。スキーマ処理は`crates/persistence/src/schema.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+現行Workspaceの実装単位は`apps/game-server`、`apps/outbox-publisher`と、`crates/shogi-domain`、`game-application`、`persistence`、`messaging`、`rpc`である。スキーマ処理は`crates/persistence/src/schema.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
 
 以下は将来拡張を含む配置案であり、すべてのディレクトリが存在するわけではない。
 

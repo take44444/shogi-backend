@@ -24,11 +24,6 @@ pub(crate) fn a(name: &str) -> Alias {
     Alias::new(name)
 }
 
-/// Serializes schema inspection and bootstrap with an immediate transaction.
-/// A missing ledger beside application tables, an empty or malformed ledger,
-/// missing version-one tables, and unknown versions return `Corrupt`. Version
-/// zero creates all application tables only when none already exist. Errors
-/// leave the transaction uncommitted; existing metadata is not repaired.
 pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationError> {
     let tx = db
         .begin_with_options(TransactionOptions {
@@ -47,7 +42,7 @@ pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationErro
         .iter()
         .map(|row| row.try_get::<String>("", "table_name"))
         .collect::<Result<Vec<_>, _>>()?;
-    let owned = ["users", "games", "journal"];
+    let owned = ["users", "games", "journal", "outbox_events"];
     let exists = |name: &str| names.iter().any(|table| table == name);
     if !exists("schema_version") {
         if owned.iter().any(|table| exists(table)) {
@@ -67,6 +62,21 @@ pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationErro
                 .values_panic([0.into(), 0.into()]),
         )
         .await?;
+    }
+    let ledger_columns = tx
+        .query_all_raw(sea_orm::Statement::from_string(
+            DbBackend::Sqlite,
+            "PRAGMA table_info(schema_version)",
+        ))
+        .await?;
+    let has_column = |name: &str| {
+        ledger_columns.iter().any(|row| {
+            row.try_get::<String>("", "name")
+                .is_ok_and(|column| column == name)
+        })
+    };
+    if !has_column("id") || !has_column("version") {
+        return Err(MigrationError::Corrupt);
     }
     let rows = tx
         .query_all(
@@ -132,20 +142,47 @@ pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationErro
                 .check(Expr::cust("(winner IS NULL AND reason IS NULL) OR (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1, 2) AND reason IN (1, 2))"))
                 .foreign_key(ForeignKey::create().from(a("journal"), a("game_id")).to(a("games"), a("id")))
                 .foreign_key(ForeignKey::create().from(a("journal"), a("user_id")).to(a("users"), a("id")))).await?;
-            tx.execute(
-                Query::update()
-                    .table(a("schema_version"))
-                    .value(a("version"), 1)
-                    .and_where(Expr::col(a("id")).eq(0)),
-            )
-            .await?;
         }
         1 => {
+            if !["users", "games", "journal"]
+                .iter()
+                .all(|table| exists(table))
+                || exists("outbox_events")
+            {
+                return Err(MigrationError::Corrupt);
+            }
+        }
+        2 => {
             if !owned.iter().all(|table| exists(table)) {
                 return Err(MigrationError::Corrupt);
             }
         }
         _ => return Err(MigrationError::Corrupt),
+    }
+    if version < 2 {
+        tx.execute_unprepared("CREATE TABLE outbox_events (
+            id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, seq BIGINT NOT NULL,
+            event_kind INTEGER NOT NULL CHECK(event_kind IN (0, 1)),
+            encoding_version INTEGER NOT NULL, request_id TEXT NOT NULL, user_id TEXT NOT NULL,
+            usi TEXT, in_check BOOLEAN, winner INTEGER, reason INTEGER,
+            published BOOLEAN NOT NULL DEFAULT 0 CHECK(published IN (0, 1)),
+            UNIQUE(game_id, seq, event_kind),
+            FOREIGN KEY(game_id, seq) REFERENCES journal(game_id, seq),
+            CHECK((winner IS NULL AND reason IS NULL) OR
+                (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2))),
+            CHECK((event_kind = 0 AND usi IS NOT NULL AND in_check IS NOT NULL
+                    AND in_check IN (0,1) AND (reason IS NULL OR reason = 1))
+                OR (event_kind = 1 AND usi IS NULL AND in_check IS NULL AND winner IS NOT NULL))
+        )").await?;
+        tx.execute_unprepared("CREATE INDEX outbox_pending ON outbox_events(published, id)")
+            .await?;
+        tx.execute(
+            Query::update()
+                .table(a("schema_version"))
+                .value(a("version"), 2)
+                .and_where(Expr::col(a("id")).eq(0)),
+        )
+        .await?;
     }
     tx.commit().await?;
     Ok(())

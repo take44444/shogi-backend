@@ -38,6 +38,8 @@
 #![warn(missing_docs)]
 
 mod actor;
+mod events;
+pub use events::*;
 mod repository;
 mod types;
 mod user;
