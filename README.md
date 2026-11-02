@@ -56,6 +56,37 @@ and verifies both original receipts after a second restart of the finished game.
 The same seed, resume, and finished commands also work with a local server.
 Stop and restart the local server between phases with the same `DATABASE_URL`.
 
+## Read the API documentation
+
+Generate the workspace API reference with rustdoc.
+
+```sh
+cargo doc --workspace --no-deps
+```
+
+The HTML is written under `target/doc/`. Open a crate's reference in your browser.
+
+```sh
+cargo doc -p game-application --no-deps --open
+```
+
+The crate pages describe domain rules, application commands and errors, the
+storage contract, and the gRPC adapter. Protocol message comments originate in
+`proto/game.proto` and appear in the generated `rpc::proto` reference.
+
+Include private modules when inspecting actor recovery and schema migrations.
+
+```sh
+cargo doc --workspace --no-deps --document-private-items
+```
+
+Check documentation links and examples before changing the public contract.
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+cargo test --workspace --doc
+```
+
 ## Verify the workspace
 
 ```sh

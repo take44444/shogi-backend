@@ -1,6 +1,10 @@
+//! Strict USI parsing and canonical formatting, independent of position legality.
+
 use crate::{HandPiece, Move, Square};
 use std::{error::Error, fmt, str::FromStr};
 
+/// Input is not an exact USI square, board move, or unpromoted piece drop.
+/// Whitespace, invalid coordinates, lowercase drop symbols, and extra bytes fail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParseUsiError;
 
@@ -22,6 +26,13 @@ fn square(bytes: &[u8]) -> Result<Square, ParseUsiError> {
 
 impl FromStr for Square {
     type Err = ParseUsiError;
+
+    /// Parses exactly one USI file digit and rank letter, such as `7g`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseUsiError`] for anything outside `1a` through `9i`,
+    /// including whitespace or extra bytes.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         square(s.as_bytes())
     }
@@ -36,7 +47,13 @@ impl fmt::Display for Square {
 impl FromStr for Move {
     type Err = ParseUsiError;
 
-    /// Parses syntax only. Legality is checked by `Game::play`.
+    /// Parses syntax only. Legality is checked by [`Game::play`](crate::Game::play).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseUsiError`] for invalid squares, malformed board moves,
+    /// invalid drop symbols, whitespace, or extra bytes. Promotion uses a final
+    /// `+`; drops use uppercase `PLNSGBR` followed by `*` and a square.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.as_bytes() {
             [piece, b'*', file, rank] => {

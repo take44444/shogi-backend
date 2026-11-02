@@ -1,3 +1,6 @@
+//! Isolates rsshogi construction, move generation, atomic application, and snapshot conversion.
+//! No rules-library types escape this module.
+
 use crate::{CommandError, HandPiece, Move, Piece, PieceKind, Player, PositionView, Square};
 use rsshogi::{
     board::{self, Move32List, Position},

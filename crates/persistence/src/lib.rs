@@ -1,4 +1,51 @@
-//! SeaORM implementation of the application-owned durable Store contract.
+//! SQLite persistence for the application-owned [`Store`] contract through SeaORM.
+//!
+//! [`SeaOrmStore::connect`] opens a pool and migrates or validates the schema before
+//! returning. SQLite is the only compiled and tested driver. Other adapters or
+//! drivers require their own validation, even though the application port is neutral.
+//!
+//! Each connection enables foreign keys, full synchronization, and a five-second
+//! busy timeout. File databases use WAL; in-memory databases use memory journaling.
+//! In-memory databases use one pooled connection; file databases use
+//! up to five. Creation and append use immediate SQLite transactions. Append compares
+//! the version and writes metadata and the receipt atomically, checking membership
+//! before commit. Failed append statements explicitly roll back. Commit errors can be
+//! uncertain; the application reconciles every append error through a fresh load.
+//!
+//! Metadata and ordered receipts load through one left join, so a read cannot combine
+//! different database snapshots. The application validates replay from a standard
+//! game rather than restoring an untrusted position string. Manual database edits
+//! are outside the mutation API.
+//!
+//! ```
+//! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId};
+//! use persistence::SeaOrmStore;
+//! use std::sync::Arc;
+//!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await?);
+//! let service = GameService::new(store.clone());
+//! let black = UserId::new("black")?;
+//! let white = UserId::new("white")?;
+//! service.create_user(black.clone()).await?;
+//! service.create_user(white.clone()).await?;
+//! let id = GameId::new("example")?;
+//! assert_eq!(service.create(id.clone(), Participants { black: black.clone(), white }).await?.seq, 0);
+//! let command = MakeMove {
+//!     request_id: RequestId::new("opening")?, expected_seq: 0,
+//!     user_id: black, movement: "7g7f".parse()?,
+//! };
+//! let accepted = service.make_move(&id, command.clone()).await?;
+//! assert_eq!(accepted.seq, 1);
+//! assert_eq!(service.make_move(&id, command).await?, accepted);
+//! assert_eq!(service.snapshot(&id).await?.seq, 1);
+//! store.close().await?;
+//! # Ok(())
+//! # }
+//! ```
+#![warn(missing_docs)]
+
 mod schema;
 
 use async_trait::async_trait;
@@ -15,12 +62,22 @@ use sea_orm::{
 use shogi_domain::{FinishReason, GameResult, Player};
 use std::time::Duration;
 
+/// A migrated SQLite connection pool implementing [`Store`].
+/// Share through `Arc` when multiple services use the same pool.
 pub struct SeaOrmStore {
     db: DatabaseConnection,
 }
 
 impl SeaOrmStore {
     /// Opens SQLite and validates or migrates its schema before returning.
+    /// For a new database, creates the schema and version ledger atomically.
+    /// Existing empty or incompatible ledgers and missing application tables fail
+    /// closed. Concurrent startup is serialized by an immediate transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unavailable`] for connection or database errors and
+    /// [`Error::Corrupt`] for an incompatible or incomplete schema.
     pub async fn connect(url: &str) -> Result<Self, Error> {
         let mut options = ConnectOptions::new(url);
         options
@@ -41,6 +98,13 @@ impl SeaOrmStore {
         Ok(Self { db })
     }
 
+    /// Closes the shared connection pool through a reference.
+    /// All services holding this store lose access to that pool; later operations
+    /// can fail with [`Error::Unavailable`]. Coordinate shutdown with those users.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unavailable`] if the database pool fails to close.
     pub async fn close(&self) -> Result<(), Error> {
         self.db.close_by_ref().await.map_err(storage)
     }

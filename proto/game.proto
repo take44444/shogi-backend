@@ -1,107 +1,217 @@
 syntax = "proto3";
 package shogi.v1;
 
+// Durable shogi commands. User IDs are caller claims, not authentication.
+// IDs contain 1 through 128 UTF-8 bytes with no Unicode whitespace.
+// Cancelled or lost responses can follow a committed command. For MakeMove and
+// Resign, retry identical contents with the same request ID and expected sequence.
+// CreateUser and CreateGame are not exact-retry APIs; duplicates return AlreadyExists.
 service GameService {
+  // Registers a new internal user; duplicate IDs return AlreadyExists.
   rpc CreateUser(CreateUserRequest) returns (User);
+  // Loads an existing user; unknown IDs return NotFound.
   rpc GetUser(GetUserRequest) returns (User);
+  // Binds two distinct existing users and creates a sequence-zero game.
   rpc CreateGame(CreateGameRequest) returns (Snapshot);
+  // Returns current participants, board, hands, legal moves, and sequence.
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
+  // Accepts a legal move at the required sequence or replays an identical receipt.
   rpc MakeMove(MakeMoveRequest) returns (Acceptance);
+  // Accepts a participant resignation or replays an identical receipt.
   rpc Resign(ResignRequest) returns (Acceptance);
 }
 
-message CreateUserRequest { string user_id = 1; }
-message GetUserRequest { string user_id = 1; }
-message User { string user_id = 1; }
+// Creates a user. Repeated creation returns AlreadyExists.
+message CreateUserRequest {
+  // New user ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
+  string user_id = 1;
+}
+// Looks up a registered user. Unknown users return NotFound.
+message GetUserRequest {
+  // Registered user ID with the same byte and whitespace bounds as creation.
+  string user_id = 1;
+}
+// A registered internal user, without authentication credentials.
+message User {
+  // The registered internal user ID.
+  string user_id = 1;
+}
+// Creates a standard game with immutable bindings to two distinct existing users.
+// Duplicate game IDs return AlreadyExists. Creation is not an exact-retry API.
 message CreateGameRequest {
+  // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
   string game_id = 1;
+  // Existing user permanently bound to Black, distinct from the White user.
   string black_user_id = 2;
+  // Existing user permanently bound to White, distinct from the Black user.
   string white_user_id = 3;
 }
-message GetSnapshotRequest { string game_id = 1; }
-message MakeMoveRequest {
+// Reads a game after the server checks its durable version.
+message GetSnapshotRequest {
+  // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
   string game_id = 1;
+}
+// A participant move in strict USI notation. Syntax is checked before dispatch.
+// Exact accepted retries match user, expected sequence, and typed action.
+// Nonparticipants are rejected before receipt lookup. Replays precede stale
+// sequence and finished-game checks. Rejected requests do not reserve IDs.
+message MakeMoveRequest {
+  // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
+  string game_id = 1;
+  // Request ID, unique among accepted mutations within this game. Preserve on retries.
   string request_id = 2;
+  // Required pre-command sequence, starting at zero. Omission is InvalidArgument.
+  // Preserve the original value on exact retries; optional presence distinguishes zero.
   optional uint64 expected_seq = 3;
   reserved 4;
   reserved "player";
+  // Exact USI move, such as 7g7f, 2b3c+, or P*5e. No surrounding whitespace.
   string usi = 5;
+  // Caller-supplied participant claim. The server derives the side from the binding.
   string user_id = 6;
 }
+// A participant resignation, allowed off turn.
+// Exact accepted retries return the original acceptance, including after finish.
+// Retry uncertain outcomes with identical contents and the same request ID.
 message ResignRequest {
+  // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
   string game_id = 1;
+  // Request ID, unique among accepted mutations within this game. Preserve on retries.
   string request_id = 2;
+  // Required pre-command sequence, starting at zero. Omission is InvalidArgument.
+  // Preserve the original value on exact retries; optional presence distinguishes zero.
   optional uint64 expected_seq = 3;
   reserved 4;
   reserved "player";
+  // Caller-supplied participant claim; either side may resign off turn.
   string user_id = 5;
 }
+// The original response to one accepted mutation, retained for exact replay.
 message Acceptance {
+  // Sequence of this accepted command, from one through i64::MAX. Replay retains it.
   uint64 seq = 1;
+  // Whether the side to move after this accepted command is checked.
   bool in_check = 2;
+  // Terminal result after this command; absent while play continues.
   GameResult result = 3;
 }
+// A game snapshot. Finished games retain position and turn but have no legal moves.
 message Snapshot {
+  // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
   string game_id = 1;
+  // Accepted command count, starting at zero and bounded by i64::MAX.
   uint64 seq = 2;
+  // Occupied squares only, in ascending file order then ascending rank order.
   repeated BoardPiece board = 3;
+  // All fourteen counts, including zero: Black then White, each in hand-piece enum order.
   repeated HandCount hands = 4;
+  // Side to move in the retained position, including after completion.
   Player turn = 5;
+  // Whether the side to move in the retained position is checked.
   bool in_check = 6;
+  // Terminal result, absent while play continues.
   GameResult result = 7;
+  // Legal USI moves including optional nonpromotions; empty after completion.
   repeated string legal_moves = 8;
+  // Existing user permanently bound to Black, distinct from the White user.
   string black_user_id = 9;
+  // Existing user permanently bound to White, distinct from the Black user.
   string white_user_id = 10;
 }
+// An occupied square in absolute coordinates. Empty squares are omitted.
 message BoardPiece {
+  // Absolute file in 1 through 9, as in USI.
   uint32 file = 1;
+  // Absolute rank in 1 through 9, corresponding to USI a through i for either side.
   uint32 rank = 2;
+  // Concrete side owning the piece.
   Player owner = 3;
+  // Concrete current piece kind, including promotion.
   PieceKind kind = 4;
 }
+// The number of one unpromoted hand piece held by a player.
 message HandCount {
+  // Concrete side holding the pieces.
   Player player = 1;
+  // Concrete unpromoted hand piece kind.
   HandPiece piece = 2;
+  // Number held in hand, including zero.
   uint32 count = 3;
 }
+// A terminal result with a concrete winner and reason.
 message GameResult {
+  // Concrete winning side.
   Player winner = 1;
+  // Concrete reason for game completion.
   FinishReason reason = 2;
 }
+// A side of the board. Black moves first.
 enum Player {
+  // Wire default only; not a valid domain value.
   PLAYER_UNSPECIFIED = 0;
+  // Black, the first player, advancing toward rank 1.
   PLAYER_BLACK = 1;
+  // White, advancing toward rank 9.
   PLAYER_WHITE = 2;
 }
+// A board piece kind, including promoted forms.
 enum PieceKind {
+  // Wire default only; not a valid domain value.
   PIECE_KIND_UNSPECIFIED = 0;
+  // An unpromoted pawn.
   PIECE_KIND_PAWN = 1;
+  // An unpromoted lance.
   PIECE_KIND_LANCE = 2;
+  // An unpromoted knight.
   PIECE_KIND_KNIGHT = 3;
+  // An unpromoted silver general.
   PIECE_KIND_SILVER = 4;
+  // A gold general.
   PIECE_KIND_GOLD = 5;
+  // An unpromoted bishop.
   PIECE_KIND_BISHOP = 6;
+  // An unpromoted rook.
   PIECE_KIND_ROOK = 7;
+  // The king, which cannot be held in hand.
   PIECE_KIND_KING = 8;
+  // A promoted pawn (tokin), moving as a gold.
   PIECE_KIND_PROMOTED_PAWN = 9;
+  // A promoted lance, moving as a gold.
   PIECE_KIND_PROMOTED_LANCE = 10;
+  // A promoted knight, moving as a gold.
   PIECE_KIND_PROMOTED_KNIGHT = 11;
+  // A promoted silver general, moving as a gold.
   PIECE_KIND_PROMOTED_SILVER = 12;
+  // A promoted bishop.
   PIECE_KIND_HORSE = 13;
+  // A promoted rook.
   PIECE_KIND_DRAGON = 14;
 }
+// An unpromoted piece kind that can be captured into hand and dropped.
 enum HandPiece {
+  // Wire default only; not a valid domain value.
   HAND_PIECE_UNSPECIFIED = 0;
+  // An unpromoted pawn.
   HAND_PIECE_PAWN = 1;
+  // An unpromoted lance.
   HAND_PIECE_LANCE = 2;
+  // An unpromoted knight.
   HAND_PIECE_KNIGHT = 3;
+  // An unpromoted silver general.
   HAND_PIECE_SILVER = 4;
+  // A gold general.
   HAND_PIECE_GOLD = 5;
+  // An unpromoted bishop.
   HAND_PIECE_BISHOP = 6;
+  // An unpromoted rook.
   HAND_PIECE_ROOK = 7;
 }
+// A terminal condition adjudicated by the domain.
 enum FinishReason {
+  // Wire default only; not a valid domain value.
   FINISH_REASON_UNSPECIFIED = 0;
+  // The side to move is checked and has no legal moves.
   FINISH_REASON_CHECKMATE = 1;
+  // A participant resigned; the opponent wins.
   FINISH_REASON_RESIGNATION = 2;
 }

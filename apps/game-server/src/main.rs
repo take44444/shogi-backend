@@ -1,3 +1,5 @@
+//! Composes SQLite persistence, the application service, and a plaintext gRPC listener.
+
 use game_application::GameService;
 use persistence::SeaOrmStore;
 use rpc::{GameRpc, proto::game_service_server::GameServiceServer};

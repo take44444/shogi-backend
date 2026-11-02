@@ -1,3 +1,5 @@
+//! Drives a complete game through a running gRPC server using freshly created users and a game.
+
 use rpc::proto::{self, game_service_client::GameServiceClient};
 
 #[tokio::main]

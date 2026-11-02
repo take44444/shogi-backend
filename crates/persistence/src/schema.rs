@@ -1,3 +1,6 @@
+//! SQLite schema bootstrap and version validation under an immediate transaction.
+//! Tables, constraints, and the version ledger commit together for a new database.
+
 use sea_orm::sea_query::{Alias, ColumnDef, Expr, ExprTrait, ForeignKey, Index, Query, Table};
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DbBackend, DbErr, SqliteTransactionMode,
@@ -5,6 +8,7 @@ use sea_orm::{
 };
 use sea_schema::probe::SchemaProbe;
 
+/// Distinguishes database failures from an incompatible or incomplete schema.
 pub(crate) enum MigrationError {
     Database(DbErr),
     Corrupt,
@@ -20,6 +24,11 @@ pub(crate) fn a(name: &str) -> Alias {
     Alias::new(name)
 }
 
+/// Serializes schema inspection and bootstrap with an immediate transaction.
+/// A missing ledger beside application tables, an empty or malformed ledger,
+/// missing version-one tables, and unknown versions return `Corrupt`. Version
+/// zero creates all application tables only when none already exist. Errors
+/// leave the transaction uncommitted; existing metadata is not repaired.
 pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationError> {
     let tx = db
         .begin_with_options(TransactionOptions {

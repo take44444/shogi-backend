@@ -1,13 +1,23 @@
+//! Validates wire input and delegates to the application, mapping outcomes to gRPC status.
+
 use crate::{conversion::application_status, proto};
 use game_application::{GameId, GameService, MakeMove, Participants, RequestId, Resign, UserId};
 use tonic::{Request, Response, Status};
 
+/// Cloneable gRPC facade for [`GameService`].
+///
+/// Implements [`proto::game_service_server::GameService`] for use with
+/// [`proto::game_service_server::GameServiceServer`]. IDs and move syntax are
+/// validated before dispatch. User IDs are unauthenticated caller claims. See
+/// the [crate documentation](crate) for status mapping and retry contracts.
 #[derive(Clone)]
 pub struct GameRpc {
     games: GameService,
 }
 
 impl GameRpc {
+    /// Wraps an application service, sharing its actor registry through clones.
+    /// Construction performs no I/O and does not start a listener.
     pub fn new(games: GameService) -> Self {
         Self { games }
     }

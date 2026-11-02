@@ -1,3 +1,6 @@
+//! Serializes each game's commands, validates durable replay, and reconciles uncertain commits.
+//! Candidates become cached state only after commit confirmation or durable receipt lookup.
+
 use crate::{
     Acceptance, Action, ApplicationError, GameId, GameRecord, Participants, Receipt, RequestId,
     Snapshot, Store, UserId,
@@ -56,6 +59,10 @@ fn next_sequence(seq: u64) -> Result<u64, ApplicationError> {
 }
 
 impl State {
+    /// Replays a coherent journal from the standard position.
+    /// Rejects equal bindings, out-of-range or noncontiguous sequences, duplicate
+    /// requests, nonparticipants, illegal actions, receipt mismatches, and final
+    /// version or result mismatches as `Corrupt`. No partial state escapes.
     fn restore(record: GameRecord) -> Result<Self, ApplicationError> {
         let mut state = Self {
             game: Game::new(),
@@ -102,6 +109,9 @@ impl State {
         }
     }
 
+    /// Checks membership before looking up an accepted request.
+    /// Returns its original acceptance only when user, expected sequence, and action
+    /// match. Changed contents conflict; an unused ID remains available for a new command.
     fn replay(&self, receipt: &Pending) -> Result<Option<Acceptance>, ApplicationError> {
         self.participants.side(&receipt.user_id)?;
         self.accepted
@@ -135,6 +145,8 @@ impl Actor {
         }
     }
 
+    /// Invalidates cached state before loading and validating durable history.
+    /// A failed read or replay leaves state invalid so a later refresh can recover.
     async fn reload(&mut self) -> Result<(), ApplicationError> {
         self.state = None;
         let record = self.store.load_game(&self.id).await?;
@@ -145,6 +157,8 @@ impl Actor {
         Ok(())
     }
 
+    /// Reads the durable version before every query or mutation.
+    /// Reloads missing or changed state. Read errors propagate even with a cached game.
     async fn refresh(&mut self) -> Result<(), ApplicationError> {
         let version = self.store.version(&self.id).await?;
         if self.state.as_ref().is_none_or(|state| state.seq != version) {
@@ -168,6 +182,8 @@ impl Actor {
         })
     }
 
+    /// Drains queued commands until all senders close.
+    /// A dropped response receiver does not cancel an enqueued command or transaction.
     pub(crate) async fn run(mut self, mut receiver: mpsc::Receiver<Command>) {
         while let Some(command) = receiver.recv().await {
             match command {
@@ -181,6 +197,11 @@ impl Actor {
         }
     }
 
+    /// Replays accepted requests before checking staleness or domain completion.
+    /// Stages new commands on a clone, checks sequence capacity before mutation, and
+    /// publishes only a confirmed commit. Every append failure reloads history to
+    /// resolve exact replay, conflict, or a competing version. Otherwise returns
+    /// `Unavailable` with invalid state; absence of a receipt does not prove rollback.
     async fn apply(&mut self, pending: Pending) -> Result<Acceptance, ApplicationError> {
         self.refresh().await?;
         let state = self.state.as_ref().ok_or(ApplicationError::Unavailable)?;
