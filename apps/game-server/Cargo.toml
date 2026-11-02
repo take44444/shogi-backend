@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+persistence = { path = "../../crates/persistence" }
 game-application = { path = "../../crates/game-application" }
 rpc = { path = "../../crates/rpc" }
 tokio.workspace = true

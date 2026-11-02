@@ -669,3 +669,19 @@ fn promotion_can_start_in_zone_and_end_outside_it() {
         );
     }
 }
+
+#[test]
+fn cloned_games_own_their_position_and_terminal_result() {
+    let original = Game::new();
+    let initial = original.position();
+    let mut staged = original.clone();
+    staged.play(Player::Black, "7g7f".parse().unwrap()).unwrap();
+    assert_eq!(original.position(), initial);
+    assert_ne!(staged.position(), initial);
+    staged.resign(Player::Black).unwrap();
+    assert_eq!(original.result(), None);
+    let finished = staged.clone();
+    assert_eq!(finished.result(), staged.result());
+    assert_eq!(finished.position(), staged.position());
+    assert!(finished.legal_moves().is_empty());
+}

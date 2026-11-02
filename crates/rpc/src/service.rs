@@ -1,8 +1,5 @@
-use crate::{
-    conversion::{application_status, player},
-    proto,
-};
-use game_application::{GameId, GameService, MakeMove, RequestId, Resign};
+use crate::{conversion::application_status, proto};
+use game_application::{GameId, GameService, MakeMove, Participants, RequestId, Resign, UserId};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
@@ -18,12 +15,47 @@ impl GameRpc {
 
 #[tonic::async_trait]
 impl proto::game_service_server::GameService for GameRpc {
+    async fn create_user(
+        &self,
+        request: Request<proto::CreateUserRequest>,
+    ) -> Result<Response<proto::User>, Status> {
+        let id = UserId::new(request.into_inner().user_id).map_err(invalid)?;
+        let user = self
+            .games
+            .create_user(id)
+            .await
+            .map_err(application_status)?;
+        Ok(Response::new(proto::User {
+            user_id: user.id.as_str().to_owned(),
+        }))
+    }
+
+    async fn get_user(
+        &self,
+        request: Request<proto::GetUserRequest>,
+    ) -> Result<Response<proto::User>, Status> {
+        let id = UserId::new(request.into_inner().user_id).map_err(invalid)?;
+        let user = self.games.get_user(&id).await.map_err(application_status)?;
+        Ok(Response::new(proto::User {
+            user_id: user.id.as_str().to_owned(),
+        }))
+    }
+
     async fn create_game(
         &self,
         request: Request<proto::CreateGameRequest>,
     ) -> Result<Response<proto::Snapshot>, Status> {
-        let id = GameId::new(request.into_inner().game_id).map_err(invalid)?;
-        let snapshot = self.games.create(id).await.map_err(application_status)?;
+        let request = request.into_inner();
+        let id = GameId::new(request.game_id).map_err(invalid)?;
+        let participants = Participants {
+            black: UserId::new(request.black_user_id).map_err(invalid)?,
+            white: UserId::new(request.white_user_id).map_err(invalid)?,
+        };
+        let snapshot = self
+            .games
+            .create(id, participants)
+            .await
+            .map_err(application_status)?;
         Ok(Response::new(snapshot.into()))
     }
 
@@ -47,7 +79,7 @@ impl proto::game_service_server::GameService for GameRpc {
             expected_seq: request
                 .expected_seq
                 .ok_or_else(|| Status::invalid_argument("expected_seq is required"))?,
-            player: player(request.player)?,
+            user_id: UserId::new(request.user_id).map_err(invalid)?,
             movement: request.usi.parse().map_err(invalid)?,
         };
         let acceptance = self
@@ -69,7 +101,7 @@ impl proto::game_service_server::GameService for GameRpc {
             expected_seq: request
                 .expected_seq
                 .ok_or_else(|| Status::invalid_argument("expected_seq is required"))?,
-            player: player(request.player)?,
+            user_id: UserId::new(request.user_id).map_err(invalid)?,
         };
         let acceptance = self
             .games

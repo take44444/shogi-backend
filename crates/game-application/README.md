@@ -1,31 +1,55 @@
 # game-application
 
-`GameService` owns independent, in-memory shogi games through a shared registry.
-Clones share that registry. `create` inserts a new game or returns `AlreadyExists`.
-`snapshot` returns an owned position, legal moves, turn, check, result, and sequence.
+`GameService::new(Arc<dyn Store>)` uses the application-owned async `Store` port.
+The application and domain contain no SQL or ORM types. Production composition
+injects `persistence::SeaOrmStore`. There is no default in-memory store.
 
-`make_move` accepts `MakeMove`; `resign` accepts `Resign`. Both return a compact
-`Acceptance`. Sequence starts at zero and advances once per accepted command,
-including resignation. A rejected command changes neither sequence nor game state.
+`create_user(UserId)` returns `User { id }`; a duplicate ID returns `AlreadyExists`.
+`get_user(&UserId)` returns `UserNotFound` for an unknown user.
+`create(GameId, Participants { black, white })` binds two distinct existing users
+permanently to the game's sides. Equal users return `InvalidParticipants` and
+missing users return `UserNotFound`. A duplicate game returns `AlreadyExists`.
 
-Each game has one private actor and a mailbox of 64 commands. Sending waits for
-capacity. The registry lock is never held across a channel wait. Games do not
-block each other's mailboxes. Dropping the last service closes the registry's
-senders; actors drain enqueued commands and exit. Finished games remain available
-for snapshots and retries while the service lives. An actor failure returns
-`Unavailable` and never recreates the game.
+`snapshot` returns the participants, sequence, owned position, legal moves,
+turn, check, and result. An uncached game loads from durable storage.
+Unknown IDs return `NotFound` without retaining actors. A closed actor reloads
+the durable game. Each game has one actor per service registry and a mailbox
+of 64 commands. Registry locks never span database or channel waits.
 
-Request IDs are unique within a game across moves and resignation. Only accepted
-commands reserve IDs. Repeating the same ID and exact typed contents returns the
-original `Acceptance`, even after later moves or game completion. Changing the
-kind, player, expected sequence, or move returns `RequestConflict`. Replays do not
-return the current snapshot. Query `snapshot` to synchronize.
+`make_move(MakeMove)` and `resign(Resign)` take a `user_id`, request ID, and
+required typed `expected_seq: u64`. The service derives the side from the binding.
+A nonparticipant returns `NonParticipant` before receipt lookup.
+Either participant may resign off turn. Existing domain rules remain unchanged.
 
-Cancellation after enqueue does not cancel a command. A lost response or
-`Unavailable` can leave the outcome unknown. Retry identical contents with the
-same request ID against the same live service. State and replay history are kept
-only in memory, without eviction, for the service lifetime. Restart loses both.
+Sequence starts at zero and advances once per accepted command, including
+resignation. The portable durable limit is `i64::MAX`; exhaustion precedes
+candidate mutation. Only accepted commands reserve request IDs. Exact retries
+match command kind, user ID, expected sequence, and typed move. They return the
+original `Acceptance`, even after later commands or game completion. Changed
+contents return `RequestConflict`. Rejected request IDs remain reusable.
+Replay precedes stale-sequence and finished-game checks.
 
-`GameId::new` and `RequestId::new` require 1 through 128 bytes without whitespace.
-Domain value types come from `shogi-domain`. There are no clocks, storage,
-transport dependencies, authentication, or additional adjudication rules here.
+Before each snapshot or mutation, the actor checks the durable version and
+reloads if it differs or its state was invalidated. A failed storage read returns
+an error even when a cached snapshot exists. Restoration replays a coherent,
+ordered journal from `Game::new()` and validates contiguous sequence numbers,
+request uniqueness, participant binding, legality, every receipt, and final
+metadata. Invalid history returns `Corrupt`.
+
+A command stages a cloned `Game` and one accepted receipt. `Store::append`
+atomically compares the version, advances metadata, and writes the receipt.
+The actor publishes the candidate only after a confirmed commit. A failed append
+reloads durable history. A matching receipt returns its durable acceptance;
+changed contents return `RequestConflict`. A competing version returns
+`SequenceMismatch`. An uncertain result with no receipt returns `Unavailable`,
+invalidates local state, and does not claim rollback. A failed reconciliation
+also leaves state invalid. A later successful refresh permits recovery.
+
+Cancellation after enqueue does not cancel the actor's transaction. A lost
+response or `Unavailable` may mean the command committed. Retry identical
+contents with the same request ID. Do not assign a new ID to an uncertain retry.
+Dropping the last service closes its senders. Actors drain queued commands and
+exit. Finished games remain queryable and replayable across process restarts.
+
+`GameId`, `RequestId`, and `UserId` require 1 through 128 bytes without whitespace.
+User IDs are internal caller claims, not authentication credentials.

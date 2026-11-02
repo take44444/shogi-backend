@@ -16,6 +16,8 @@ tonic-prost-build = "0.14.9"
 protoc-bin-vendored = "3.3.0"
 
 [dev-dependencies]
+persistence = { path = "../persistence" }
+tempfile = "3"
 tokio.workspace = true
 tokio-stream = { version = "0.1.18", features = ["net"] }
 

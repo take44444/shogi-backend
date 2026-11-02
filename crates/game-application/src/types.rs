@@ -35,12 +35,36 @@ macro_rules! id {
 
 id!(GameId);
 id!(RequestId);
+id!(UserId);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct User {
+    pub id: UserId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Participants {
+    pub black: UserId,
+    pub white: UserId,
+}
+
+impl Participants {
+    pub fn side(&self, user: &UserId) -> Result<Player, ApplicationError> {
+        if user == &self.black {
+            Ok(Player::Black)
+        } else if user == &self.white {
+            Ok(Player::White)
+        } else {
+            Err(ApplicationError::NonParticipant)
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MakeMove {
     pub request_id: RequestId,
     pub expected_seq: u64,
-    pub player: Player,
+    pub user_id: UserId,
     pub movement: Move,
 }
 
@@ -48,7 +72,7 @@ pub struct MakeMove {
 pub struct Resign {
     pub request_id: RequestId,
     pub expected_seq: u64,
-    pub player: Player,
+    pub user_id: UserId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +85,7 @@ pub struct Acceptance {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     pub game_id: GameId,
+    pub participants: Participants,
     pub seq: u64,
     pub position: PositionView,
     pub turn: Player,
@@ -72,6 +97,10 @@ pub struct Snapshot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApplicationError {
     AlreadyExists,
+    UserNotFound,
+    NonParticipant,
+    InvalidParticipants,
+    Corrupt,
     NotFound,
     Unavailable,
     SequenceMismatch { expected: u64, actual: u64 },
@@ -83,10 +112,14 @@ pub enum ApplicationError {
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AlreadyExists => f.write_str("game already exists"),
+            Self::AlreadyExists => f.write_str("resource already exists"),
+            Self::UserNotFound => f.write_str("user not found"),
+            Self::NonParticipant => f.write_str("user is not a game participant"),
+            Self::InvalidParticipants => f.write_str("participants must be distinct existing users"),
+            Self::Corrupt => f.write_str("durable game history is corrupt"),
             Self::NotFound => f.write_str("game not found"),
             Self::Unavailable => {
-                f.write_str("game actor unavailable; an enqueued command may have executed")
+                f.write_str("storage or actor unavailable; retry the same request ID because the command may have committed")
             }
             Self::SequenceMismatch { expected, actual } => {
                 write!(f, "sequence mismatch: expected {expected}, actual {actual}")

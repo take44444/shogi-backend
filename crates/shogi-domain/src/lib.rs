@@ -9,6 +9,7 @@ pub use types::*;
 
 /// A standard shogi game. Only accepted moves and resignation mutate it.
 /// No clock, persistence, repetition, or declaration adjudication is performed.
+#[derive(Clone)]
 pub struct Game {
     rules: adapter::Rules,
     result: Option<GameResult>,

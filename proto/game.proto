@@ -2,26 +2,39 @@ syntax = "proto3";
 package shogi.v1;
 
 service GameService {
+  rpc CreateUser(CreateUserRequest) returns (User);
+  rpc GetUser(GetUserRequest) returns (User);
   rpc CreateGame(CreateGameRequest) returns (Snapshot);
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
   rpc MakeMove(MakeMoveRequest) returns (Acceptance);
   rpc Resign(ResignRequest) returns (Acceptance);
 }
 
-message CreateGameRequest { string game_id = 1; }
+message CreateUserRequest { string user_id = 1; }
+message GetUserRequest { string user_id = 1; }
+message User { string user_id = 1; }
+message CreateGameRequest {
+  string game_id = 1;
+  string black_user_id = 2;
+  string white_user_id = 3;
+}
 message GetSnapshotRequest { string game_id = 1; }
 message MakeMoveRequest {
   string game_id = 1;
   string request_id = 2;
   optional uint64 expected_seq = 3;
-  Player player = 4;
+  reserved 4;
+  reserved "player";
   string usi = 5;
+  string user_id = 6;
 }
 message ResignRequest {
   string game_id = 1;
   string request_id = 2;
   optional uint64 expected_seq = 3;
-  Player player = 4;
+  reserved 4;
+  reserved "player";
+  string user_id = 5;
 }
 message Acceptance {
   uint64 seq = 1;
@@ -37,6 +50,8 @@ message Snapshot {
   bool in_check = 6;
   GameResult result = 7;
   repeated string legal_moves = 8;
+  string black_user_id = 9;
+  string white_user_id = 10;
 }
 message BoardPiece {
   uint32 file = 1;

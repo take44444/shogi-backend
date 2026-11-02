@@ -1,5 +1,6 @@
 use game_application::{
-    ApplicationError as Error, GameId, GameService, MakeMove, RequestId, Resign,
+    ApplicationError as Error, GameId, GameService, MakeMove, Participants, RequestId, Resign,
+    UserId,
 };
 use shogi_domain::{CommandError, FinishReason, Player};
 use std::sync::Arc;
@@ -12,7 +13,7 @@ fn movement(request: &str, seq: u64, player: Player, usi: &str) -> MakeMove {
     MakeMove {
         request_id: RequestId::new(request).unwrap(),
         expected_seq: seq,
-        player,
+        user_id: user(player),
         movement: usi.parse().unwrap(),
     }
 }
@@ -20,7 +21,7 @@ fn resignation(request: &str, seq: u64, player: Player) -> Resign {
     Resign {
         request_id: RequestId::new(request).unwrap(),
         expected_seq: seq,
-        player,
+        user_id: user(player),
     }
 }
 
@@ -46,7 +47,7 @@ fn ids_validate_bytes_and_unicode_whitespace() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
-    let service = GameService::new();
+    let service = setup().await;
     let barrier = Arc::new(Barrier::new(24));
     let mut tasks = JoinSet::new();
     for _ in 0..24 {
@@ -54,7 +55,7 @@ async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
         let barrier = barrier.clone();
         tasks.spawn(async move {
             barrier.wait().await;
-            service.create(id("same")).await
+            service.create(id("same"), participants()).await
         });
     }
     let mut created = 0;
@@ -78,9 +79,9 @@ async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn competing_commands_at_one_sequence_accept_exactly_one() {
-    let service = GameService::new();
+    let service = setup().await;
     let game = id("race");
-    service.create(game.clone()).await.unwrap();
+    service.create(game.clone(), participants()).await.unwrap();
     let mut tasks = JoinSet::new();
     let barrier = Arc::new(Barrier::new(32));
     for index in 0..32 {
@@ -124,9 +125,9 @@ async fn competing_commands_at_one_sequence_accept_exactly_one() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_identical_retries_all_receive_original_acceptance() {
-    let service = GameService::new();
+    let service = setup().await;
     let game = id("retry");
-    service.create(game.clone()).await.unwrap();
+    service.create(game.clone(), participants()).await.unwrap();
     let command = movement("same-request", 0, Player::Black, "7g7f");
     let mut tasks = JoinSet::new();
     let barrier = Arc::new(Barrier::new(32));
@@ -152,9 +153,9 @@ async fn concurrent_identical_retries_all_receive_original_acceptance() {
 
 #[tokio::test]
 async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
-    let service = GameService::new();
+    let service = setup().await;
     let game = id("rejection");
-    let before = service.create(game.clone()).await.unwrap();
+    let before = service.create(game.clone(), participants()).await.unwrap();
     for (command, expected) in [
         (
             movement("correct-me", 2, Player::Black, "7g7f"),
@@ -202,9 +203,9 @@ async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
 
 #[tokio::test]
 async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
-    let service = GameService::new();
+    let service = setup().await;
     let game = id("ledger");
-    service.create(game.clone()).await.unwrap();
+    service.create(game.clone(), participants()).await.unwrap();
     let first = movement("first", 0, Player::Black, "7g7f");
     let receipt = service.make_move(&game, first.clone()).await.unwrap();
     service
@@ -250,12 +251,12 @@ async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
 
 #[tokio::test]
 async fn games_and_independent_services_have_separate_id_namespaces() {
-    let service = GameService::new();
-    let other = GameService::new();
+    let service = setup().await;
+    let other = setup().await;
     let (a, b) = (id("a"), id("b"));
-    let initial_a = service.create(a.clone()).await.unwrap();
-    let initial_b = service.create(b.clone()).await.unwrap();
-    other.create(a.clone()).await.unwrap();
+    let initial_a = service.create(a.clone(), participants()).await.unwrap();
+    let initial_b = service.create(b.clone(), participants()).await.unwrap();
+    other.create(a.clone(), participants()).await.unwrap();
     service
         .make_move(&a, movement("shared", 0, Player::Black, "7g7f"))
         .await
@@ -280,4 +281,29 @@ async fn games_and_independent_services_have_separate_id_namespaces() {
             .await,
         Err(Error::NotFound)
     );
+}
+
+fn user(side: Player) -> UserId {
+    UserId::new(match side {
+        Player::Black => "black",
+        Player::White => "white",
+    })
+    .unwrap()
+}
+fn participants() -> Participants {
+    Participants {
+        black: user(Player::Black),
+        white: user(Player::White),
+    }
+}
+async fn setup() -> GameService {
+    let store = Arc::new(
+        persistence::SeaOrmStore::connect("sqlite::memory:")
+            .await
+            .unwrap(),
+    );
+    let service = GameService::new(store);
+    service.create_user(user(Player::Black)).await.unwrap();
+    service.create_user(user(Player::White)).await.unwrap();
+    service
 }

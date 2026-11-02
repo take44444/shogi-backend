@@ -1,28 +1,49 @@
-# rpc
+# RPC reference
 
-The `shogi.v1.GameService` gRPC adapter exposes `CreateGame`, `GetSnapshot`,
-`MakeMove`, and `Resign`. Generated clients and messages are public in `rpc::proto`.
-`GameRpc::new(GameService)` adapts the application service without owning rules.
-The source schema is [`proto/game.proto`](../../proto/game.proto).
+The generated `shogi.v1.GameService` API uses plaintext gRPC. The schema is
+[`proto/game.proto`](../../proto/game.proto). Vendored protoc builds Rust clients
+and servers. `GameRpc::new(GameService)` exposes the application service.
 
-Snapshots contain occupied squares with absolute files and ranks from 1 through 9,
-all seven hand-piece counts for both players including zero counts, and legal
-moves in USI notation. Mutations return only `Acceptance`; query `GetSnapshot`
-for the current board. `expected_seq` is required and zero is valid. Unspecified
-and unknown player enums are rejected. Player identity is supplied by the caller.
+| Method | Required request fields | Response |
+|---|---|---|
+| `CreateUser` | `user_id` | `User { user_id }` |
+| `GetUser` | `user_id` | `User { user_id }` |
+| `CreateGame` | `game_id`, `black_user_id`, `white_user_id` | `Snapshot` |
+| `GetSnapshot` | `game_id` | `Snapshot` |
+| `MakeMove` | `game_id`, `request_id`, `expected_seq`, `user_id`, `usi` | `Acceptance` |
+| `Resign` | `game_id`, `request_id`, `expected_seq`, `user_id` | `Acceptance` |
 
-| Condition | gRPC code |
-| --- | --- |
-| Invalid ID, USI syntax, missing sequence, unknown or unspecified player | `InvalidArgument` |
-| Missing game | `NotFound` |
-| Duplicate game or conflicting accepted request ID | `AlreadyExists` |
-| Sequence mismatch | `Aborted` |
-| Wrong turn, illegal move, finished game | `FailedPrecondition` |
-| Rules failure or sequence exhaustion | `Internal` |
-| Lost actor or mailbox | `Unavailable` |
+IDs contain 1 through 128 bytes without whitespace. `expected_seq` is protobuf
+optional solely to distinguish omission from valid zero. Both mutation methods
+reject an omitted sequence. `MakeMove` accepts strict USI move notation.
+User IDs are supplied claims; there is no authentication in this API.
 
-`Aborted` includes the current sequence as decimal `actual-seq` response metadata.
-Retry semantics and lifecycle are documented in
-[`game-application`](../game-application/README.md). The build uses vendored protoc
-through `tonic_prost_build::Config::protoc_executable` and requires no global
-protoc installation or environment mutation.
+Mutation input field 4 and the name `player` are reserved. `MakeMove.user_id` is
+field 6 and `Resign.user_id` is field 5. Clients choose a bound user, and the server
+derives the side. The `Player` enum remains in outputs. Snapshot fields 9 and 10
+are `black_user_id` and `white_user_id`. Existing output field numbers are retained.
+
+`Snapshot` contains an occupied-square board, all fourteen hand counts, turn,
+check, optional result, legal USI moves, participant IDs, and sequence.
+Finished snapshots retain the position and turn with no legal moves.
+`Acceptance` contains the accepted sequence, check, and optional result.
+Exact retries return the original acceptance, including after restart or finish.
+
+| Application outcome | gRPC code |
+|---|---|
+| Malformed ID, move, missing sequence, or equal participants | `InvalidArgument` |
+| Unknown user or game | `NotFound` |
+| User is not a participant | `PermissionDenied` |
+| Duplicate user or game, or conflicting accepted request ID | `AlreadyExists` |
+| Stale sequence | `Aborted`, with `actual-seq` metadata |
+| Wrong turn, illegal move, or finished game | `FailedPrecondition` |
+| Storage failure or uncertain outcome | `Unavailable` |
+| Corrupt durable history or incompatible schema | `DataLoss` |
+| Rules implementation failure or sequence exhaustion | `Internal` |
+
+After `Unavailable` or a lost response, retry the same request ID with identical
+contents. Cancellation after enqueue does not cancel a durable command.
+
+The `play` example verifies a complete game. `persistence_proof` has separate
+`seed`, `resume`, and `finished` invocations for restart testing with protobuf
+artifacts. The [root README](../../README.md) contains runnable commands.

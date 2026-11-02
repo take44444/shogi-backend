@@ -5,6 +5,7 @@ use rsshogi::{
     types::{Color, HandPiece as RulesHandPiece, Move32, PieceType, Square as RulesSquare},
 };
 
+#[derive(Clone)]
 pub(crate) struct Rules {
     position: Position,
 }

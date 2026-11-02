@@ -3,23 +3,16 @@ use game_application::{Acceptance, ApplicationError, Snapshot};
 use shogi_domain::{CommandError, FinishReason, GameResult, HandPiece, PieceKind, Player, Square};
 use tonic::Status;
 
-pub(crate) fn player(value: i32) -> Result<Player, Status> {
-    match proto::Player::try_from(value) {
-        Ok(proto::Player::Black) => Ok(Player::Black),
-        Ok(proto::Player::White) => Ok(Player::White),
-        _ => Err(Status::invalid_argument(
-            "player must be PLAYER_BLACK or PLAYER_WHITE",
-        )),
-    }
-}
-
 pub(crate) fn application_status(error: ApplicationError) -> Status {
     let message = error.to_string();
     match error {
         ApplicationError::AlreadyExists | ApplicationError::RequestConflict => {
             Status::already_exists(message)
         }
-        ApplicationError::NotFound => Status::not_found(message),
+        ApplicationError::NonParticipant => Status::permission_denied(message),
+        ApplicationError::InvalidParticipants => Status::invalid_argument(message),
+        ApplicationError::Corrupt => Status::data_loss(message),
+        ApplicationError::NotFound | ApplicationError::UserNotFound => Status::not_found(message),
         ApplicationError::Unavailable => Status::unavailable(message),
         ApplicationError::SequenceMismatch { actual, .. } => {
             let mut status = Status::aborted(message);
@@ -129,6 +122,8 @@ impl From<Snapshot> for proto::Snapshot {
             .collect();
         Self {
             game_id: value.game_id.as_str().to_owned(),
+            black_user_id: value.participants.black.as_str().to_owned(),
+            white_user_id: value.participants.white.as_str().to_owned(),
             seq: value.seq,
             board,
             hands,

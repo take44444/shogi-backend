@@ -16,9 +16,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     });
     let mut client = GameServiceClient::connect(endpoint).await?;
+    let black = format!("{game_id}-black");
+    let white = format!("{game_id}-white");
+    for user_id in [&black, &white] {
+        client
+            .create_user(proto::CreateUserRequest {
+                user_id: user_id.clone(),
+            })
+            .await?;
+    }
     let mut snapshot = client
         .create_game(proto::CreateGameRequest {
             game_id: game_id.clone(),
+            black_user_id: black.clone(),
+            white_user_id: white.clone(),
         })
         .await?
         .into_inner();
@@ -39,7 +50,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             game_id: game_id.clone(),
             request_id: format!("move-{index}"),
             expected_seq: Some(snapshot.seq),
-            player: snapshot.turn,
+            user_id: if snapshot.turn == proto::Player::Black as i32 {
+                black.clone()
+            } else {
+                white.clone()
+            },
             usi: usi.to_owned(),
         };
         let receipt = client.make_move(command.clone()).await?.into_inner();
@@ -98,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         game_id: game_id.clone(),
         request_id: "resign".into(),
         expected_seq: Some(snapshot.seq),
-        player: proto::Player::White as i32,
+        user_id: white,
     };
     let receipt = client.resign(resign.clone()).await?.into_inner();
     assert_eq!(receipt.seq, 6);
