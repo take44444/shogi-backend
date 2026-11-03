@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+user-id = { path = "../user-id" }
 shogi-domain = { path = "../shogi-domain" }
 tokio.workspace = true
 async-trait = "0.1"

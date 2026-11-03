@@ -302,9 +302,5 @@ async fn setup() -> GameService {
             .await
             .unwrap(),
     );
-    let users = game_application::UserService::new(store.clone());
-    let service = GameService::new(store);
-    users.create_user(user(Player::Black)).await.unwrap();
-    users.create_user(user(Player::White)).await.unwrap();
-    service
+    GameService::new(store)
 }

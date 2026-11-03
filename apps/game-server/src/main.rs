@@ -1,6 +1,6 @@
 //! Composes SQLite persistence, the application services, and a plaintext gRPC listener.
 
-use game_application::{GameService, UserService};
+use game_application::GameService;
 use persistence::SeaOrmStore;
 use rpc::{GameRpc, proto::game_service_server::GameServiceServer};
 use std::{path::Path, sync::Arc};
@@ -25,12 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let store = Arc::new(SeaOrmStore::connect(&url).await?);
+    let service = GameRpc::new(GameService::new(store));
     eprintln!("game-server listening on {address}");
     tonic::transport::Server::builder()
-        .add_service(GameServiceServer::new(GameRpc::new(
-            UserService::new(store.clone()),
-            GameService::new(store),
-        )))
+        .add_service(GameServiceServer::new(service))
         .serve_with_shutdown(address, async {
             if let Err(error) = tokio::signal::ctrl_c().await {
                 eprintln!("could not listen for Ctrl-C: {error}");

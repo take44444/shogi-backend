@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use shogi_domain::{GameResult, Move};
 
 use crate::{
-    Acceptance, ApplicationError, GameId, Participants, RequestId, StagedGameChange, User, UserId,
+    Acceptance, ApplicationError, GameId, Participants, RequestId, StagedGameChange, UserId,
 };
 
 /// The typed action stored for exact retry matching and journal replay.
@@ -63,8 +63,7 @@ pub struct GameRecord {
 /// stored position strings. Repository implementations still enforce storage constraints
 /// and membership independently of the actor cache.
 ///
-/// A game repository cannot register users, even when its adapter also implements
-/// [`UserRepository`].
+/// A game repository accepts user IDs from its caller and does not manage accounts.
 ///
 /// ```compile_fail,E0599
 /// use game_application::{GameRepository, UserId};
@@ -75,14 +74,12 @@ pub struct GameRecord {
 /// ```
 #[async_trait]
 pub trait GameRepository: Send + Sync {
-    /// Atomically creates version-zero metadata with two distinct existing users.
-    /// Checks participant existence in the same transaction as game insertion.
+    /// Atomically creates version-zero metadata with two distinct user IDs.
     /// Participant bindings cannot subsequently change.
     ///
     /// # Errors
     ///
     /// Returns [`ApplicationError::InvalidParticipants`] for equal users,
-    /// [`ApplicationError::UserNotFound`] for missing users,
     /// [`ApplicationError::AlreadyExists`] for a duplicate game, or
     /// [`ApplicationError::Unavailable`] for a storage failure.
     async fn create_game(
@@ -126,24 +123,4 @@ pub trait GameRepository: Send + Sync {
     /// [`ApplicationError::Unavailable`] for storage failures, including constraint
     /// or uncertain commit failures. An error does not prove rollback.
     async fn commit_change(&self, change: &StagedGameChange) -> Result<(), ApplicationError>;
-}
-
-/// Durable user registration and lookup required by [`crate::UserService`].
-/// Implementors preserve unique user IDs and never overwrite an existing user.
-#[async_trait]
-pub trait UserRepository: Send + Sync {
-    /// Inserts a user without overwriting an existing user.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate ID, or
-    /// [`ApplicationError::Unavailable`] on a storage failure.
-    async fn create_user(&self, id: UserId) -> Result<User, ApplicationError>;
-    /// Reads a registered user.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::UserNotFound`] for an unknown user, or
-    /// [`ApplicationError::Unavailable`] on a storage failure.
-    async fn get_user(&self, id: &UserId) -> Result<User, ApplicationError>;
 }

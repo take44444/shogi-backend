@@ -1,4 +1,4 @@
-//! SQLite persistence for [`UserRepository`] and [`GameRepository`] through SeaORM.
+//! SQLite persistence for [`GameRepository`] through SeaORM.
 //!
 //! [`SeaOrmStore::connect`] opens a pool and migrates or validates the schema before
 //! returning. SQLite is the only compiled and tested driver. Other adapters or
@@ -19,19 +19,16 @@
 //! are outside the mutation API.
 //!
 //! ```
-//! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId, UserService};
+//! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId};
 //! use persistence::SeaOrmStore;
 //! use std::sync::Arc;
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await?);
-//! let users = UserService::new(store.clone());
 //! let service = GameService::new(store.clone());
 //! let black = UserId::new("black")?;
 //! let white = UserId::new("white")?;
-//! users.create_user(black.clone()).await?;
-//! users.create_user(white.clone()).await?;
 //! let id = GameId::new("example")?;
 //! assert_eq!(service.create(id.clone(), Participants { black: black.clone(), white }).await?.seq, 0);
 //! let command = MakeMove {
@@ -55,7 +52,7 @@ pub use outbox::{OutboxOpenError, SqliteCursor, SqliteOutbox};
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository,
-    Participants, Receipt, RequestId, StagedGameChange, User, UserId, UserRepository,
+    Participants, Receipt, RequestId, StagedGameChange, UserId,
 };
 use schema::a;
 use sea_orm::sea_query::{Expr, ExprTrait, JoinType, Order, Query, Value};
@@ -66,8 +63,7 @@ use sea_orm::{
 use shogi_domain::{FinishReason, GameResult, Player};
 use std::time::Duration;
 
-/// A migrated SQLite connection pool implementing [`UserRepository`] and [`GameRepository`].
-/// Clone one concrete `Arc<SeaOrmStore>` into both services to share the exact same pool.
+/// A migrated SQLite connection pool implementing [`GameRepository`].
 pub struct SeaOrmStore {
     db: DatabaseConnection,
 }
@@ -169,46 +165,6 @@ fn result(row: &QueryResult, prefix: &str) -> Result<Option<GameResult>, Error> 
 }
 
 #[async_trait]
-impl UserRepository for SeaOrmStore {
-    async fn create_user(&self, id: UserId) -> Result<User, Error> {
-        match self
-            .db
-            .execute(
-                Query::insert()
-                    .into_table(a("users"))
-                    .columns([a("id")])
-                    .values_panic([id.as_str().into()]),
-            )
-            .await
-        {
-            Ok(_) => Ok(User { id }),
-            Err(error)
-                if error.sql_err().is_some_and(|e| {
-                    matches!(e, sea_orm::SqlErr::UniqueConstraintViolation(_))
-                }) =>
-            {
-                Err(Error::AlreadyExists)
-            }
-            Err(error) => Err(storage(error)),
-        }
-    }
-
-    async fn get_user(&self, id: &UserId) -> Result<User, Error> {
-        self.db
-            .query_one(
-                Query::select()
-                    .column(a("id"))
-                    .from(a("users"))
-                    .and_where(Expr::col(a("id")).eq(id.as_str())),
-            )
-            .await
-            .map_err(storage)?
-            .ok_or(Error::UserNotFound)?;
-        Ok(User { id: id.clone() })
-    }
-}
-
-#[async_trait]
 impl GameRepository for SeaOrmStore {
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
         if participants.black == participants.white {
@@ -222,21 +178,6 @@ impl GameRepository for SeaOrmStore {
             })
             .await
             .map_err(storage)?;
-        for user in [&participants.black, &participants.white] {
-            if tx
-                .query_one(
-                    Query::select()
-                        .column(a("id"))
-                        .from(a("users"))
-                        .and_where(Expr::col(a("id")).eq(user.as_str())),
-                )
-                .await
-                .map_err(storage)?
-                .is_none()
-            {
-                return Err(Error::UserNotFound);
-            }
-        }
         let inserted = tx
             .execute(
                 Query::insert()

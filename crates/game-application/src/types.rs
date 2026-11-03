@@ -4,16 +4,7 @@ use std::{error::Error, fmt};
 
 use shogi_domain::{CommandError, GameResult, Move, Player, PositionView};
 
-/// An ID is empty, exceeds 128 UTF-8 bytes, or contains Unicode whitespace.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InvalidId;
-
-impl fmt::Display for InvalidId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ID must contain 1..=128 bytes and no whitespace")
-    }
-}
-impl Error for InvalidId {}
+pub use user_id::{InvalidId, UserId};
 
 macro_rules! id {
     ($(#[$meta:meta])* $name:ident) => {
@@ -53,20 +44,7 @@ id!(
     /// Contains 1 through 128 UTF-8 bytes and no Unicode whitespace.
     RequestId
 );
-id!(
-    /// An internal user identifier, not an authentication credential.
-    /// Contains 1 through 128 UTF-8 bytes and no Unicode whitespace.
-    UserId
-);
-
-/// A registered internal user. Registration does not establish identity.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct User {
-    /// The registered user ID.
-    pub id: UserId,
-}
-
-/// Permanent side bindings. Game creation requires distinct existing users.
+/// Permanent side bindings. Game creation requires distinct user IDs.
 /// Constructing this value alone does not validate those requirements.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Participants {
@@ -152,10 +130,8 @@ pub struct Snapshot {
 /// A command, lookup, restoration, or durability failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApplicationError {
-    /// A user or game with this ID already exists.
+    /// A game with this ID already exists.
     AlreadyExists,
-    /// A required user does not exist.
-    UserNotFound,
     /// The supplied user is not bound to either side.
     NonParticipant,
     /// The two participant IDs are equal.
@@ -188,9 +164,8 @@ impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AlreadyExists => f.write_str("resource already exists"),
-            Self::UserNotFound => f.write_str("user not found"),
             Self::NonParticipant => f.write_str("user is not a game participant"),
-            Self::InvalidParticipants => f.write_str("participants must be distinct existing users"),
+            Self::InvalidParticipants => f.write_str("participants must be distinct user IDs"),
             Self::Corrupt => f.write_str("durable game history is corrupt"),
             Self::NotFound => f.write_str("game not found"),
             Self::Unavailable => {

@@ -1,17 +1,14 @@
 # game-application
 
-`UserService::new(Arc<dyn UserRepository>)` owns user use cases.
 `GameService::new(Arc<dyn GameRepository>)` owns game use cases and actors.
-Actors receive only `GameRepository`, so they cannot call user operations.
 The application and domain contain no SQL or ORM types. Production composition
-injects the same `Arc<persistence::SeaOrmStore>` through the two repository traits,
-sharing one connection pool. There is no default in-memory store.
+injects `Arc<persistence::SeaOrmStore>`. There is no default in-memory store.
 
-`UserService::create_user(UserId)` returns `User { id }`; a duplicate ID returns `AlreadyExists`.
-`UserService::get_user(&UserId)` returns `UserNotFound` for an unknown user.
-`GameService::create(GameId, Participants { black, white })` binds two distinct existing users
-permanently to the game's sides. Equal users return `InvalidParticipants` and
-missing users return `UserNotFound`. A duplicate game returns `AlreadyExists`.
+`GameService::create(GameId, Participants { black, white })` binds two distinct user IDs
+permanently to the game's sides. Equal IDs return `InvalidParticipants`.
+A duplicate game returns `AlreadyExists`. The shared `user-id` crate owns `UserId`.
+The game service trusts caller-supplied IDs and never queries an account database.
+User management and authentication belong to a separate HTTP service.
 
 `snapshot` returns the participants, sequence, owned position, legal moves,
 turn, check, and result. An uncached game loads from durable storage.

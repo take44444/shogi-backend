@@ -1,0 +1,13 @@
+[package]
+name = "user-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+[dependencies]
+user-application = { path = "../../crates/user-application" }
+user-persistence = { path = "../../crates/user-persistence" }
+user-http = { path = "../../crates/user-http" }
+tokio.workspace = true
+axum = "0.8"
+[lints]
+workspace = true

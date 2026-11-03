@@ -3,3 +3,5 @@ target
 .audit
 data
 **/target
+.env
+.env.*

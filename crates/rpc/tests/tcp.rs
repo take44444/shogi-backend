@@ -1,4 +1,4 @@
-use game_application::{GameService, UserId, UserService};
+use game_application::GameService;
 use persistence::SeaOrmStore;
 use rpc::{
     GameRpc,
@@ -23,21 +23,17 @@ struct TestServer {
 impl TestServer {
     async fn start() -> Self {
         let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await.unwrap());
-        let users = UserService::new(store.clone());
         let games = GameService::new(store);
-        for name in ["black", "white"] {
-            users.create_user(UserId::new(name).unwrap()).await.unwrap();
-        }
-        Self::start_service(users, games).await
+        Self::start_service(games).await
     }
 
-    async fn start_service(users: UserService, games: GameService) -> Self {
+    async fn start_service(games: GameService) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (stop, stopped) = oneshot::channel();
         let task = tokio::spawn(
             Server::builder()
-                .add_service(GameServiceServer::new(GameRpc::new(users, games)))
+                .add_service(GameServiceServer::new(GameRpc::new(games)))
                 .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
                     let _ = stopped.await;
                 }),
@@ -479,66 +475,19 @@ async fn independent_tcp_clients_serialize_competing_commands_and_retry_identica
 }
 
 #[tokio::test]
-async fn users_bindings_and_permission_statuses_are_enforced_at_the_wire() {
+async fn id_bindings_and_permission_statuses_are_enforced_at_the_wire() {
     let server = TestServer::start().await;
     let mut client = server.client().await;
-    assert_eq!(
-        client
-            .create_user(proto::CreateUserRequest { user_id: "".into() })
-            .await
-            .unwrap_err()
-            .code(),
-        Code::InvalidArgument
-    );
-    assert_eq!(
-        client
-            .get_user(proto::GetUserRequest {
-                user_id: "absent".into()
-            })
-            .await
-            .unwrap_err()
-            .code(),
-        Code::NotFound
-    );
-    assert_eq!(
-        client
-            .create_user(proto::CreateUserRequest {
-                user_id: "black".into()
-            })
-            .await
-            .unwrap_err()
-            .code(),
-        Code::AlreadyExists
-    );
-    assert_eq!(
-        client
-            .create_user(proto::CreateUserRequest {
-                user_id: "outsider".into()
-            })
-            .await
-            .unwrap()
-            .into_inner()
-            .user_id,
-        "outsider"
-    );
-    assert_eq!(
-        client
-            .get_user(proto::GetUserRequest {
-                user_id: "outsider".into()
-            })
-            .await
-            .unwrap()
-            .into_inner()
-            .user_id,
-        "outsider"
-    );
-    for (white, expected) in [("black", Code::InvalidArgument), ("absent", Code::NotFound)] {
+    for (white, expected) in [
+        ("black", Code::InvalidArgument),
+        ("", Code::InvalidArgument),
+    ] {
         assert_eq!(
             client
                 .create_game(proto::CreateGameRequest {
                     game_id: "binding".into(),
                     black_user_id: "black".into(),
-                    white_user_id: white.into()
+                    white_user_id: white.into(),
                 })
                 .await
                 .unwrap_err()
@@ -546,6 +495,17 @@ async fn users_bindings_and_permission_statuses_are_enforced_at_the_wire() {
             expected
         );
     }
+    let independent = client
+        .create_game(proto::CreateGameRequest {
+            game_id: "independent".into(),
+            black_user_id: "new-black".into(),
+            white_user_id: "new-white".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(independent.black_user_id, "new-black");
+    assert_eq!(independent.white_user_id, "new-white");
     let initial = create(&mut client, "binding").await;
     assert_eq!(initial.black_user_id, "black");
     assert_eq!(initial.white_user_id, "white");
@@ -572,20 +532,8 @@ async fn generated_tcp_client_restores_file_database_across_two_server_restarts(
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite://{}?mode=rwc", dir.path().join("tcp.db").display());
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(
-        UserService::new(store.clone()),
-        GameService::new(store.clone()),
-    )
-    .await;
+    let server = TestServer::start_service(GameService::new(store.clone())).await;
     let mut client = server.client().await;
-    for name in ["black", "white"] {
-        client
-            .create_user(proto::CreateUserRequest {
-                user_id: name.into(),
-            })
-            .await
-            .unwrap();
-    }
     create(&mut client, "restart").await;
     let first = command("restart", "first", 0, proto::Player::Black, "7g7f");
     let original = client.make_move(first.clone()).await.unwrap().into_inner();
@@ -594,27 +542,12 @@ async fn generated_tcp_client_restores_file_database_across_two_server_restarts(
     server.shutdown().await;
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(
-        UserService::new(store.clone()),
-        GameService::new(store.clone()),
-    )
-    .await;
+    let server = TestServer::start_service(GameService::new(store.clone())).await;
     let mut client = server.client().await;
     assert_eq!(snapshot(&mut client, "restart").await, ongoing);
     assert_eq!(
         client.make_move(first.clone()).await.unwrap().into_inner(),
         original
-    );
-    assert_eq!(
-        client
-            .get_user(proto::GetUserRequest {
-                user_id: "black".into()
-            })
-            .await
-            .unwrap()
-            .into_inner()
-            .user_id,
-        "black"
     );
     client
         .make_move(command("restart", "white", 1, proto::Player::White, "3c3d"))
@@ -627,8 +560,7 @@ async fn generated_tcp_client_restores_file_database_across_two_server_restarts(
     server.shutdown().await;
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server =
-        TestServer::start_service(UserService::new(store.clone()), GameService::new(store)).await;
+    let server = TestServer::start_service(GameService::new(store)).await;
     let mut client = server.client().await;
     assert_eq!(snapshot(&mut client, "restart").await, finished);
     assert_eq!(
