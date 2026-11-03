@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use game_application::{
     ApplicationError as Error, DomainEvent, GameId, GameRecord, GameRepository, GameService,
-    MakeMove, OutboxRepository, Participants, Receipt, RequestId, Resign, UserId, UserService,
+    MakeMove, OutboxRepository, Participants, RequestId, Resign, StagedGameChange, UserId,
+    UserService,
 };
 use persistence::{SeaOrmStore, SqliteOutbox};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
@@ -200,13 +201,13 @@ impl GameRepository for Uncertain {
     async fn version(&self, id: &GameId) -> Result<u64, Error> {
         self.0.version(id).await
     }
-    async fn append(&self, id: &GameId, r: &Receipt) -> Result<(), Error> {
-        self.0.append(id, r).await?;
+    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {
+        self.0.commit_change(change).await?;
         Err(Error::Unavailable)
     }
 }
 #[tokio::test]
-async fn uncertain_append_and_retry_enqueue_once() {
+async fn uncertain_commit_and_retry_enqueue_once() {
     let dir = tempfile::tempdir().unwrap();
     let url = url(&dir);
     let (store, _, raw) = setup(&url).await;

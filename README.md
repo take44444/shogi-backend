@@ -61,8 +61,9 @@ Stop and restart the local server between phases with the same `DATABASE_URL`.
 
 ## Publish committed game events
 
-The game server commits game metadata, the accepted command receipt, and its
-events in one SQLite transaction. A move produces `MoveCommitted`; resignation
+The game actor generates and freezes events in a `StagedGameChange` before
+calling the repository. The repository commits game metadata, the supplied receipt,
+and those events in one SQLite transaction. A move produces `MoveCommitted`; resignation
 produces `GameFinished`. A mating move produces both at the same sequence.
 Exact command retries return their original acceptance without adding events.
 The game server accepts commands while the publisher or broker is unavailable.

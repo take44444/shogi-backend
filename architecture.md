@@ -16,7 +16,7 @@
 | 実装単位 | 現在の責務 |
 |---|---|
 | `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
-| `game-application` | ユーザー・対局操作、Actor、受理記録からのDomain Event導出、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
+| `game-application` | ユーザー・対局操作、Actor、保存前のDomain Event生成・固定、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
 | `persistence` | SeaORMによるRepository、共有接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
 | `messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
 | `rpc` / `game-server` | gRPCでユーザー作成・取得、対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
@@ -276,14 +276,14 @@ sequenceDiagram
 - `mpsc`への投入成功は処理成功を意味しない。投入後に呼出元がキャンセルされても処理は続き、送信側がすべて閉じた後も投入済み要求を処理して終了する。
 - 変更要求は参加者、`expected_seq`、`request_id`、対局ルールを検証する。受理済み要求の同一内容での再送には元の応答を返し、同じ`request_id`で内容が異なる要求は拒否する。
 - 成功応答は永続化の確定を根拠とする。応答喪失や保存結果が不明な場合は、元の`expected_seq`を含む同一内容・同一`request_id`で再送する。確定・復旧の方針は0.2節に示す。
-- `Receipt::events`が受理記録からDomain Eventを導出する。着手は`MoveCommitted`、投了は`GameFinished`、詰みの着手はその順で両方を生成する。対局作成・拒否・受理済み要求の再送・履歴復元では新しいイベントを生成しない。
-- `GameRepository::append`は変更・受理記録・イベントを同じDBトランザクションで保存する。ActorからNATSへ直接送信しない。応答とイベントの到着順・到着可否は独立とする。`CheckTimeout`と`Ready`は未実装である。
+- Actorが`StagedGameChange::new(game_id, receipt)`を呼び、保存前に受理記録からDomain Eventを生成・固定する。着手は`MoveCommitted`、投了は`GameFinished`、詰みの着手はその順で両方を生成する。対局作成・拒否・受理済み要求の再送・履歴復元では新しいイベントを生成しない。
+- `GameRepository::commit_change(&change)`は渡された受理記録・生成済みイベントとメタデータを同じDBトランザクションで保存し、イベントを生成しない。ActorからNATSへ直接送信しない。応答とイベントの到着順・到着可否は独立とする。`CheckTimeout`と`Ready`は未実装である。
 
 実装の定義は[Actor](crates/game-application/src/actor.rs)、[要求・応答型](crates/game-application/src/types.rs)、[gRPC定義](proto/game.proto)を参照する。
 
 ### 6.3 現行Outbox Publisherの契約
 
-- `game-application`が型付きイベントと配信ユースケース・Traitを所有する。`persistence`がイベント内容の固定、原子的保存、未配信行の取得、配信済み記録を担う。`messaging`がCore NATSのSubject・JSON変換と送信を担い、`outbox-publisher`が独立プロセスとして組み立てる。
+- `game-application`が保存前のイベント生成・内容の固定、型付きイベント、配信ユースケース・Traitを所有する。`persistence`が渡された受理記録・イベントの原子的保存、未配信行の取得、配信済み記録を担う。`messaging`がCore NATSのSubject・JSON変換と送信を担い、`outbox-publisher`が独立プロセスとして組み立てる。
 - イベント識別子は`(game_id, seq, event_kind)`である。詰みの着手では同じ`seq`の2イベントを種別で区別する。ペイロードには元の`request_id`と`user_id`も保持する。
 - Publisherは未配信行を挿入順に1件ずつ処理する。イベントのSubjectを購読してから送信し、同じ接続で同一ペイロードのechoを確認して、その行だけを配信済みとする。このためイベントSubjectへのPublishとSubscribeの権限が必要である。ソケットのflushだけをサーバー処理の確認に使わない。接続を自動で張り直さず、失敗時はプロセスを終了し、Composeの再起動で未配信行から再開する。送信成功後の記録失敗などでは同じ識別子を再送し得る。
 - SQLite版はLinuxのローカルファイルシステム上で単一Publisherを使う。`SqliteOutbox`が実DBファイルのOSロックを保持して二重起動を拒否する。配信待ちの間にDBトランザクションを保持せず、ShardやLeaseを導入しない。終了時は通信処理を停止してからロックを解放する。

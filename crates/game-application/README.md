@@ -39,10 +39,12 @@ ordered journal from `Game::new()` and validates contiguous sequence numbers,
 request uniqueness, participant binding, legality, every receipt, and final
 metadata. Invalid history returns `Corrupt`.
 
-A command stages a cloned `Game` and one accepted receipt. `GameRepository::append`
-atomically compares the version, advances metadata, and writes the receipt and
-its canonical domain events to the outbox.
-The actor publishes the candidate only after a confirmed commit. A failed append
+A command stages a cloned `Game` and one accepted receipt. The actor constructs
+`StagedGameChange::new(game_id, receipt)` to generate and freeze its canonical
+domain events before calling `GameRepository::commit_change(&change)`. The repository
+atomically compares the version, advances metadata, and writes the supplied receipt
+and events to the outbox. It does not generate events.
+The actor publishes the candidate only after a confirmed commit. A failed commit
 reloads durable history. A matching receipt returns its durable acceptance;
 changed contents return `RequestConflict`. A competing version returns
 `SequenceMismatch`. An uncertain result with no receipt returns `Unavailable`,
@@ -55,7 +57,9 @@ contents with the same request ID. Do not assign a new ID to an uncertain retry.
 Dropping the last service closes its senders. Actors drain queued commands and
 exit. Finished games remain queryable and replayable across process restarts.
 
-`Receipt::events` derives `CommittedEvent` values from the accepted command.
+`StagedGameChange` privately binds the game ID, receipt, and generated
+`CommittedEvent` values. Its constructor checks sequence bounds, continuity, and
+action/result consistency. Its accessors expose shared references only.
 Each move produces `MoveCommitted` with its move, check status, and optional
 terminal result. Resignation produces `GameFinished`. A mating move produces
 both events, in that order. The identity is `(game_id, seq, event kind)`, so

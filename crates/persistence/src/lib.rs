@@ -7,11 +7,11 @@
 //! Each connection enables foreign keys, full synchronization, and a five-second
 //! busy timeout. File databases use WAL; in-memory databases use memory journaling.
 //! In-memory databases use one pooled connection; file databases use
-//! up to five. Creation and append use immediate SQLite transactions. Append compares
-//! the version and writes metadata, the receipt, and its frozen canonical events
-//! atomically, checking membership
-//! before commit. Failed append statements explicitly roll back. Commit errors can be
-//! uncertain; the application reconciles every append error through a fresh load.
+//! up to five. Creation and `commit_change` use immediate SQLite transactions. The latter compares
+//! the version and writes metadata, the supplied receipt, and its already generated
+//! events atomically, checking membership
+//! before commit. Failed writes explicitly roll back. Commit errors can be
+//! uncertain; the application reconciles every commit error through a fresh load.
 //!
 //! Metadata and ordered receipts load through one left join, so a read cannot combine
 //! different database snapshots. The application validates replay from a standard
@@ -55,7 +55,7 @@ pub use outbox::{OutboxOpenError, SqliteCursor, SqliteOutbox};
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository,
-    Participants, Receipt, RequestId, User, UserId, UserRepository,
+    Participants, Receipt, RequestId, StagedGameChange, User, UserId, UserRepository,
 };
 use schema::a;
 use sea_orm::sea_query::{Expr, ExprTrait, JoinType, Order, Query, Value};
@@ -353,16 +353,11 @@ impl GameRepository for SeaOrmStore {
         Ok(record)
     }
 
-    async fn append(&self, id: &GameId, receipt: &Receipt) -> Result<(), Error> {
+    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {
+        let id = change.game_id();
+        let receipt = change.receipt();
         let expected = signed(receipt.expected_seq)?;
         let seq = signed(receipt.acceptance.seq)?;
-        if expected == i64::MAX {
-            return Err(Error::SequenceExhausted);
-        }
-        if seq != expected + 1 {
-            return Err(Error::Corrupt);
-        }
-        let events = receipt.events(id)?;
         let tx = self
             .db
             .begin_with_options(TransactionOptions {
@@ -452,7 +447,7 @@ impl GameRepository for SeaOrmStore {
             )
             .await
             .map_err(storage)?;
-            for event in &events {
+            for event in change.events() {
                 outbox::enqueue(&tx, event).await?;
             }
             Ok(())

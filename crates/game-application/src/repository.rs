@@ -1,9 +1,12 @@
-//! Repository contracts and durable journal values. Adapters persist receipts; the application validates replay.
+//! Repository contracts and durable journal values.
+//! Adapters persist staged changes; the application generates events and validates replay.
 
 use async_trait::async_trait;
 use shogi_domain::{GameResult, Move};
 
-use crate::{Acceptance, ApplicationError, GameId, Participants, RequestId, User, UserId};
+use crate::{
+    Acceptance, ApplicationError, GameId, Participants, RequestId, StagedGameChange, User, UserId,
+};
 
 /// The typed action stored for exact retry matching and journal replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,9 +54,9 @@ pub struct GameRecord {
 /// have version zero, no result, and an empty journal. Durable versions are bounded
 /// by `i64::MAX`. Reads must not fabricate a successful empty record for an unknown ID.
 ///
-/// [`Self::load_game`] must return one coherent view. [`Self::append`] must atomically
+/// [`Self::load_game`] must return one coherent view. [`Self::commit_change`] must atomically
 /// compare the version, advance metadata, insert exactly one receipt, and enqueue
-/// exactly [`Receipt::events`] in canonical order. An `Ok`
+/// the supplied [`StagedGameChange::events`] in their existing order. An `Ok`
 /// result confirms durability. An error can follow a commit; callers must reconcile
 /// by loading durable history before publishing a candidate or accepting another mutation.
 /// The application stages legal commands and validates replay rather than trusting
@@ -105,26 +108,24 @@ pub trait GameRepository: Send + Sync {
     /// [`ApplicationError::Corrupt`] for invalid durable encoding, or
     /// [`ApplicationError::Unavailable`] for a failed read.
     async fn version(&self, id: &GameId) -> Result<u64, ApplicationError>;
-    /// Commits a staged receipt and resulting metadata in one atomic transaction.
+    /// Atomically persists the supplied receipt, events, and resulting metadata.
     ///
-    /// Compares the current version with [`Receipt::expected_seq`], requires the
-    /// acceptance sequence to be exactly one greater and within `i64::MAX`, verifies
+    /// Compares the current version with [`Receipt::expected_seq`], verifies
     /// participant membership, and preserves per-game request and sequence uniqueness.
-    /// The updated version, result, receipt, and canonical [`Receipt::events`] must
-    /// commit together or not at all.
+    /// The updated version, result, receipt, and all supplied events must commit
+    /// together or not at all. The application generates events before calling this
+    /// method. Implementors persist them without deriving or changing the batch.
     /// This operation is not itself an exact-retry API; the application reconciles
-    /// failures through [`Self::load_game`]. It supplies a legally staged receipt.
+    /// failures through [`Self::load_game`]. It supplies a legally staged change.
     ///
     /// # Errors
     ///
     /// Returns [`ApplicationError::NotFound`] for an unknown game,
     /// [`ApplicationError::SequenceMismatch`] for a competing version,
-    /// [`ApplicationError::NonParticipant`] for an unbound user,
-    /// [`ApplicationError::SequenceExhausted`] for an out-of-range sequence,
-    /// [`ApplicationError::Corrupt`] for inconsistent receipt sequence, or
+    /// [`ApplicationError::NonParticipant`] for an unbound user, or
     /// [`ApplicationError::Unavailable`] for storage failures, including constraint
     /// or uncertain commit failures. An error does not prove rollback.
-    async fn append(&self, id: &GameId, receipt: &Receipt) -> Result<(), ApplicationError>;
+    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), ApplicationError>;
 }
 
 /// Durable user registration and lookup required by [`crate::UserService`].

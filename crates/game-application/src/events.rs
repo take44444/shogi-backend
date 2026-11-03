@@ -53,29 +53,62 @@ pub struct CommittedEvent {
     /// The immutable application fact.
     pub event: DomainEvent,
 }
-impl Receipt {
-    /// Derives the canonical event batch, in move-then-finish order.
+
+/// An application-generated receipt and its canonical events, ready for atomic persistence.
+///
+/// Construction freezes the game, receipt, and event order together. Accessors expose
+/// shared references so adapters can persist the supplied values without changing them.
+///
+/// ```compile_fail,E0616
+/// use game_application::StagedGameChange;
+/// fn replace_events(change: &mut StagedGameChange) {
+///     change.events = Vec::new();
+/// }
+/// ```
+///
+/// ```compile_fail,E0594
+/// use game_application::StagedGameChange;
+/// fn change_receipt(change: &mut StagedGameChange) {
+///     change.receipt().acceptance.seq = 2;
+/// }
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagedGameChange {
+    game_id: GameId,
+    receipt: Receipt,
+    events: Vec<CommittedEvent>,
+}
+impl StagedGameChange {
+    /// Generates the canonical event batch in move-then-finish order.
     ///
-    /// Returns [`ApplicationError::Corrupt`] for inconsistent sequence or result.
-    pub fn events(&self, game_id: &GameId) -> Result<Vec<CommittedEvent>, ApplicationError> {
-        if self.expected_seq.checked_add(1) != Some(self.acceptance.seq)
-            || self.acceptance.seq > i64::MAX as u64
-        {
+    /// Validates sequence bounds, continuity, and action/result consistency.
+    /// Board legality and participant membership are checked by the actor and repository.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApplicationError::SequenceExhausted`] for out-of-range sequences or
+    /// an expected sequence at `i64::MAX`. Returns [`ApplicationError::Corrupt`] for
+    /// in-range nonconsecutive sequences or inconsistent action and result.
+    pub fn new(game_id: GameId, receipt: Receipt) -> Result<Self, ApplicationError> {
+        if receipt.expected_seq >= i64::MAX as u64 || receipt.acceptance.seq > i64::MAX as u64 {
+            return Err(ApplicationError::SequenceExhausted);
+        }
+        if receipt.expected_seq + 1 != receipt.acceptance.seq {
             return Err(ApplicationError::Corrupt);
         }
         let mut events = Vec::with_capacity(2);
         let mut push = |event| {
             events.push(CommittedEvent {
                 game_id: game_id.clone(),
-                request_id: self.request_id.clone(),
-                user_id: self.user_id.clone(),
-                seq: self.acceptance.seq,
+                request_id: receipt.request_id.clone(),
+                user_id: receipt.user_id.clone(),
+                seq: receipt.acceptance.seq,
                 event,
             })
         };
-        match self.action {
+        match receipt.action {
             Action::Move(movement) => {
-                if self
+                if receipt
                     .acceptance
                     .result
                     .is_some_and(|r| r.reason != FinishReason::Checkmate)
@@ -84,12 +117,12 @@ impl Receipt {
                 }
                 push(DomainEvent::MoveCommitted {
                     movement,
-                    in_check: self.acceptance.in_check,
-                    result: self.acceptance.result,
+                    in_check: receipt.acceptance.in_check,
+                    result: receipt.acceptance.result,
                 });
             }
             Action::Resign => {
-                if !self
+                if !receipt
                     .acceptance
                     .result
                     .is_some_and(|r| r.reason == FinishReason::Resignation)
@@ -98,10 +131,29 @@ impl Receipt {
                 }
             }
         }
-        if let Some(result) = self.acceptance.result {
+        if let Some(result) = receipt.acceptance.result {
             push(DomainEvent::GameFinished { result });
         }
-        Ok(events)
+        Ok(Self {
+            game_id,
+            receipt,
+            events,
+        })
+    }
+
+    /// Returns the game whose receipt and events are staged.
+    pub fn game_id(&self) -> &GameId {
+        &self.game_id
+    }
+
+    /// Returns the accepted command and its original response.
+    pub fn receipt(&self) -> &Receipt {
+        &self.receipt
+    }
+
+    /// Returns the already generated events in canonical order.
+    pub fn events(&self) -> &[CommittedEvent] {
+        &self.events
     }
 }
 
@@ -242,48 +294,82 @@ mod tests {
     #[test]
     fn canonical_move_mate_and_resignation_events() {
         let movement = "7g7f".parse().unwrap();
-        let normal = receipt(Action::Move(movement), None)
-            .events(&game())
-            .unwrap();
-        assert_eq!(normal.len(), 1);
+        let event = |event| CommittedEvent {
+            game_id: game(),
+            request_id: RequestId::new("request").unwrap(),
+            user_id: UserId::new("black").unwrap(),
+            seq: 1,
+            event,
+        };
+        let normal = StagedGameChange::new(game(), receipt(Action::Move(movement), None)).unwrap();
         assert_eq!(
-            normal[0].event,
-            DomainEvent::MoveCommitted {
+            normal.events(),
+            &[event(DomainEvent::MoveCommitted {
                 movement,
                 in_check: false,
-                result: None
-            }
+                result: None,
+            })]
         );
         let mate = GameResult {
             winner: Player::Black,
             reason: FinishReason::Checkmate,
         };
-        let terminal = receipt(Action::Move(movement), Some(mate))
-            .events(&game())
-            .unwrap();
-        assert_eq!(terminal.len(), 2);
-        assert_eq!(terminal[0].seq, terminal[1].seq);
-        assert_eq!(terminal[0].event.kind(), EventKind::MoveCommitted);
+        let terminal =
+            StagedGameChange::new(game(), receipt(Action::Move(movement), Some(mate))).unwrap();
         assert_eq!(
-            terminal[1].event,
-            DomainEvent::GameFinished { result: mate }
+            terminal.events(),
+            &[
+                event(DomainEvent::MoveCommitted {
+                    movement,
+                    in_check: true,
+                    result: Some(mate),
+                }),
+                event(DomainEvent::GameFinished { result: mate }),
+            ]
         );
         let result = GameResult {
             reason: FinishReason::Resignation,
             ..mate
         };
-        let end = receipt(Action::Resign, Some(result))
-            .events(&game())
-            .unwrap();
-        assert_eq!(end.len(), 1);
-        assert_eq!(end[0].event, DomainEvent::GameFinished { result });
+        let end = StagedGameChange::new(game(), receipt(Action::Resign, Some(result))).unwrap();
+        assert_eq!(end.events(), &[event(DomainEvent::GameFinished { result })]);
         for bad in [
             receipt(Action::Resign, None),
             receipt(Action::Resign, Some(mate)),
             receipt(Action::Move(movement), Some(result)),
         ] {
-            assert_eq!(bad.events(&game()), Err(ApplicationError::Corrupt));
+            assert_eq!(
+                StagedGameChange::new(game(), bad),
+                Err(ApplicationError::Corrupt)
+            );
         }
+    }
+
+    #[test]
+    fn staging_checks_sequence_bounds_before_continuity() {
+        let limit = i64::MAX as u64;
+        for (expected, accepted, error) in [
+            (limit, limit, ApplicationError::SequenceExhausted),
+            (limit, limit + 1, ApplicationError::SequenceExhausted),
+            (u64::MAX, 0, ApplicationError::SequenceExhausted),
+            (0, limit + 1, ApplicationError::SequenceExhausted),
+            (0, u64::MAX, ApplicationError::SequenceExhausted),
+            (0, 0, ApplicationError::Corrupt),
+            (0, 2, ApplicationError::Corrupt),
+            (1, 1, ApplicationError::Corrupt),
+        ] {
+            let mut receipt = receipt(Action::Move("7g7f".parse().unwrap()), None);
+            receipt.expected_seq = expected;
+            receipt.acceptance.seq = accepted;
+            assert_eq!(StagedGameChange::new(game(), receipt), Err(error));
+        }
+        let mut receipt = receipt(Action::Move("7g7f".parse().unwrap()), None);
+        receipt.expected_seq = limit - 1;
+        receipt.acceptance.seq = limit;
+        let change = StagedGameChange::new(game(), receipt.clone()).unwrap();
+        assert_eq!(change.game_id(), &game());
+        assert_eq!(change.receipt(), &receipt);
+        assert_eq!(change.events()[0].seq, limit);
     }
 
     struct Queue {
@@ -335,10 +421,11 @@ mod tests {
             (false, true, false, vec![1, 1, 2]),
             (false, true, true, vec![1, 2]),
         ] {
-            let first = receipt(Action::Move("7g7f".parse().unwrap()), None)
-                .events(&game())
-                .unwrap()
-                .remove(0);
+            let first =
+                StagedGameChange::new(game(), receipt(Action::Move("7g7f".parse().unwrap()), None))
+                    .unwrap()
+                    .events()[0]
+                    .clone();
             let mut second = first.clone();
             second.seq = 2;
             let observed = Arc::default();

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, GameService,
-    MakeMove, Participants, Receipt, RequestId, Resign, UserId, UserService,
+    MakeMove, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId, UserService,
 };
 use persistence::SeaOrmStore;
 use sea_orm::{ConnectionTrait, Database};
@@ -237,9 +237,9 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
         let raw = Database::connect(&url).await.unwrap();
         if commit_failure {
             raw.execute_unprepared("CREATE TABLE deferred_failure (user_id TEXT REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)").await.unwrap();
-            raw.execute_unprepared("CREATE TRIGGER fail_append AFTER INSERT ON journal BEGIN INSERT INTO deferred_failure VALUES ('absent'); END").await.unwrap();
+            raw.execute_unprepared("CREATE TRIGGER fail_commit_change AFTER INSERT ON journal BEGIN INSERT INTO deferred_failure VALUES ('absent'); END").await.unwrap();
         } else {
-            raw.execute_unprepared("CREATE TRIGGER fail_append BEFORE INSERT ON journal BEGIN SELECT RAISE(ABORT, 'injected write failure'); END").await.unwrap();
+            raw.execute_unprepared("CREATE TRIGGER fail_commit_change BEFORE INSERT ON journal BEGIN SELECT RAISE(ABORT, 'injected write failure'); END").await.unwrap();
         }
         let before = service.snapshot(&id()).await.unwrap();
         let command = movement("retry", 0, "black", "7g7f");
@@ -250,7 +250,7 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
         assert_eq!(store.version(&id()).await.unwrap(), 0);
         assert!(store.load_game(&id()).await.unwrap().journal.is_empty());
         assert_eq!(service.snapshot(&id()).await.unwrap(), before);
-        raw.execute_unprepared("DROP TRIGGER fail_append")
+        raw.execute_unprepared("DROP TRIGGER fail_commit_change")
             .await
             .unwrap();
         assert_eq!(service.make_move(&id(), command).await.unwrap().seq, 1);
@@ -272,7 +272,9 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
         },
     };
     assert_eq!(
-        store.append(&id(), &receipt).await,
+        store
+            .commit_change(&StagedGameChange::new(id(), receipt.clone()).unwrap())
+            .await,
         Err(Error::NonParticipant)
     );
     assert_eq!(store.version(&id()).await.unwrap(), 0);
@@ -280,9 +282,11 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     bad.expected_seq = u64::MAX;
     bad.acceptance.seq = 0;
     assert_eq!(
-        store.append(&id(), &bad).await,
+        StagedGameChange::new(id(), bad),
         Err(Error::SequenceExhausted)
     );
+    assert_eq!(store.version(&id()).await.unwrap(), 0);
+    assert!(store.load_game(&id()).await.unwrap().journal.is_empty());
     service
         .make_move(&id(), movement("r", 0, "black", "7g7f"))
         .await
@@ -293,7 +297,9 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     duplicate.acceptance.seq = 2;
     duplicate.action = Action::Move("3c3d".parse().unwrap());
     assert_eq!(
-        store.append(&id(), &duplicate).await,
+        store
+            .commit_change(&StagedGameChange::new(id(), duplicate).unwrap())
+            .await,
         Err(Error::Unavailable)
     );
     assert_eq!(store.version(&id()).await.unwrap(), 1);
@@ -354,22 +360,23 @@ impl GameRepository for FaultStore {
             self.inner.version(id).await
         }
     }
-    async fn append(&self, id: &GameId, receipt: &Receipt) -> Result<(), Error> {
+    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {
         let mode = self.mode.swap(0, Ordering::SeqCst);
         if mode == 1 {
             return Err(Error::Unavailable);
         }
         if mode == 4 {
-            let mut different = receipt.clone();
+            let mut different = change.receipt().clone();
             different.user_id = user("white");
             different.action = Action::Resign;
             different.acceptance.result = Some(shogi_domain::GameResult {
                 winner: Player::Black,
                 reason: shogi_domain::FinishReason::Resignation,
             });
-            self.inner.append(id, &different).await?;
+            let different = StagedGameChange::new(change.game_id().clone(), different)?;
+            self.inner.commit_change(&different).await?;
         } else {
-            self.inner.append(id, receipt).await?;
+            self.inner.commit_change(change).await?;
         }
         if mode == 3 {
             self.unreadable.store(true, Ordering::SeqCst);

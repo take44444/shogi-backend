@@ -3,7 +3,7 @@
 
 use crate::{
     Acceptance, Action, ApplicationError, GameId, GameRecord, GameRepository, Participants,
-    Receipt, RequestId, Snapshot, UserId,
+    Receipt, RequestId, Snapshot, StagedGameChange, UserId,
 };
 use shogi_domain::Game;
 use std::{collections::HashMap, sync::Arc};
@@ -199,7 +199,7 @@ impl Actor {
 
     /// Replays accepted requests before checking staleness or domain completion.
     /// Stages new commands on a clone, checks sequence capacity before mutation, and
-    /// publishes only a confirmed commit. Every append failure reloads history to
+    /// publishes only a confirmed commit. Every commit failure reloads history to
     /// resolve exact replay, conflict, or a competing version. Otherwise returns
     /// `Unavailable` with invalid state; absence of a receipt does not prove rollback.
     async fn apply(&mut self, pending: Pending) -> Result<Acceptance, ApplicationError> {
@@ -233,8 +233,10 @@ impl Actor {
                 result: candidate.result(),
             },
         };
-        match self.repository.append(&self.id, &receipt).await {
+        let change = StagedGameChange::new(self.id.clone(), receipt)?;
+        match self.repository.commit_change(&change).await {
             Ok(()) => {
+                let receipt = change.receipt();
                 let state = self.state.as_mut().ok_or(ApplicationError::Internal)?;
                 state.game = candidate;
                 state.seq = seq;
@@ -250,7 +252,7 @@ impl Actor {
                     return Ok(acceptance);
                 }
                 // This conflict occurs if another writer advances this game's version
-                // between refresh and append; a single-writer setup prevents it.
+                // between refresh and commit; a single-writer setup prevents it.
                 // With exclusive ownership enforced by lease/fencing, this would
                 // indicate a violation of the single-writer invariant.
                 if matches!(error, ApplicationError::SequenceMismatch { .. }) {
