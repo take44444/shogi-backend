@@ -81,3 +81,8 @@ Error responses use `{ "error": "code" }`. Handled responses have
 SQLite reader has four connections. Acquisition, busy waits, and SQLite execution
 each have a two-second bound. SQLite progress handlers interrupt long queries.
 No response includes retry IDs, receipts, expected sequences, or outbox data.
+
+`GET /openapi.json` serves the OpenAPI 3.1 contract. To export it without server
+startup or configuration, run `cargo run -p player-http --example player-openapi`.
+See the [HTTP adapter reference](../../crates/player-http/README.md) for generation
+and contract checks.

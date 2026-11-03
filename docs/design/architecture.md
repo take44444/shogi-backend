@@ -895,6 +895,7 @@ Cargoマニフェストとユーザーサービスのソースから生成。更
 - `/auth/google/start`
 - `/auth/logout`
 - `/me`
+- `/openapi.json`
 
 ユーザーSQLiteのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。
 

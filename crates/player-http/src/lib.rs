@@ -7,7 +7,6 @@ use axum::{
     },
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
 };
 use game_record_application::{
     Detail, Error, Filters, FinishReason, GameId, GameRecords, Metadata, Page, Player,
@@ -16,33 +15,81 @@ use game_record_application::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 #[derive(Clone)]
 struct App {
     records: GameRecords,
     capacity: Arc<Semaphore>,
 }
-pub fn router(records: GameRecords) -> Router {
-    Router::new()
-        .route("/game-records", get(search))
-        .route("/game-records/{id}", get(detail))
-        .with_state(App {
-            records,
-            capacity: Arc::new(Semaphore::new(16)),
-        })
+/// Construct the document without a database, configuration, or service startup.
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    api_router().into_openapi()
 }
-#[derive(Deserialize)]
+fn api_router() -> OpenApiRouter<App> {
+    let document = utoipa::openapi::OpenApi::new(
+        utoipa::openapi::Info::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
+        utoipa::openapi::Paths::new(),
+    );
+    OpenApiRouter::with_openapi(document)
+        .routes(routes!(search))
+        .routes(routes!(detail))
+        .routes(routes!(openapi_json))
+}
+pub fn router(records: GameRecords) -> Router {
+    api_router().split_for_parts().0.with_state(App {
+        records,
+        capacity: Arc::new(Semaphore::new(16)),
+    })
+}
+#[utoipa::path(get, path = "/openapi.json", responses(
+    (status = 200, description = "OpenAPI document", body = Object, content_type = "application/json")
+))]
+async fn openapi_json() -> Response {
+    respond(Ok(openapi()))
+}
+#[derive(Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum RuleDto {
+    Standard,
+}
+#[derive(Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum PlayerDto {
+    Black,
+    White,
+}
+#[derive(Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum ReasonDto {
+    Checkmate,
+    Resignation,
+}
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct SearchQuery {
+    /// User ID, 1..128 UTF-8 bytes with no Unicode whitespace.
     participant: Option<String>,
-    rule: Option<String>,
-    winner: Option<String>,
-    reason: Option<String>,
+    rule: Option<RuleDto>,
+    winner: Option<PlayerDto>,
+    reason: Option<ReasonDto>,
+    /// Inclusive start in UTC microseconds. The interval must be at most 366 days.
+    #[param(minimum = 0)]
     from: i64,
+    /// Exclusive end in UTC microseconds, greater than from.
+    #[param(minimum = 1)]
     to: i64,
+    /// Inclusive minimum move ply, no greater than max_ply.
+    #[param(minimum = 0, maximum = 9223372036854775807_u64)]
     min_ply: Option<u64>,
+    /// Inclusive maximum move ply.
+    #[param(minimum = 0, maximum = 9223372036854775807_u64)]
     max_ply: Option<u64>,
+    #[param(minimum = 1, maximum = 100, default = 30)]
     limit: Option<u32>,
+    /// Opaque cursor, at most 1024 bytes, bound to the same filters. Limit may change.
     cursor: Option<String>,
 }
 impl SearchQuery {
@@ -52,29 +99,15 @@ impl SearchQuery {
             .map(UserId::new)
             .transpose()
             .map_err(|_| Error::InvalidQuery)?;
-        let rule = self
-            .rule
-            .map(|s| match s.as_str() {
-                "standard" => Ok(Rule::Standard),
-                _ => Err(Error::InvalidQuery),
-            })
-            .transpose()?;
-        let winner = self
-            .winner
-            .map(|s| match s.as_str() {
-                "black" => Ok(Player::Black),
-                "white" => Ok(Player::White),
-                _ => Err(Error::InvalidQuery),
-            })
-            .transpose()?;
-        let reason = self
-            .reason
-            .map(|s| match s.as_str() {
-                "checkmate" => Ok(FinishReason::Checkmate),
-                "resignation" => Ok(FinishReason::Resignation),
-                _ => Err(Error::InvalidQuery),
-            })
-            .transpose()?;
+        let rule = self.rule.map(|RuleDto::Standard| Rule::Standard);
+        let winner = self.winner.map(|p| match p {
+            PlayerDto::Black => Player::Black,
+            PlayerDto::White => Player::White,
+        });
+        let reason = self.reason.map(|r| match r {
+            ReasonDto::Checkmate => FinishReason::Checkmate,
+            ReasonDto::Resignation => FinishReason::Resignation,
+        });
         Search::new(
             Filters {
                 participant,
@@ -91,6 +124,15 @@ impl SearchQuery {
         )
     }
 }
+/// Search public completed records. Unknown or repeated query fields are rejected.
+/// Handled responses have Cache-Control: no-store.
+#[utoipa::path(get, path = "/game-records", params(SearchQuery), responses(
+        (status = 200, description = "Page of public metadata", body = PageDto),
+        (status = 400, description = "Invalid input", body = ErrorBody),
+        (status = 422, description = "History or response exceeds bounds", body = ErrorBody),
+        (status = 500, description = "Invalid stored record", body = ErrorBody),
+        (status = 503, description = "Storage unavailable or request capacity exhausted", body = ErrorBody)
+))]
 async fn search(
     State(app): State<App>,
     query: Result<Query<SearchQuery>, QueryRejection>,
@@ -103,6 +145,18 @@ async fn search(
     .await;
     respond(result)
 }
+/// Read public history. Missing, ongoing and hidden records are indistinguishable.
+/// Handled responses have Cache-Control: no-store.
+#[utoipa::path(get, path = "/game-records/{id}", params(
+    ("id" = String, Path, description = "Game ID, 1..128 UTF-8 bytes with no Unicode whitespace")
+), responses(
+        (status = 200, description = "Public metadata and ordered history", body = DetailDto),
+        (status = 404, description = "No public completed record", body = ErrorBody),
+        (status = 400, description = "Invalid input", body = ErrorBody),
+        (status = 422, description = "History or response exceeds bounds", body = ErrorBody),
+        (status = 500, description = "Invalid stored record", body = ErrorBody),
+        (status = 503, description = "Storage unavailable or request capacity exhausted", body = ErrorBody)
+))]
 async fn detail(State(app): State<App>, path: Result<Path<String>, PathRejection>) -> Response {
     let result = async {
         let id = GameId::new(path.map_err(|_| Error::InvalidQuery)?.0)?;
@@ -130,35 +184,51 @@ fn respond<T: Serialize>(result: Result<T, Error>) -> Response {
 }
 fn error(error: Error) -> Response {
     let (status, code) = match error {
-        Error::InvalidQuery => (StatusCode::BAD_REQUEST, "invalid_query"),
-        Error::NotFound => (StatusCode::NOT_FOUND, "not_found"),
-        Error::Corrupt => (StatusCode::INTERNAL_SERVER_ERROR, "invalid_record"),
-        Error::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
-        Error::HistoryTooLong => (StatusCode::UNPROCESSABLE_ENTITY, "history_too_long"),
+        Error::InvalidQuery => (StatusCode::BAD_REQUEST, ErrorCode::InvalidQuery),
+        Error::NotFound => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Error::Corrupt => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::InvalidRecord),
+        Error::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
+        Error::HistoryTooLong => (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::HistoryTooLong),
     };
-    (status, axum::Json(serde_json::json!({"error": code}))).into_response()
+    (status, axum::Json(ErrorBody { error: code })).into_response()
 }
-fn player(player: Player) -> &'static str {
+#[derive(Serialize, ToSchema)]
+struct ErrorBody {
+    error: ErrorCode,
+}
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum ErrorCode {
+    InvalidQuery,
+    NotFound,
+    InvalidRecord,
+    Unavailable,
+    HistoryTooLong,
+}
+fn player(player: Player) -> PlayerDto {
     if player == Player::Black {
-        "black"
+        PlayerDto::Black
     } else {
-        "white"
+        PlayerDto::White
     }
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct ResultDto {
-    winner: &'static str,
-    reason: &'static str,
+    winner: PlayerDto,
+    reason: ReasonDto,
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct MetadataDto {
     id: String,
     black: String,
     white: String,
-    rule: &'static str,
+    rule: RuleDto,
     result: ResultDto,
+    /// UTC microseconds.
     finished_at: i64,
+    #[schema(format = "uint64", minimum = 0, maximum = 18446744073709551615_u64)]
     final_seq: u64,
+    #[schema(format = "uint64", minimum = 0, maximum = 18446744073709551615_u64)]
     final_move_ply: u64,
 }
 impl From<Metadata> for MetadataDto {
@@ -167,13 +237,13 @@ impl From<Metadata> for MetadataDto {
             id: m.id.as_str().into(),
             black: m.black.as_str().into(),
             white: m.white.as_str().into(),
-            rule: "standard",
+            rule: RuleDto::Standard,
             result: ResultDto {
                 winner: player(m.result.winner),
                 reason: if m.result.reason == FinishReason::Checkmate {
-                    "checkmate"
+                    ReasonDto::Checkmate
                 } else {
-                    "resignation"
+                    ReasonDto::Resignation
                 },
             },
             finished_at: m.finished_at,
@@ -182,9 +252,10 @@ impl From<Metadata> for MetadataDto {
         }
     }
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct PageDto {
     items: Vec<MetadataDto>,
+    #[schema(required = true)]
     next_cursor: Option<String>,
 }
 impl From<Page> for PageDto {
@@ -195,20 +266,21 @@ impl From<Page> for PageDto {
         }
     }
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum ActionDto {
     Move { usi: String },
     Resign,
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct OperationDto {
+    #[schema(format = "uint64", minimum = 0, maximum = 18446744073709551615_u64)]
     seq: u64,
-    player: &'static str,
+    player: PlayerDto,
     #[serde(flatten)]
     action: ActionDto,
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct DetailDto {
     metadata: MetadataDto,
     history: Vec<OperationDto>,
@@ -234,3 +306,6 @@ impl From<Detail> for DetailDto {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod openapi_tests;

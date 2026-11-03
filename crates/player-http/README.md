@@ -19,3 +19,22 @@ to 1 MiB. SQL acquisition and execution limits belong to the repository.
 See [player-server](../../apps/player-server/README.md) for complete query and
 configuration reference. Router tests exercise a real initialized SQLite database,
 public JSON fields, invalid inputs, indistinguishable missing records, and errors.
+
+`GET /openapi.json` returns this service's OpenAPI 3.1 document. The public
+`player_http::openapi()` constructor needs no database, service configuration, or
+provider connection. Handler annotations, serde DTOs, and one `OpenApiRouter`
+registry define both the runtime routes and the document. Register new handlers
+with `routes!` in `api_router()` and keep their `#[utoipa::path]` annotations
+next to the handlers. No separate document path list is maintained.
+
+Export this service's document without starting the server.
+
+```sh
+cargo run -p player-http --example player-openapi
+```
+
+From the repository root, `bash scripts/generate-openapi.sh` writes both service
+documents to `target/openapi/player.json` and `target/openapi/user.json`. Pass an
+output directory as its first argument to choose another destination. Generated
+JSON is a build artifact. CI runs HTTP contract tests, generates both documents,
+and validates them with `openapi-spec-validator`.

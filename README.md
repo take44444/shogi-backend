@@ -142,6 +142,20 @@ containers and volume.
 
 ## Read the API documentation
 
+Generate OpenAPI 3.1 JSON for both HTTP services without a database, credentials,
+or running servers.
+
+```sh
+bash scripts/generate-openapi.sh
+```
+
+The documents are `target/openapi/player.json` and `target/openapi/user.json`.
+An optional first argument selects the output directory. Running services expose
+these documents at `GET /openapi.json`. The handler annotations and serialized
+HTTP DTOs in [player-http](crates/player-http/README.md) and
+[user-http](crates/user-http/README.md) are the schema sources.
+
+
 Generate the workspace API reference with rustdoc.
 
 ```sh

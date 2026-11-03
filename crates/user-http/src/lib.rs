@@ -7,7 +7,6 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
 };
 pub use config::{BrowserConfig, ConfigError, ServerConfig};
 pub use google::{Authorization, GOOGLE_ISSUER, GoogleProvider, IdentityProvider};
@@ -18,6 +17,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use user_application::{AccountRepository, DisplayName, Error, LoginAttempt, NewSession, Profile};
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 #[derive(Clone)]
 struct App {
@@ -30,17 +31,77 @@ pub fn router(
     provider: Arc<dyn IdentityProvider>,
     browser: BrowserConfig,
 ) -> Router {
-    Router::new()
-        .route("/auth/google/start", get(start))
-        .route("/auth/google/callback", get(callback))
-        .route("/me", get(me).patch(rename))
-        .route("/auth/logout", post(logout))
+    api_router()
+        .split_for_parts()
+        .0
         .layer(middleware::map_response(private_response))
         .with_state(App {
             store,
             provider,
             browser,
         })
+}
+/// Construct the document without configuration, persistence, or provider calls.
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    api_router().into_openapi()
+}
+#[derive(utoipa::OpenApi)]
+#[openapi(modifiers(&CookieSecurity))]
+struct Api;
+struct CookieSecurity;
+impl utoipa::Modify for CookieSecurity {
+    fn modify(&self, api: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
+        api.info = utoipa::openapi::Info::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        let components = api.components.get_or_insert_with(Default::default);
+        for (scheme, name, description) in [
+            (
+                "session",
+                "__Host-user_session",
+                "HTTPS production session cookie",
+            ),
+            (
+                "development_session",
+                "user_session",
+                "Explicit loopback HTTP development session cookie",
+            ),
+            (
+                "login",
+                "__Host-user_login",
+                "HTTPS production browser-bound login attempt cookie",
+            ),
+            (
+                "development_login",
+                "user_login",
+                "Explicit loopback HTTP development login attempt cookie",
+            ),
+        ] {
+            components.add_security_scheme(
+                scheme,
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    name,
+                    description,
+                ))),
+            );
+        }
+        api.info.description = Some("Opaque browser cookies. HTTPS uses host-only __Host- cookies with Secure, HttpOnly, SameSite=Lax and Path=/. Explicit loopback HTTP development mode uses the alternative cookie names without Secure. All responses have Cache-Control: no-store, Referrer-Policy: no-referrer and X-Content-Type-Options: nosniff.".into());
+    }
+}
+fn api_router() -> OpenApiRouter<App> {
+    use utoipa::OpenApi;
+    OpenApiRouter::with_openapi(Api::openapi())
+        .routes(routes!(start))
+        .routes(routes!(callback))
+        .routes(routes!(me))
+        .routes(routes!(rename))
+        .routes(routes!(logout))
+        .routes(routes!(openapi_json))
+}
+#[utoipa::path(get, path = "/openapi.json", responses(
+    (status = 200, description = "OpenAPI document", body = Object, content_type = "application/json")
+))]
+async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
+    Json(openapi())
 }
 async fn private_response(mut response: Response) -> Response {
     response
@@ -138,19 +199,36 @@ impl IntoResponse for HttpError {
         (code, Json(serde_json_error(self.0))).into_response()
     }
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct ErrorBody {
-    error: &'static str,
+    error: ErrorCode,
+}
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum ErrorCode {
+    AuthenticationRequired,
+    InvalidInput,
+    ServiceUnavailable,
 }
 fn serde_json_error(e: Error) -> ErrorBody {
     ErrorBody {
         error: match e {
-            Error::Unauthorized => "authentication_required",
-            Error::InvalidInput => "invalid_input",
-            _ => "service_unavailable",
+            Error::Unauthorized => ErrorCode::AuthenticationRequired,
+            Error::InvalidInput => ErrorCode::InvalidInput,
+            _ => ErrorCode::ServiceUnavailable,
         },
     }
 }
+/// Create a ten-minute browser-bound login attempt. No session is required.
+#[utoipa::path(get, path = "/auth/google/start", responses(
+    (status = 303, description = "Redirect to Google", headers(
+        ("Location" = String, description = "Google authorization URL"),
+        ("Set-Cookie" = String, description = "Login cookie with Max-Age=600")
+    )),
+    (status = 400, description = "Invalid input", body = ErrorBody),
+    (status = 401, description = "Authentication required or browser check failed", body = ErrorBody),
+    (status = 503, description = "Service unavailable", body = ErrorBody)
+))]
 async fn start(State(app): State<App>) -> Result<Response, HttpError> {
     let a = app.provider.authorize();
     let browser = random();
@@ -176,12 +254,29 @@ async fn start(State(app): State<App>) -> Result<Response, HttpError> {
     );
     Ok(response)
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct Callback {
+    /// Required single-use state, at most 1024 bytes, bound to the login cookie.
     state: String,
+    /// Required for success, nonempty and at most 4096 bytes.
     code: Option<String>,
+    /// Provider error. Presence rejects authentication.
     error: Option<String>,
 }
+/// Consume the browser-bound, single-use login attempt. Successful login rotates the session.
+#[utoipa::path(get, path = "/auth/google/callback", params(Callback),
+    security(("login" = []), ("development_login" = [])), responses(
+    (status = 303, description = "Session created", headers(
+        ("Location" = String, description = "/me"),
+        ("Set-Cookie" = String, description = "Two Set-Cookie headers set the session and clear the login cookie")
+    )),
+    (status = 400, description = "Malformed or missing callback query (text), or invalid input (JSON)", content(
+        (String = "text/plain"), (ErrorBody = "application/json")
+    )),
+    (status = 401, description = "Authentication required or browser check failed", body = ErrorBody),
+    (status = 503, description = "Service unavailable", body = ErrorBody)
+))]
 async fn callback(
     State(app): State<App>,
     headers: HeaderMap,
@@ -234,10 +329,11 @@ async fn callback(
     );
     Ok(response)
 }
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct ProfileBody {
     id: String,
     display_name: String,
+    /// UTC seconds since the Unix epoch.
     created_at: i64,
 }
 impl From<Profile> for ProfileBody {
@@ -249,6 +345,12 @@ impl From<Profile> for ProfileBody {
         }
     }
 }
+#[utoipa::path(get, path = "/me", security(("session" = []), ("development_session" = [])), responses(
+    (status = 200, description = "Authenticated profile", body = ProfileBody),
+    (status = 400, description = "Invalid input", body = ErrorBody),
+    (status = 401, description = "Authentication required or browser check failed", body = ErrorBody),
+    (status = 503, description = "Service unavailable", body = ErrorBody)
+))]
 async fn me(State(app): State<App>, headers: HeaderMap) -> Result<Json<ProfileBody>, HttpError> {
     Ok(Json(
         app.store
@@ -260,11 +362,28 @@ async fn me(State(app): State<App>, headers: HeaderMap) -> Result<Json<ProfileBo
             .into(),
     ))
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct Rename {
+    /// Trimmed before validation. Must then contain 1..80 Unicode characters and no controls.
     display_name: String,
 }
+/// Require matching Origin and, when supplied, Sec-Fetch-Site: same-origin.
+#[utoipa::path(patch, path = "/me", request_body = Rename, params(
+    ("Origin" = String, Header, description = "Required exact match to configured public origin"),
+    ("Sec-Fetch-Site" = Option<String>, Header, description = "If supplied, must be same-origin")
+),
+    security(("session" = []), ("development_session" = [])), responses(
+    (status = 200, description = "Updated profile", body = ProfileBody),
+    (status = 400, description = "Malformed JSON (text) or invalid trimmed display name (JSON)", content(
+        (String = "text/plain"), (ErrorBody = "application/json")
+    )),
+    (status = 413, description = "Request body too large", body = String, content_type = "text/plain"),
+    (status = 415, description = "Missing or unsupported JSON content type", body = String, content_type = "text/plain"),
+    (status = 422, description = "Invalid JSON structure, including unknown fields", body = String, content_type = "text/plain"),
+    (status = 401, description = "Authentication required or browser check failed", body = ErrorBody),
+    (status = 503, description = "Service unavailable", body = ErrorBody)
+))]
 async fn rename(
     State(app): State<App>,
     headers: HeaderMap,
@@ -283,6 +402,19 @@ async fn rename(
             .into(),
     ))
 }
+/// Require matching Origin and, when supplied, Sec-Fetch-Site: same-origin.
+/// A missing or invalid session cookie is allowed. A valid session is revoked.
+#[utoipa::path(post, path = "/auth/logout", params(
+    ("Origin" = String, Header, description = "Required exact match to configured public origin"),
+    ("Sec-Fetch-Site" = Option<String>, Header, description = "If supplied, must be same-origin")
+), responses(
+    (status = 204, description = "Session cookie cleared", headers(
+        ("Set-Cookie" = String, description = "Session cookie with Max-Age=0")
+    )),
+    (status = 400, description = "Invalid input", body = ErrorBody),
+    (status = 401, description = "Authentication required or browser check failed", body = ErrorBody),
+    (status = 503, description = "Service unavailable", body = ErrorBody)
+))]
 async fn logout(State(app): State<App>, headers: HeaderMap) -> Result<Response, HttpError> {
     same_origin(&headers, &app.browser)?;
     if let Ok(token) = cookie(&headers, app.browser.session_cookie()) {
@@ -300,3 +432,6 @@ async fn logout(State(app): State<App>, headers: HeaderMap) -> Result<Response, 
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod openapi_tests;

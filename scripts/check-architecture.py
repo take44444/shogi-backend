@@ -91,10 +91,38 @@ def workspace_members(root: Path) -> list[Member]:
 def user_routes(root: Path) -> list[str]:
     path = root / "crates/user-http/src/lib.rs"
     source = read_required(path)
-    calls = re.findall(r"\.route\s*\(", source)
-    routes = re.findall(r'\.route\s*\(\s*"([^"\\]+)"\s*,', source)
-    if not routes or len(calls) != len(routes) or any(not r.startswith("/") for r in routes):
-        raise ValueError(f"Cannot parse every literal .route(...) path in {path}; update the checker")
+    message = f"Cannot parse every HTTP route in {path}; update the checker"
+    # This deliberately accepts only the two supported registration forms. New
+    # composition syntax must extend this parser and its command-line fixtures.
+    if re.search(r"\.(?:nest|merge|route_service|nest_service|fallback|fallback_service)\s*\(", source):
+        raise ValueError(message)
+    classic_calls = re.findall(r"\.route\s*\(", source)
+    classic = re.findall(r'\.route\s*\(\s*"([^"\\]+)"\s*,', source)
+    registry_calls = re.findall(r"\.routes\s*\(", source)
+    registrations = re.findall(r"\.routes\s*\(\s*routes!\(\s*([A-Za-z_][A-Za-z_0-9]*)\s*\)\s*\)", source)
+    annotations = re.findall(
+        r'#\[utoipa::path\(\s*(get|post|put|patch|delete|head|options|trace)\s*,\s*path\s*=\s*"([^"\\]+)"(.*?)\)\]\s*async\s+fn\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(',
+        source, re.DOTALL,
+    )
+    annotation_calls = re.findall(r"#\[utoipa::path\s*\(", source)
+    macro_calls = re.findall(r"\broutes!\s*\(", source)
+    if (len(classic_calls) != len(classic)
+            or len(registry_calls) != len(registrations)
+            or len(macro_calls) != len(registrations)
+            or len(annotation_calls) != len(annotations)
+            or (classic and registry_calls)):
+        raise ValueError(message)
+    handlers = [handler for _, _, _, handler in annotations]
+    operations = [(method, route) for method, route, _, _ in annotations]
+    if (len(set(registrations)) != len(registrations)
+            or len(set(handlers)) != len(handlers)
+            or len(set(operations)) != len(operations)
+            or set(registrations) != set(handlers)
+            or any(re.search(r"\b(?:context_path|path)\s*=", options) for _, _, options, _ in annotations)):
+        raise ValueError(message)
+    routes = classic + [route for _, route, _, _ in annotations]
+    if not routes or any(not route.startswith("/") for route in routes):
+        raise ValueError(message)
     return sorted(set(routes))
 
 
