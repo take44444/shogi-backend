@@ -169,17 +169,11 @@ schema startup. The [RPC reference](crates/rpc/README.md) covers wire fields and
 status codes. The [domain crate](crates/shogi-domain/README.md) owns shogi rules.
 
 User registration, Google login, profile updates, and session management belong
-to the independent HTTP user service. See [the user service guide](docs/user-service.md)
-for Google OAuth client setup, environment variables, and HTTP endpoints.
+to the independent HTTP user service. See the [user-server README](apps/user-server/README.md)
+for configuration, startup, and verification, and the [HTTP API reference](crates/user-http/README.md)
+for endpoints.
 It uses a separate SQLite database and shares only the `user-id` value type
 with game code. User management has no gRPC endpoints.
-
-For local development, set the variables in `.env.example` in your shell and run
-`cargo run -p user-server`. Cargo does not load `.env` automatically.
-With Docker Compose, copy `.env.example` to `.env`, supply your Google credentials,
-and run `docker compose --profile auth up --build -d user-server`. The user service
-defaults to `http://localhost:8080` and stores accounts in its own `user-data` volume.
-The default Compose profile still runs only the game services.
 
 Game gRPC still accepts caller-supplied identity claims and belongs on a trusted
 internal network. The user service does not authenticate game gRPC requests.

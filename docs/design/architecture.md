@@ -13,6 +13,8 @@
 
 現在は、`user-server`がHTTPでGoogle認証・ユーザー管理を提供し、単一の`game-server`をTonic / gRPCで利用する。独立したOutbox PublisherからCore NATSへ確定イベントを配信する。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
 
+Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッションの採用理由と現行の保証範囲は[ユーザー認証の設計](user-authentication.md)を参照する。
+
 | 実装単位 | 現在の責務 |
 |---|---|
 | `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
@@ -60,7 +62,7 @@ flowchart LR
 
 ### 0.3 DB・実行環境
 
-Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。退会やプロフィール変更は対局履歴を変更しない。旧DBのユーザーIDにはGoogle本人確認情報がなく、自動では新規アカウントに紐付けない。現行DBドライバーはSQLiteのみである。認証方式と設定は[ユーザーサービスの手順](../user-service.md)を参照する。
+Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。退会やプロフィール変更は対局履歴を変更しない。旧DBのユーザーIDにはGoogle本人確認情報がなく、自動では新規アカウントに紐付けない。現行DBドライバーはSQLiteのみである。認証方式は[ユーザー認証の設計](user-authentication.md)、設定と起動は [user-server の README](../../apps/user-server/README.md) を参照する。
 
 ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`、`outbox-publisher`、Core NATSを起動する。対局とOutboxは共有SQLite Volumeに保存し、コンテナ再作成後も復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
 
