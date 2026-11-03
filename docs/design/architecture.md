@@ -1,6 +1,6 @@
 # 大規模将棋アプリ サーバーサイドアーキテクチャ設計書
 
-- バージョン: 1.7（現行実装と将来設計）
+- バージョン: 1.8（現行実装と将来設計）
 - 更新日: 2026-11-03
 - 対象: Web / iOS / Android
 - 設計目標: 最大同時接続 100,000人
@@ -19,8 +19,10 @@ Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッ�
 |---|---|
 | `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
 | `user-id` | 内部ユーザーIDの検証済み値型。対局とユーザーサービスで共有する |
-| `user-application` / `user-persistence` | ユーザー、Google識別子、ログイン試行、セッションと独立したSQLite保存 |
-| `user-http` / `user-server` | Google OpenID Connect、HTTPのログイン・プロフィール・ログアウト、起動設定 |
+| `user-application` | プロフィール・表示名・検証済み外部識別子・ログイン試行・セッションの型と、`AccountRepository` の契約 |
+| `user-persistence` | `AccountRepository` の実装。ユーザー専用SQLite、スキーマ検証、試行消費・登録・セッションの保存 |
+| `user-http` | Google OpenID Connect、HTTPルート、ログイン処理の組み立て、Cookie・Origin検証 |
+| `user-server` | 設定読込、永続化とGoogleプロバイダーの組み立て、HTTP待ち受け |
 | `game-application` | 対局操作、Actor、保存前のDomain Event生成・固定、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
 | `persistence` | SeaORMによるGameRepository、対局用接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
 | `messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
@@ -30,9 +32,10 @@ Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッ�
 flowchart LR
   C[gRPC Client] --> RPC[rpc / game-server]
   WEB[Browser] --> HTTP[user-http / user-server]
-  HTTP --> USERS[user-application]
-  USERS --> UP[user-persistence]
+  HTTP --> UR[AccountRepository / user-application]
+  UR -->|実行時の実装| UP[SqliteAccounts / user-persistence]
   UP --> UDB[(User SQLite)]
+  HTTP -->|discovery・JWKS・認可コード交換| GOOGLE[Google OpenID Connect]
   RPC --> APP[GameService / Game Actor]
   APP --> DOMAIN[shogi-domain / rsshogi adapter]
   APP --> GR[GameRepository]
@@ -42,6 +45,8 @@ flowchart LR
   OUT --> MSG[messaging / Core NATS adapter]
   MSG --> NATS[Core NATS]
 ```
+
+上図は実行時の呼出関係である。IDトークンの署名・claim検証は取得した鍵を使ってサービス内で行う。Rustの依存は `user-http → user-application` と `user-persistence → user-application` であり、`user-application` はHTTP・ORM・具体的な保存実装に依存しない。`user-server` が両アダプターを組み立てる。
 
 ### 0.1 対局・ユーザーの仕様
 
@@ -62,13 +67,25 @@ flowchart LR
 
 ### 0.3 DB・実行環境
 
-Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。退会やプロフィール変更は対局履歴を変更しない。旧DBのユーザーIDにはGoogle本人確認情報がなく、自動では新規アカウントに紐付けない。現行DBドライバーはSQLiteのみである。認証方式は[ユーザー認証の設計](user-authentication.md)、設定と起動は [user-server の README](../../apps/user-server/README.md) を参照する。
+Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。プロフィール変更は対局履歴を変更しない。アカウント削除APIは未実装である。旧DBのユーザーIDにはGoogle本人確認情報がなく、自動では新規アカウントに紐付けない。現行DBドライバーはSQLiteのみである。認証方式は[ユーザー認証の設計](user-authentication.md)、設定と起動は [user-server の README](../../apps/user-server/README.md) を参照する。
 
-ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`、`outbox-publisher`、Core NATSを起動する。対局とOutboxは共有SQLite Volumeに保存し、コンテナ再作成後も復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
+ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは既定で`game-server`、`outbox-publisher`、Core NATSを起動する。`auth` profileで`user-server`を追加する。対局とOutboxは`shogi-data`、ユーザーDBは独立した`user-data` Volumeに保存する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
+
+### 0.4 ユーザー認証・プロフィールの現行仕様
+
+- Google OpenID Connectの認可コードフローとPKCE S256を採用する。stateと試行用Cookieで開始元ブラウザーを照合し、nonceとIDトークンの署名・issuer・audience・期限等を検証する。
+- 検証済みのGoogle識別子 `(issuer, subject)` を内部 `UserId` に対応付ける。初回ログイン時に登録し、同じ識別子の再ログインでは既存アカウントを使う。メールアドレスや旧対局DBのIDから自動連携しない。
+- ログイン後は独自のCookieセッションを使い、DBにはトークンのハッシュと固定期限を保存する。Googleのトークンをアプリケーションのセッションに使わない。プロフィール取得、表示名変更、現在のセッションのログアウトを提供する。
+- 本番Cookieは `Secure`、`HttpOnly`、`SameSite=Lax`、host-onlyとし、表示名変更とログアウトは公開originとの一致を検証する。Google側のログアウトと独自セッションの失効は連動しない。
+- 起動時とコード交換時のdiscovery・JWKS取得はGoogleへの外部通信に依存する。既存セッションの照会はユーザーDBだけを使う。HTTPログインと対局gRPC・将来のWS認証の接続は未実装である。
+
+処理のトランザクション境界・失敗時動作は[ユーザー認証の設計](user-authentication.md)、環境変数・起動・検証コマンドは [user-serverのREADME](../../apps/user-server/README.md) を正本とする。本書はサービス間の責務と実装状況を記述する。
 
 ## 1. 要件と負荷モデル
 
 ### 1.1 主要機能
+
+以下は目標機能の全体像であり、実装済みの範囲は第0章に示す。
 
 - 対人対局: マッチング、着手、合法手判定、持ち時間、秒読み、投了、勝敗、レーティング
 - 観戦: 多数の同時観戦、着手イベント配信、途中参加、再接続、盤面再同期
@@ -92,20 +109,21 @@ Domain層とApplication層はSQL・ORMに依存しない。対局は`GameReposit
 
 ## 2. 技術スタック（現行と将来候補）
 
-Valkey、NATS、AI、Kubernetes、観測基盤は将来導入する構成であり、現行サーバーの実行には不要である。
+Core NATSへの確定イベント配信と、AxumによるGoogle認証・ユーザー管理は実装済みである。Valkey、NATS JetStream、AI、Kubernetes、観測基盤は将来構成である。対局の受理はPublisherやNATSの稼働を必要としない。
 
 | 領域 | 採用技術 | 主な役割 |
 |---|---|---|
 | 言語 | **Rust** | サーバー実装 |
-| Web API | **Axum** | HTTP API / 認証 |
-| 非同期基盤 | **Tokio** | 現在はGame Actor。WebSocket・タイマーは将来 |
+| Web API | **Axum** | 現在は独立したユーザーHTTPサービス。その他のApplication APIは将来 |
+| ユーザー認証 | **Google OpenID Connect / openidconnect** | 認可コードフロー・PKCE・IDトークン検証。アプリセッションは専用SQLiteで管理 |
+| 非同期基盤 | **Tokio** | 現在はGame ActorとHTTP・外部通信。WebSocket・タイマーは将来 |
 | RPC | **Tonic / gRPC** | 現在の対局操作。Gateway接続は将来 |
 | 将棋ルール | **rsshogi** | 非公開アダプター経由で利用 |
 | ORM | **SeaORM** | ユーザー・対局・受理済み履歴の保存 |
 | SQL | **SeaQuery / SeaORM経由のSQLx** | スキーマ構築、トランザクション、versionの条件付き更新 |
 | RDBMS | **SQLite（現行） / PostgreSQL（将来候補）** | 現在の正本はSQLite。時計・Shard Leaseは未実装 |
 | 一時データ | **Valkey** | Presence、マッチング、キャッシュ、Token Bucketによるレート制限 |
-| 低遅延イベント | **Core NATS** | 確定した着手等をGatewayへ配信 |
+| 低遅延イベント | **Core NATS** | 現在は確定イベントを発行。Gatewayへの配信は将来 |
 | 永続イベント/ジョブ | **NATS JetStream** | AI解析、統計、通知等の非同期ジョブ |
 | 将棋AI | **やねうら王等のUSIエンジン** | 局面評価・候補手・棋譜解析 |
 | 解説AI | **LLM（別Worker/外部推論）** | エンジン結果に根拠を置いた自然言語説明 |
@@ -120,7 +138,10 @@ Valkey、NATS、AI、Kubernetes、観測基盤は将来導入する構成であ�
 ```mermaid
 flowchart TB
   C[Web / iOS / Android] --> LB[Ingress / Load Balancer]
-  LB --> API[Application API<br/>Axum]
+  LB --> USER[User Service / user-server<br/>Google認証・プロフィール・セッション]
+  USER --> GOOGLE[Google OpenID Connect]
+  USER <-->|独立した所有権| USERDB[(User DB<br/>本番配置は未決定)]
+  LB --> API[Application API<br/>棋譜検索・レーティング・AI受付]
   LB --> GW[Realtime Gateway<br/>Axum / WebSocket]
   GW -->|Game ID → Shard → Owner| R[Game Router<br/>Gateway内モジュール]
   R -->|gRPC: MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
@@ -144,11 +165,12 @@ flowchart TB
   SM -->|配置/復旧調整| GAME
 ```
 
-上図は論理構成。AI完了イベントにもOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。
+上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Application APIへ認証を再統合しない。Gatewayがユーザー認証結果を受け取る方法は未設計であり、この図でWS認証の実装済みを意味しない。AI完了イベントにもOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。
 
 ### 3.1 アプリケーション単位
 
-- **Application API**: 認証、ユーザー情報、棋譜検索、レーティング、設定、AI解析受付
+- **User Service**: Google認証、登録、プロフィール、独自セッション。現行の `user-server` の責務を維持する
+- **Application API**: 棋譜検索、レーティング、対局設定、AI解析受付。ユーザー認証・プロフィールの正本は持たない
 - **Realtime Gateway**: WebSocketの接続認証、対局/観戦購読、着手の転送、再同期、送信キュー制限
 - **Game Service**: 各Game Actor、時計、合法手、結果確定、Shard復旧
 - **Shard Manager（独立アプリ）**: Game Podの登録・負荷収集、Shard配置・再配置計画、障害復旧の調整
@@ -440,7 +462,7 @@ flowchart LR
 
 ## 11. 永続化データモデル
 
-### 11.1 現行のSQLiteスキーマ
+### 11.1 現行の対局用SQLiteスキーマ
 
 | テーブル | 内容 |
 |---|---|
@@ -452,13 +474,26 @@ flowchart LR
 
 `games`のversion・結果、`journal`、`outbox_events`は原子的に更新する。対局スキーマバージョンは3であり、新規DBの初期化とv1・v2からの更新は同一トランザクション内で行う。v3ではユーザーへの外部キーを除去し、既存OutboxのID・配信済み状態を保つ。ユーザーサービスは別DBと独自のスキーマ台帳を持つ。v1の既存履歴を保ち、Outboxは空で開始する。イベントは更新後に受理した操作から生成し、既存履歴を遡って配信しない。起動時にはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Leaseは保存していない。
 
-### 11.2 将来の拡張候補
+### 11.2 現行のユーザー用SQLiteスキーマ
 
-以下はPostgreSQL等で分散構成を導入する際の概念モデルであり、現行テーブル名や導入済み機能を示すものではない。
+ユーザーDBは対局DBと別のファイル・接続プール・スキーマ台帳を持つ。
 
 | テーブル | 内容 |
 |---|---|
-| `users` | ユーザー |
+| `accounts` | 内部ユーザーID、表示名、作成時刻 |
+| `external_identities` | Googleのissuer・subjectと内部IDの対応。issuerとsubjectの組が主キー |
+| `login_attempts` | stateとブラウザー対応付け値のハッシュ、nonce、PKCE verifier、有効期限 |
+| `sessions` | 独自セッショントークンのハッシュ、内部ID、有効期限 |
+| `account_schema_version` | ユーザーDBのスキーマ台帳。現行バージョンは1 |
+
+外部識別子の解決、新規アカウントの作成、新セッションの追加は一つの即時トランザクションで行う。試行の一度限りの消費、Google通信、旧セッション削除は別の操作であり、callback全体は単一トランザクションではない。ユーザーDB起動時には台帳とテーブル・インデックスのSQL定義を検証する。この検証は11.1節の対局DBの起動検証とは別実装である。
+
+### 11.3 将来の拡張候補
+
+以下はPostgreSQL等で分散構成を導入する際の概念モデルであり、現行テーブル名や導入済み機能を示すものではない。ユーザー・外部識別子・セッションは11.2節の独立したユーザーDBに残し、対局DBへ統合しない。
+
+| テーブル | 内容 |
+|---|---|
 | `player_ratings` | ルール別レーティング |
 | `games` | 対局メタ、手番、version、時計の確定状態 |
 | `game_moves` | `(game_id, seq)`をキーとする確定着手履歴、request_id |
@@ -473,12 +508,15 @@ flowchart LR
 
 大量着手履歴については、インデックス・パーティショニング・アーカイブを計画する。単純に2,500手/秒が24時間継続すると約2億1,600万手/日となるが、これは負荷試験上の上限シナリオであって実トラフィック予測ではない。
 
-## 12. Kubernetes上での配置・運用
+## 12. Kubernetes上での配置・運用（将来設計）
+
+以下は未実装の配置案である。現行のローカル構成は0.3節のDocker Composeを参照する。
 
 ### 12.1 コンポーネントとKubernetesリソース
 
 | コンポーネント | 実行形態 | Service / 接続 | スケーリング・注意点 |
 |---|---|---|---|
+| User Service（`user-server`） | **独立Deployment候補** | 専用のHTTP ServiceとIngress、GoogleへのHTTPS通信 | ユーザーDBの配置・複数Pod運用は別途設計。現行SQLiteをそのまま複数Podで共有できるとはしない |
 | Application API（Axum） | **Deployment** / 複数Pod | ClusterIP Service + Ingress / Load Balancer | ステートレス。HPAでCPU・リクエスト数等を参照 |
 | Realtime Gateway（Axum / WS） | **Deployment** / 複数Pod | ClusterIP Service + WebSocket対応Ingress | 接続数・メモリ・送信キュー・帯域を監視。Graceful Drainが必要 |
 | **Game Router** | **各Gateway Pod内のRustモジュール** | 独立Service不要。所有者PodへTonic / gRPC | Game ID→Shard→所有者endpointをキャッシュし、変更時再解決 |
@@ -499,7 +537,8 @@ flowchart LR
 flowchart TB
   CLIENT[Web / iOS / Android] --> INGRESS[Ingress / Load Balancer]
   subgraph K8S[Kubernetes Cluster]
-    INGRESS --> API[API Deployment / Service]
+    INGRESS --> USER[User Service Deployment / Service]
+    INGRESS --> API[Application API Deployment / Service]
     INGRESS --> GW[Gateway Deployment / Service<br/>各PodにGame Router]
     MATCH[Matchmaking Deployment]
     GAME[Game Server Deployment<br/>Podごとに複数ShardとGame Actor]
@@ -527,9 +566,11 @@ flowchart TB
   BG <-->|Outbox等| PG
   BG -->|確定イベントPublish| NATS
   AI --> PG
+  USER --> GOOGLE[Google OpenID Connect]
+  USER <--> USERDB[(User DB / 配置方式は未決定)]
 ```
 
-これは実行配置の概念図であり、すべての通信を網羅しない。NATSのCore配信とJetStreamは**同じNATSサーバークラスタ上の異なる機能**である。
+User Serviceの接続先も将来配置の検討対象であり、独立したユーザーDBのDB製品や複数Pod方式は未決定である。これは実行配置の概念図であり、すべての通信を網羅しない。NATSのCore配信とJetStreamは**同じNATSサーバークラスタ上の異なる機能**である。
 
 ### 12.3 Game Server Podの発見・Shardの引き継ぎ
 
@@ -542,6 +583,7 @@ flowchart TB
 
 ### 12.4 可用性と更新・スケーリング
 
+- **User Service**: 独立したユーザーDBの永続化とバックアップを設計する。複数Pod運用は対応するDBアダプターと競合制御を検証してから決定する。Googleへのdiscovery依存も起動・ログインの可用性条件に含める。
 - **Application API**: Readiness / Liveness / Startup ProbeとHPAを構成する。
 - **Realtime Gateway**: ローリングアップデート時は新規接続受付を停止し、既存WebSocketをDrainingしてクライアントに再接続・再同期させる。CPUだけでなく接続数・送信キュー・帯域を観測する。
 - **Game Server**: Pod終了前にDrainingを開始しShardを移管する。突然の停止ではLease + Fencingで復旧。Pod追加とShard再配置を連動させるため、HPA自動化は負荷試験後に導入する。
@@ -553,7 +595,7 @@ flowchart TB
 
 - **Valkey採用**: Presence、Token Bucket / Fixed Window、キャッシュ、Sorted Setによるマッチングに利用する。イベント配信・ジョブキューは引き続きCore NATS / JetStreamを使い、Valkey Pub/Sub / Streamsへの依存は初期設計では持たない。
 - **Valkey本番**: AWSならAmazon ElastiCache for Valkey、Google CloudならMemorystore for Valkeyなど、Kubernetes基盤と同一クラウド・同一リージョンのマネージドサービスを優先する。互換コマンド・Lua・クラスタのキースロット制約を検証する。
-- **Valkeyローカル**: 導入時にDocker ComposeへValkeyを追加する。現行の`compose.yaml`は`game-server`、`outbox-publisher`、Core NATS、SQLite用Volumeを定義する。RustではRedisプロトコルに対応する`redis` crate等を利用可能。
+- **Valkeyローカル**: 導入時にDocker ComposeへValkeyを追加する。現行の`compose.yaml`は既定の対局・Outbox・Core NATSに加え、`auth` profileの`user-server`と専用ユーザーDB Volumeを定義する。RustではRedisプロトコルに対応する`redis` crate等を利用可能。
 - **PostgreSQL本番**: RDS / Cloud SQL / Azure Database for PostgreSQL等のマネージドHAを優先。Lease・FencingのトランザクションはPrimaryへ送る。
 - **自前Kubernetes運用の代替**: ValkeyやPostgreSQLをStatefulSet / Operatorで動かすことも可能だが、初期は運用負担を抑えるため採用しない。
 
@@ -562,6 +604,7 @@ flowchart TB
 ```text
 Kubernetes Cluster
 ├── shogi-app
+│   ├── user-server               (独立Deployment候補 + Service; DB配置は未決定)
 │   ├── api-server                (Deployment + Service)
 │   ├── realtime-gateway          (Deployment + Service; Game Router内蔵)
 │   ├── game-server               (Deployment; Pod固有gRPC endpoint)
@@ -585,7 +628,8 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 
 | 対象 | 仮の試験開始値 | 主な指標 |
 |---|---:|---|
-| API | 3 Pod | HTTPレイテンシ・CPU |
+| User Service | 未決定 | Google通信、セッションDB照会、DB配置と競合制御 |
+| Application API | 3 Pod | HTTPレイテンシ・CPU |
 | Gateway | 20〜30 Pod | 10万接続時の接続密度・送信帯域 |
 | Game Server | 8 Pod | 25,000局時のActor負荷・着手p99 |
 | Shard Manager | 2 Pod（Leader + Standby） | リーダー切替・再配置遅延 |
@@ -598,7 +642,13 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 
 ## 13. 可用性・性能・セキュリティ
 
-### 13.1 主要な対策
+### 13.1 現行の認証・権限検証
+
+ユーザーHTTPサービスでは、Google OIDCとPKCE、ブラウザーに対応付いた一度限りの試行、IDトークン検証、DB保存型セッション、Cookie属性、変更要求のOrigin検証を実装している。GoogleのAPIトークンは永続化しない。詳細と制約は[ユーザー認証の設計](user-authentication.md)にまとめる。
+
+対局gRPCは依然として内部の呼出元を信頼し、申告されたIDと参加者の対応を確認する。HTTPセッションをgRPCやWSへ渡す認証境界は未実装である。`expected_seq`、`request_id`、合法手の検証は現行機能だが、時計、分散Lease、Valkeyレート制限、WS認証は将来機能である。
+
+### 13.2 将来構成の対策
 
 - PostgreSQLのHA構成、バックアップ、リストア試験
 - Valkey / NATSの冗長化とクライアント再接続
@@ -608,10 +658,11 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 - 着手の`expected_seq`、`request_id`、サーバー側合法手・時間判定
 - AI解析のクォータ、同時実行制限、キャッシュ共有
 
-### 13.2 観測すべきメトリクス
+### 13.3 観測すべきメトリクス（未導入）
 
 | 領域 | 指標 |
 |---|---|
+| User Service | ログイン成否、Google通信失敗、セッションDB照会・書き込み、起動時discovery失敗 |
 | API/Gateway | 接続数、切断率、再接続率、送信キュー滞留、送信帯域 |
 | Game Actor | 着手処理p50/p95/p99、Actorキュー長、タイマー遅延 |
 | Shard | 配置偏り、Lease更新失敗、Shard復旧時間、世代衝突 |
@@ -622,7 +673,7 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 
 SLO候補として、着手確定と観戦配信のp99を定義する。ただしネットワーク往復や地域を明示してから正式な数値目標を確定する。
 
-### 13.3 負荷試験
+### 13.4 負荷試験（未実施の計画）
 
 - 1万 / 5万 / 10万WebSocket同時接続
 - 25,000同時対局、平均2,500着手/秒・ピーク10,000着手/秒（仮定）
@@ -637,7 +688,7 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 
 現在はRust / Tokio / Tonic / SeaORM / SQLiteで、単一Game Service、Game Actor（bounded mpsc + oneshot）、通常の合法手・詰み・投了、対局者固定、履歴永続化と再起動復元、受理済み要求の冪等再送まで実装済みである。
 
-Google認証・ユーザー管理は独立したAxumサービスで実装する。次の拡張は時計などを個別にスコープ決定して進める。時計の導入時には第7章の方針に従い、期限境界、mpsc待機、タイマー競合を検証する。PostgreSQLの導入は現行MVPの前提ではない。
+Google認証・ユーザー管理も、独立したAxumサービスと専用SQLiteで実装済みである。登録、プロフィール、固定期限のCookieセッション、ログアウトを提供する。実Googleログインの成功は利用者による手動確認として記録している。次の拡張は時計などを個別にスコープ決定して進める。時計の導入時には第7章の方針に従い、期限境界、mpsc待機、タイマー競合を検証する。PostgreSQLの導入は現行MVPの前提ではない。
 
 ### Phase 2: リアルタイム分離
 
@@ -653,7 +704,47 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 
 ## 15. Rustモノレポ構成
 
-現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。スキーマ処理は`crates/persistence/src/schema.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。対局スキーマは`crates/persistence/src/schema.rs`、ユーザースキーマは`crates/user-persistence/src/lib.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+
+### 15.1 現行Workspaceとユーザーサービスの公開境界
+
+以下はソースから生成する現在の一覧である。crateの依存は本番用の内部path依存だけを示し、テスト専用依存は含めない。
+
+<!-- architecture-inventory:start -->
+Cargoマニフェストとユーザーサービスのソースから生成。更新は `python3 scripts/check-architecture.py --write` を実行する。
+
+| Workspaceパッケージ | マニフェスト | 本番の内部依存 |
+|---|---|---|
+| `game-application` | [crates/game-application/Cargo.toml](../../crates/game-application/Cargo.toml) | `shogi-domain`, `user-id` |
+| `game-server` | [apps/game-server/Cargo.toml](../../apps/game-server/Cargo.toml) | `game-application`, `persistence`, `rpc` |
+| `messaging` | [crates/messaging/Cargo.toml](../../crates/messaging/Cargo.toml) | `game-application`, `shogi-domain` |
+| `outbox-publisher` | [apps/outbox-publisher/Cargo.toml](../../apps/outbox-publisher/Cargo.toml) | `game-application`, `messaging`, `persistence` |
+| `persistence` | [crates/persistence/Cargo.toml](../../crates/persistence/Cargo.toml) | `game-application`, `shogi-domain` |
+| `rpc` | [crates/rpc/Cargo.toml](../../crates/rpc/Cargo.toml) | `game-application`, `shogi-domain` |
+| `shogi-domain` | [crates/shogi-domain/Cargo.toml](../../crates/shogi-domain/Cargo.toml) | なし |
+| `user-application` | [crates/user-application/Cargo.toml](../../crates/user-application/Cargo.toml) | `user-id` |
+| `user-http` | [crates/user-http/Cargo.toml](../../crates/user-http/Cargo.toml) | `user-application` |
+| `user-id` | [crates/user-id/Cargo.toml](../../crates/user-id/Cargo.toml) | なし |
+| `user-persistence` | [crates/user-persistence/Cargo.toml](../../crates/user-persistence/Cargo.toml) | `user-application` |
+| `user-server` | [apps/user-server/Cargo.toml](../../apps/user-server/Cargo.toml) | `user-application`, `user-http`, `user-persistence` |
+
+ユーザーHTTPのルートパス。定義は `crates/user-http/src/lib.rs`。
+
+- `/auth/google/callback`
+- `/auth/google/start`
+- `/auth/logout`
+- `/me`
+
+ユーザーSQLiteのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。
+
+- `account_schema_version`
+- `accounts`
+- `external_identities`
+- `login_attempts`
+- `sessions`
+<!-- architecture-inventory:end -->
+
+### 15.2 将来拡張を含む配置案
 
 以下は将来拡張を含む配置案であり、すべてのディレクトリが存在するわけではない。
 
@@ -661,6 +752,8 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 shogi-backend/
 ├── Cargo.toml
 ├── apps/
+│   ├── user-server/            # 現行のユーザーHTTPサービス
+│   ├── outbox-publisher/       # 現行の確定イベント配信
 │   ├── api-server/
 │   ├── realtime-gateway/
 │   ├── game-server/
@@ -671,6 +764,10 @@ shogi-backend/
 ├── crates/
 │   ├── shogi-domain/         # 局面・合法手・詰み・投了（時計は未実装）
 │   ├── game-application/     # Game Actorとユースケース
+│   ├── user-id/              # 現行の共有ID値型
+│   ├── user-application/     # 現行のユーザー型・Repository契約
+│   ├── user-persistence/     # 現行の専用SQLite
+│   ├── user-http/            # 現行のGoogle OIDC・HTTP
 │   ├── shard-management/     # Shard / Lease / Fencing
 │   ├── game-routing/         # Game ID → 担当Pod
 │   ├── persistence/          # SeaORM / SQL / Outbox
@@ -700,10 +797,12 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 3. **サービス負荷の実測**: 1 Gateway PodあたりWebSocket数、1 Game PodあたりActor数、fan-out帯域。
 4. **追加ルールの導入範囲**: 現在対象外の時計、千日手、連続王手の千日手、入玉宣言勝ち等を導入する時期と判定詳細。
 5. **AI予算とSLO**: 解析深度、同時実行、課金/制限、エンジンのライセンス。
-6. **DB拡張**: SQLite以外のアダプター検証、本番DBの選定、レプリカ、パーティショニング、アーカイブの導入タイミング。
+6. **DB拡張**: SQLite以外のアダプター検証、本番DBの選定、レプリカ、パーティショニング、アーカイブの導入タイミング。ユーザーDBの本番配置と複数Pod方式も独立して決める。
+7. **認証境界の拡張**: HTTPセッションを利用する画面の配置、将来のGateway・WS接続認証・内部サービスへの本人情報の伝達方法。ユーザー管理の所有権を維持して設計する。
 
 ## 17. 設計方針のまとめ（将来構成）
 
+- **ユーザー管理・認証**: 独立した `user-server`、Google OIDCとPKCE、専用DBのCookieセッション。Application API・Game Serviceへ再統合しない
 - **対局の権威**: Rust/TokioのGame Actor（mpsc + oneshot、Actor取出し時点で正式受付、Admission Gateなし）
 - **分散配置**: Virtual Shard + **独立DeploymentのRust Shard Manager（Leader / Standby）**
 - **所有権の整合性**: PostgreSQL Lease + Fencing Token
@@ -716,3 +815,26 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 - **運用**: Kubernetes（アプリDeployment・NATSクラスタ）+ Managed Valkey / PostgreSQL
 
 **最初は単一Game ServiceのMVPを正しく作り、境界を保ったまま分散化する。** これが複雑さを抑えつつ10万人規模を狙う基本方針。
+
+## 18. 実装変更に合わせた更新と検証
+
+本書はサービス境界・現行実装状況・将来構想を所有する。認証フローの詳細は[ユーザー認証の設計](user-authentication.md)、設定・起動は [user-serverのREADME](../../apps/user-server/README.md)、HTTPの操作一覧は [user-httpのREADME](../../crates/user-http/README.md) に置く。詳細を本書へ複製せず、対応する正本を同じ変更で更新する。
+
+15.1節の一覧は [`scripts/check-architecture.py`](../../scripts/check-architecture.py) で生成する。Python 3.11以上を使い、リポジトリのルートで実行する。
+
+```sh
+python3 scripts/check-architecture.py --write
+python3 scripts/check-architecture.py --check
+```
+
+CIはソースと生成一覧の不一致を拒否する。検査対象はWorkspace・本番内部依存・ユーザーHTTPのルートパス・ユーザーDBのテーブル一覧であり、文章の意味や将来構想の正しさまで自動では保証しない。
+
+| 実装で変わったもの | 同じ変更で確認・更新する箇所 |
+|---|---|
+| crateの追加・削除・内部依存 | 第0章の責務、15.1節の生成一覧、15.2節の配置案 |
+| ユーザーHTTPルート・セッション・Google検証 | 0.4節、第13章、認証設計、HTTP APIのREADME |
+| DB所有権・スキーマ・登録と対局の関係 | 0.3節、第11章、現行・将来の構成図 |
+| Compose profile・Volume・待ち受け | 0.3節、user-serverのREADME、compose.yamlとの整合 |
+| 将来機能の実装完了 | 第0章、第2章、該当する将来設計章、第14章。実装済みと未実装を両方更新する |
+
+文章の照合先は現行のソースとテストである。将来構想を実装済みの根拠にしない。設定値と操作手順はREADME、認証の保証範囲は認証設計と対応テストで確認する。

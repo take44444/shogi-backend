@@ -1,0 +1,18 @@
+name: Documentation
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test architecture checker
+        run: python3 scripts/test-check-architecture.py
+      - name: Check architecture inventory and links
+        run: python3 scripts/check-architecture.py
