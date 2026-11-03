@@ -25,22 +25,52 @@ Database errors return `Unavailable`; an incompatible schema version returns
 `Corrupt`.
 
 Startup acquires an immediate transaction before inspecting the schema. Only a
-new database receives a `schema_version` ledger. Ledger creation and version 1
-are committed together. An existing empty ledger, a missing ledger beside game
-tables, missing application tables, and unknown versions fail closed without
+new database receives a `schema_version` ledger. New databases reach version 2
+atomically. Version 1 databases gain an empty `outbox_events` table and advance
+to version 2 in the same transaction. Existing users and game history remain
+unchanged. Historical commands are not backfilled as live events. An existing
+empty ledger, a missing ledger beside owned tables, missing application tables,
+an unexpected outbox beside version 1, and unknown versions fail closed without
 repairing metadata. Concurrent startup serializes migration.
 
-Game creation and append use immediate SQLite transactions. Append updates the
-game only at the expected version and inserts the receipt in the same transaction.
+Game creation and `commit_change` use immediate SQLite transactions.
+`commit_change(&StagedGameChange)` updates the game only at the expected version and
+inserts the supplied receipt and already generated events in the same transaction.
+The application constructs the change and freezes event content before commit;
+the adapter does not generate events.
 It verifies participant membership before committing. A failed statement rolls
 back explicitly. SeaORM retains an open failed transaction until its drop queues
 SQLx rollback; such a connection cannot serve the next request with pending writes.
-The application reconciles every append failure through a fresh durable load.
+The application reconciles every commit failure through a fresh durable load.
 
 `load_game` reads metadata and the ordered journal with one left join. A load
 cannot combine metadata and history from different database snapshots. The
 application validates replay; the adapter never restores a game from an untrusted
 position string. Direct manual database edits are outside the mutation API.
+
+`outbox_events` freezes each event's typed payload and encoding version at commit
+time. Pending events are not regenerated from journal records during delivery.
+Uniqueness on `(game_id, seq, event_kind)` protects event identity, and a foreign
+key binds the event to its journal entry. Published rows remain stored. A pending
+index orders dispatch by insertion ID. That ID is a storage cursor, separate
+from the public event identity.
+
+`SqliteOutbox::connect` is the production entry point to pending events. It
+requires a file-backed database on a Linux local filesystem and holds an
+exclusive OS file lock on the actual database inode. Competing publishers
+cannot open the queue concurrently. Use the same database path for all services.
+Hard links to a live WAL database are unsupported because they can use different
+WAL files for the same database inode.
+The lock permits ordinary SQLite transactions, and dispatch holds no transaction
+open while waiting for NATS. Process exit releases the lock. Replacing or
+unlinking a live database is unsupported.
+
+The publisher reads one pending row and marks that exact row after a successful
+transport handoff. Marking is idempotent. A failed or uncertain handoff or mark
+leaves recovery to the next read. This single publisher preserves the order of
+new event attempts, but uncertain sends can produce late duplicates. A blocked
+head event blocks later events. This adapter does not implement distributed
+publisher ownership or leases.
 
 Contract tests use both in-memory and temporary file SQLite databases. They cover
 constraints, concurrent bootstrap and writers, coherent reads, real statement

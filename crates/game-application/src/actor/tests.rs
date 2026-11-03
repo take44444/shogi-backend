@@ -1,9 +1,9 @@
 use super::*;
-use crate::{GameService, MAILBOX_CAPACITY, MakeMove, UserId};
+use crate::{CommittedEvent, DomainEvent, GameService, MAILBOX_CAPACITY, MakeMove, UserId};
 use async_trait::async_trait;
 use std::sync::Mutex;
 
-struct RecordStore(Mutex<GameRecord>);
+struct RecordStore(Mutex<GameRecord>, Mutex<Vec<StagedGameChange>>);
 fn id() -> GameId {
     GameId::new("lifecycle").unwrap()
 }
@@ -15,17 +15,20 @@ fn receipt() -> Pending {
         action: Action::Move("7g7f".parse().unwrap()),
     }
 }
-fn store() -> Arc<dyn GameRepository> {
-    Arc::new(RecordStore(Mutex::new(GameRecord {
-        id: id(),
-        participants: Participants {
-            black: UserId::new("black").unwrap(),
-            white: UserId::new("white").unwrap(),
-        },
-        version: 0,
-        result: None,
-        journal: vec![],
-    })))
+fn store() -> Arc<RecordStore> {
+    Arc::new(RecordStore(
+        Mutex::new(GameRecord {
+            id: id(),
+            participants: Participants {
+                black: UserId::new("black").unwrap(),
+                white: UserId::new("white").unwrap(),
+            },
+            version: 0,
+            result: None,
+            journal: vec![],
+        }),
+        Mutex::default(),
+    ))
 }
 #[async_trait]
 impl GameRepository for RecordStore {
@@ -42,13 +45,76 @@ impl GameRepository for RecordStore {
         }
         Ok(record.version)
     }
-    async fn append(&self, _: &GameId, receipt: &Receipt) -> Result<(), ApplicationError> {
+    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), ApplicationError> {
+        self.1.lock().unwrap().push(change.clone());
+        let receipt = change.receipt();
         let mut record = self.0.lock().unwrap();
         record.version = receipt.acceptance.seq;
         record.result = receipt.acceptance.result;
         record.journal.push(receipt.clone());
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn actor_supplies_events_before_commit_change_and_skips_retries_and_rejections() {
+    let store = store();
+    let mut actor = Actor::new(id(), store.clone());
+    let first = receipt();
+    let accepted = actor.apply(first.clone()).await.unwrap();
+    assert_eq!(actor.apply(first.clone()).await, Ok(accepted));
+    assert_eq!(
+        actor
+            .apply(Pending {
+                request_id: RequestId::new("rejected").unwrap(),
+                expected_seq: 1,
+                ..first.clone()
+            })
+            .await,
+        Err(ApplicationError::Domain(
+            shogi_domain::CommandError::WrongTurn
+        ))
+    );
+    let resignation = Pending {
+        request_id: RequestId::new("end").unwrap(),
+        user_id: UserId::new("white").unwrap(),
+        expected_seq: 1,
+        action: Action::Resign,
+    };
+    let finished = actor.apply(resignation.clone()).await.unwrap();
+    assert_eq!(actor.apply(resignation.clone()).await, Ok(finished));
+
+    let supplied = store.1.lock().unwrap();
+    assert_eq!(supplied.len(), 2);
+    assert_eq!(supplied[0].game_id(), &id());
+    assert_eq!(supplied[0].receipt().acceptance, accepted);
+    assert_eq!(
+        supplied[0].events(),
+        &[CommittedEvent {
+            game_id: id(),
+            request_id: first.request_id,
+            user_id: first.user_id,
+            seq: accepted.seq,
+            event: DomainEvent::MoveCommitted {
+                movement: "7g7f".parse().unwrap(),
+                in_check: accepted.in_check,
+                result: accepted.result,
+            },
+        }]
+    );
+    assert_eq!(supplied[1].receipt().acceptance, finished);
+    assert_eq!(
+        supplied[1].events(),
+        &[CommittedEvent {
+            game_id: id(),
+            request_id: resignation.request_id,
+            user_id: resignation.user_id,
+            seq: finished.seq,
+            event: DomainEvent::GameFinished {
+                result: finished.result.unwrap(),
+            },
+        }]
+    );
 }
 
 #[test]

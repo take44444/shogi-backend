@@ -22,12 +22,14 @@
 //! [`Acceptance`] before stale-sequence or finished-game checks, even after restart.
 //! Rejected request IDs remain reusable. Creating a user or game is not idempotent.
 //!
-//! A command stages a cloned game and receipt. The actor publishes that candidate
-//! only after [`GameRepository::append`] confirms a commit. Every failed append
+//! A command stages a cloned game and receipt. The actor constructs a
+//! [`StagedGameChange`] to generate and freeze events before persistence. The repository
+//! atomically saves that supplied receipt and event batch. The actor publishes the candidate
+//! only after [`GameRepository::commit_change`] confirms a commit. Every failed commit
 //! triggers a durable reload. A matching receipt yields its original acceptance; changed
-//! contents yield [`ApplicationError::RequestConflict`]. If append reported a version
+//! contents yield [`ApplicationError::RequestConflict`]. If commit reported a version
 //! conflict and no matching receipt exists, the actor returns
-//! [`ApplicationError::SequenceMismatch`] with the reloaded version. Other append
+//! [`ApplicationError::SequenceMismatch`] with the reloaded version. Other commit
 //! failures without a receipt yield [`ApplicationError::Unavailable`] and invalidate
 //! local state. Failed
 //! reconciliation also leaves state invalid; a later successful refresh can recover.
@@ -38,6 +40,8 @@
 #![warn(missing_docs)]
 
 mod actor;
+mod events;
+pub use events::*;
 mod repository;
 mod types;
 mod user;
