@@ -1,0 +1,13 @@
+[package]
+name = "player-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+[dependencies]
+game-record-application = { path = "../../crates/game-record-application" }
+game-persistence = { path = "../../crates/game-persistence" }
+player-http = { path = "../../crates/player-http" }
+tokio.workspace = true
+axum = "0.8"
+[lints]
+workspace = true

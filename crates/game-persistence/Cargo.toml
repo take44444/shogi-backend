@@ -5,11 +5,11 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+game-record-application = { path = "../game-record-application" }
 game-application = { path = "../game-application" }
 shogi-domain = { path = "../shogi-domain" }
 async-trait = "0.1"
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "sqlx-sqlite", "runtime-tokio"] }
-sea-schema = { version = "0.18.1", default-features = false, features = ["probe", "sqlite", "postgres", "mysql"] }
 
 [dev-dependencies]
 tokio.workspace = true

@@ -14,6 +14,6 @@ The public API accepts no caller-selected internal user ID and never links ident
 
 Production cookies are host-only `__Host-user_session` and `__Host-user_login` cookies with `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`. Explicit loopback HTTP development mode uses `user_session` and `user_login` without `Secure`.
 
-The account service does not expose user gRPC, WebSocket, presence, matchmaking, routing, or gateway endpoints. It does not import or link legacy game users. Existing game records remain unchanged. Account deletion and administrative account management are outside this implementation.
+The account service does not expose user gRPC, WebSocket, presence, matchmaking, routing, or gateway endpoints. Existing game records remain unchanged. Account deletion and administrative account management are outside this implementation.
 
 See the [user-server README](../../apps/user-server/README.md) for Google client configuration, environment variables, and startup.

@@ -1010,11 +1010,23 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "game-application",
+ "game-record-application",
  "sea-orm",
- "sea-schema",
  "shogi-domain",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "game-record-application"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "serde_json",
+ "sha2 0.10.9",
+ "shogi-domain",
+ "user-id",
 ]
 
 [[package]]
@@ -1966,6 +1978,34 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
+name = "player-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "game-application",
+ "game-persistence",
+ "game-record-application",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "player-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "game-persistence",
+ "game-record-application",
+ "player-http",
+ "tokio",
+]
 
 [[package]]
 name = "pluralizer"

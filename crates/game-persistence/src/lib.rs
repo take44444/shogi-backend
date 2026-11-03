@@ -1,6 +1,6 @@
 //! SQLite persistence for [`GameRepository`] through SeaORM.
 //!
-//! [`SeaOrmStore::connect`] opens a pool and migrates or validates the schema before
+//! [`SeaOrmStore::connect`] opens a pool and initializes or validates the schema before
 //! returning. SQLite is the only compiled and tested driver. Other adapters or
 //! drivers require their own validation, even though the application port is neutral.
 //!
@@ -46,8 +46,10 @@
 #![warn(missing_docs)]
 
 mod outbox;
+mod record;
 mod schema;
 pub use outbox::{OutboxOpenError, SqliteCursor, SqliteOutbox};
+pub use record::SqliteGameRecords;
 
 use async_trait::async_trait;
 use game_application::{
@@ -63,13 +65,13 @@ use sea_orm::{
 use shogi_domain::{FinishReason, GameResult, Player};
 use std::time::Duration;
 
-/// A migrated SQLite connection pool implementing [`GameRepository`].
+/// An initialized SQLite connection pool implementing [`GameRepository`].
 pub struct SeaOrmStore {
     db: DatabaseConnection,
 }
 
 impl SeaOrmStore {
-    /// Opens SQLite and validates or migrates its schema before returning.
+    /// Opens SQLite and initializes or validates its schema before returning.
     /// For a new database, creates the schema and version ledger atomically.
     /// Existing empty or incompatible ledgers and missing application tables fail
     /// closed. Concurrent startup is serialized by an immediate transaction.
@@ -91,9 +93,9 @@ impl SeaOrmStore {
                     .busy_timeout(Duration::from_secs(5))
             });
         let db = Database::connect(options).await.map_err(storage)?;
-        schema::migrate(&db).await.map_err(|error| match error {
-            schema::MigrationError::Corrupt => Error::Corrupt,
-            schema::MigrationError::Database(error) => storage(error),
+        schema::initialize(&db).await.map_err(|error| match error {
+            schema::SchemaError::Corrupt => Error::Corrupt,
+            schema::SchemaError::Database(error) => storage(error),
         })?;
         Ok(Self { db })
     }
@@ -182,11 +184,22 @@ impl GameRepository for SeaOrmStore {
             .execute(
                 Query::insert()
                     .into_table(a("games"))
-                    .columns([a("id"), a("black"), a("white"), a("version")])
+                    .columns([
+                        a("id"),
+                        a("black"),
+                        a("white"),
+                        a("version"),
+                        a("rule"),
+                        a("visibility"),
+                        a("final_move_ply"),
+                    ])
                     .values_panic([
                         id.as_str().into(),
                         participants.black.as_str().into(),
                         participants.white.as_str().into(),
+                        0_i64.into(),
+                        "standard".into(),
+                        "public".into(),
                         0_i64.into(),
                     ]),
             )
@@ -309,18 +322,17 @@ impl GameRepository for SeaOrmStore {
             .map_err(storage)?;
         let operation = async {
             let (winner, reason) = result_values(receipt.acceptance.result);
+            let finished_at = receipt.acceptance.result.map(|_| {
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                    .ok().and_then(|time| i64::try_from(time.as_micros()).ok())
+                    .ok_or(Error::Unavailable)
+            }).transpose()?;
             let updated = tx
-                .execute(
-                    Query::update()
-                        .table(a("games"))
-                        .values([
-                            (a("version"), seq.into()),
-                            (a("winner"), winner.clone().into()),
-                            (a("reason"), reason.clone().into()),
-                        ])
-                        .and_where(Expr::col(a("id")).eq(id.as_str()))
-                        .and_where(Expr::col(a("version")).eq(expected)),
-                )
+                .execute_raw(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DbBackend::Sqlite,
+                    "UPDATE games SET version = ?, winner = ?, reason = ?, final_move_ply = final_move_ply + ?, finished_at = ? WHERE id = ? AND version = ?",
+                    [seq.into(), winner.clone(), reason.clone(), i64::from(matches!(receipt.action, Action::Move(_))).into(), finished_at.into(), id.as_str().into(), expected.into()],
+                ))
                 .await
                 .map_err(storage)?;
             if updated.rows_affected() != 1 {

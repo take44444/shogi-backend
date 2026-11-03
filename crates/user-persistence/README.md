@@ -6,4 +6,4 @@ An immediate SQLite transaction resolves the unique Google issuer and subject, c
 
 Login attempts retain the nonce and PKCE verifier for ten minutes. A single `DELETE ... RETURNING` consumes an unexpired attempt only when its state hash and browser cookie hash match. Expired attempts and sessions are pruned when a login starts. Protect the SQLite file and its backups as account data.
 
-The crate does not depend on game code or migrate game databases.
+The crate does not depend on game code or initialize game databases.

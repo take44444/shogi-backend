@@ -166,7 +166,7 @@ HTTP アダプターのアプリケーションエラーは、認証失敗を `4
 
 ## 対局サービスとの関係と適用範囲
 
-対局 DB のスキーマ v3 はユーザーへの外部キーを持たない。旧 DB のユーザー行は `legacy_users` に退避し、棋譜・参加者 ID・Outbox の ID と配信状態を保持する。旧ユーザー ID には Google の本人確認情報がないため、新規 Google ログインへ自動で紐付けない。
+対局 DB はユーザーへの外部キーやアカウントテーブルを持たない。参加者は内部 `UserId` で識別し、アカウント情報は独立したユーザー DB に保存する。
 
 現在の対局 gRPC は、呼出元が申告したユーザー ID を受け付ける信頼された内部 API である。対局作成では異なる ID を要求するが、アカウントの存在をユーザーサービスへ問い合わせない。着手・投了では対局参加者との一致を確認する。この Cookie セッションによって対局 gRPC が認証されるわけではない。
 
@@ -181,6 +181,6 @@ WS 認証、Realtime Gateway、Game Router、Valkey の Presence・マッチン�
 | [`google/tests.rs`](../../crates/user-http/src/google/tests.rs) | `openid profile`、state、nonce、PKCE S256 の認可要求と verifier を含む実 HTTP のコード交換。RSA 署名付きトークンを使った issuer・audience・nonce・exp・azp・署名・at_hash の検証。 |
 | [`user-http/src/tests.rs`](../../crates/user-http/src/tests.rs) | 試行のブラウザー対応と再利用拒否、Cookie、Origin、プロフィール、再起動、ログアウト。ローカル TCP での一連のブラウザーフロー。 |
 | [`user-persistence`](../../crates/user-persistence/src/lib.rs) | 試行とセッションの期限境界、並行した初回登録とコールバック消費、スキーマ不整合の拒否。 |
-| [`game-persistence/tests/contracts.rs`](../../crates/game-persistence/tests/contracts.rs) | 対局 DB の移行、棋譜と Outbox の保持、ユーザー DB に依存しない対局作成。 |
+| [`game-persistence/tests/contracts.rs`](../../crates/game-persistence/tests/contracts.rs) | 対局 DB の初期化、再起動時の棋譜と Outbox の保持、ユーザー DB に依存しない対局作成。 |
 
 自動テストは実 Google アカウントの継続的な可用性を保証しない。再実行コマンドは [user-server の検証手順](../../apps/user-server/README.md#verification)、手動ログインの入口は[ローカル起動手順](../../apps/user-server/README.md#run-locally)に置く。

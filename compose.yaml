@@ -29,6 +29,23 @@ services:
     init: true
     stop_signal: SIGINT
     stop_grace_period: 15s
+  player-server:
+    build: .
+    profiles: [records]
+    entrypoint: ["player-server"]
+    environment:
+      PLAYER_BIND_ADDR: 0.0.0.0:8081
+      PLAYER_GAME_DATABASE_PATH: /data/shogi.db
+    ports:
+      - "127.0.0.1:${PLAYER_SERVER_PORT:-8081}:8081"
+    volumes:
+      - shogi-data:/data:ro
+    depends_on:
+      - game-server
+    init: true
+    restart: on-failure
+    stop_signal: SIGINT
+    stop_grace_period: 15s
   outbox-publisher:
     build: .
     entrypoint: ["outbox-publisher"]
