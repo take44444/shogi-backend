@@ -120,6 +120,48 @@ user-persistence = { path = "../../crates/user-persistence" }
         self.put("crates/user-http/src/lib.rs", 'fn router() { Router::new().route("/me", get(me)).route("/auth/logout", post(logout)); }')
         self.assert_stale("`/auth/logout`")
 
+    def test_route_bound_registry_tracks_paths_and_multiple_methods(self) -> None:
+        self.put("crates/user-http/src/lib.rs", '''fn api_router() -> OpenApiRouter<App> {
+    OpenApiRouter::new().routes(routes!(me)).routes(routes!(rename))
+}
+#[utoipa::path(get, path = "/me", responses((status = 200, body = ProfileBody)))]
+async fn me() {}
+#[utoipa::path(patch, path = "/me", request_body = Rename, responses((status = 200)))]
+async fn rename() {}
+''')
+        self.refresh()
+        path = self.root / "crates/user-http/src/lib.rs"
+        source = path.read_text().replace(".routes(routes!(rename))", ".routes(routes!(rename)).routes(routes!(logout))")
+        source += '\n#[utoipa::path(post, path = "/auth/logout", responses((status = 204)))]\nasync fn logout() {}\n'
+        path.write_text(source)
+        self.assert_stale("`/auth/logout`")
+        self.assertEqual(self.document.read_text().count("- `/me`"), 1)
+
+    def test_unsupported_route_bound_registrations_fail_closed(self) -> None:
+        valid = '''fn api_router() { OpenApiRouter::new().routes(routes!(me)) }
+#[utoipa::path(get, path = "/me", responses((status = 200)))]
+async fn me() {}
+'''
+        for source in (
+            valid.replace("routes!(me)", "routes!(undocumented)"),
+            valid.replace('path = "/me"', 'path = PATH'),
+            valid.replace('path = "/me"', 'path = "/me", context_path = "/v2"'),
+            valid.replace('path = "/me"', 'path = "/me", path = "/v2/me"'),
+            valid.replace(".routes(routes!(me))", ".routes(other_routes())"),
+            valid.replace(".routes(routes!(me))", ".routes(routes!(me, other))"),
+            valid + 'fn added() { Router::new().route("/extra", get(extra)); }',
+            valid + 'fn added() { Router::new().nest("/extra", other()); }',
+            valid + 'fn added() { Router::new().merge(other()); }',
+            valid.replace(".routes(routes!(me))", ".routes(routes!(me)).routes(routes!(me))"),
+            valid + '\n#[utoipa::path(get, path = "/other", responses((status = 200)))]\nasync fn other() {}',
+        ):
+            with self.subTest(source=source):
+                self.put("crates/user-http/src/lib.rs", source)
+                before = self.document.read_bytes()
+                result = self.run_checker("--write", success=False)
+                self.assertIn("Cannot parse every HTTP route", result.stderr)
+                self.assertEqual(before, self.document.read_bytes())
+
     def test_added_table_is_stale(self) -> None:
         self.refresh()
         path = self.root / "crates/user-persistence/src/lib.rs"

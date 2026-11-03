@@ -11,7 +11,7 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction};
 /// Failure opening a publisher's exclusive SQLite queue.
 #[derive(Debug)]
 pub enum OutboxOpenError {
-    /// Database connection, migration, or filename lookup failed.
+    /// Database connection, schema initialization or validation, or filename lookup failed.
     Database(Error),
     /// The SQLite database has no local backing file.
     FileRequired,
@@ -45,7 +45,7 @@ pub struct SqliteOutbox {
     _lock: std::fs::File,
 }
 impl SqliteOutbox {
-    /// Opens and migrates the database, then refuses a competing publisher.
+    /// Opens and initializes or validates the database, then refuses a competing publisher.
     ///
     /// Returns an error for an in-memory database, a competing lock, or storage failure.
     pub async fn connect(url: &str) -> Result<Self, OutboxOpenError> {

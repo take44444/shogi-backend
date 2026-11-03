@@ -75,3 +75,8 @@ cargo test -p user-id -p user-application -p user-persistence -p user-http -p us
 ```
 
 Tests cover signed ID-token validation, PKCE code exchange, browser-bound login attempts, concurrent registration, profile updates, CSRF checks, session expiry, restart, and logout. Local HTTP tests use a simulated provider; real Google login requires a configured OAuth client and browser interaction.
+
+`GET /openapi.json` serves the OpenAPI 3.1 contract. To export it without server
+startup or configuration, run `cargo run -p user-http --example user-openapi`.
+See the [HTTP adapter reference](../../crates/user-http/README.md) for generation
+and contract checks.

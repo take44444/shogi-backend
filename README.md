@@ -24,7 +24,7 @@ Each invocation needs a new game ID. Omitting the ID generates one.
 
 The server defaults to `127.0.0.1:50051` and
 `DATABASE_URL=sqlite://data/shogi.db?mode=rwc`. Startup creates the database's
-parent directory and migrates the schema before listening. Participant
+parent directory and initializes or validates the schema before listening. Participant
 bindings, positions, results, and accepted request receipts survive restart.
 A positional address overrides `GAME_SERVER_ADDR`.
 
@@ -32,6 +32,24 @@ A positional address overrides `GAME_SERVER_ADDR`.
 DATABASE_URL='sqlite://data/demo.db?mode=rwc' cargo run -p game-server -- 127.0.0.1:50052
 cargo run -p game-grpc --example play -- http://127.0.0.1:50052 my-game
 ```
+
+## Read public completed game records
+
+After `game-server` initializes the database, run the anonymous record API.
+
+```sh
+cargo run -p player-server
+curl 'http://127.0.0.1:8081/game-records?from=1793577600000000&to=1793664000000000&limit=30'
+curl 'http://127.0.0.1:8081/game-records/my-game'
+```
+
+Replace the period with the game's UTC microsecond interval. Lists contain only
+metadata. Detail includes ordered moves and resignation. New games are public
+once finished. No user service is required.
+The reader opens an existing game database with read-only SQLite permissions.
+See [player-server](apps/player-server/README.md) for filters, limits, and errors.
+`docker compose --profile records up --build -d` also starts the reader with a
+read-only database volume.
 
 ## Prove persistence across container recreation
 
@@ -104,11 +122,10 @@ the hexadecimal game ID, sequence, and event type with colons.
 Pending rows preserve typed event fields rather than serialized JSON bytes.
 Future encoder changes must preserve this version-one wire mapping.
 
-Existing version 1 and 2 game databases migrate to version 3 automatically.
-History and existing outbox IDs and publication state are preserved. Version 1
-databases gain an empty outbox. There is no historical event backfill.
-Version 3 removes foreign keys to user accounts. Legacy user rows are archived as `legacy_users`
-and do not establish ownership of a Google account.
+New game databases initialize schema version 5 atomically. Existing databases must
+already have the current version ledger and required tables. Startup validates
+that format without changing game records, receipts, or outbox publication state.
+Incompatible or incomplete databases fail startup without upgrading or deleting data.
 
 Run the Compose proof from the repository root.
 
@@ -124,6 +141,20 @@ by `GAME_SERVER_PORT` and `NATS_PORT`. Cleanup removes only that proof project's
 containers and volume.
 
 ## Read the API documentation
+
+Generate OpenAPI 3.1 JSON for both HTTP services without a database, credentials,
+or running servers.
+
+```sh
+bash scripts/generate-openapi.sh
+```
+
+The documents are `target/openapi/player.json` and `target/openapi/user.json`.
+An optional first argument selects the output directory. Running services expose
+these documents at `GET /openapi.json`. The handler annotations and serialized
+HTTP DTOs in [player-http](crates/player-http/README.md) and
+[user-http](crates/user-http/README.md) are the schema sources.
+
 
 Generate the workspace API reference with rustdoc.
 
@@ -141,7 +172,7 @@ The crate pages describe domain rules, application commands and errors, the
 storage contract, and the gRPC adapter. Protocol message comments originate in
 `proto/game.proto` and appear in the generated `game_grpc::proto` reference.
 
-Include private modules when inspecting actor recovery and schema migrations.
+Include private modules when inspecting actor recovery and schema initialization.
 
 ```sh
 cargo doc --workspace --no-deps --document-private-items

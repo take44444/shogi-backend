@@ -62,8 +62,7 @@ JSONの`game_id`は元の文字列を保持する。
 定義と通信形式のテストは[game-messaging](../../crates/game-messaging/src/lib.rs)にある。
 
 新規DBはスキーマversion 2を原子的に作成する。
-version 1からの移行はユーザー、対局、履歴を維持し、空のOutboxを追加する。過去のイベントは補完しない。
-移行後に受理した操作からイベントを保存する。
+空の対局DBは現行スキーマで初期化し、受理した操作からOutboxイベントを保存する。既存DBは現行形式を検証し、非対応の形式は変更せず起動を拒否する。
 必須テーブルの欠落、不正なスキーマ台帳、孤立したOutbox、未知のversionは起動時に拒否する。
 
 ## 配信確認と重複の限界
@@ -126,6 +125,6 @@ hardlinkは対応しない。
 
 - [イベントと配信ユースケースのテスト](../../crates/game-application/src/events.rs)が生成順、識別子、失敗時の再送を確認する。
 - [Actorのテスト](../../crates/game-application/src/actor/tests.rs)が保存前の生成、再送・拒否時の呼出抑止を確認する。
-- [Outboxの永続化テスト](../../crates/game-persistence/tests/outbox.rs)が原子性、固定内容、移行、不確定commit、プロセス排他を確認する。
+- [Outboxの永続化テスト](../../crates/game-persistence/tests/outbox.rs)が原子性、固定内容、再起動後の保持、不確定commit、プロセス排他を確認する。
 - [NATSアダプターのテスト](../../crates/game-messaging/src/lib.rs)が通信形式、実イベントのecho、権限拒否、再接続の抑止を確認する。
 - [Compose検証スクリプト](../../scripts/prove-outbox.sh)が実際の配信、Publisher停止中の蓄積、サーバー再作成、NATS停止後の復旧を確認する。前提条件と実行方法は[README](../../README.md#publish-committed-game-events)にある。

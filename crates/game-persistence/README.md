@@ -1,6 +1,6 @@
 # game-persistence
 
-`SeaOrmStore::connect(&str).await` connects and migrates before returning the shared adapter.
+`SeaOrmStore::connect(&str).await` connects and initializes or validates the schema before returning the shared adapter.
 `SeaOrmStore` implements `GameRepository`. Its database contains only game state
 and the durable event outbox. It does not query or connect to the user service.
 SeaORM 2.0.4 is pinned with default features disabled. SQLite is the only compiled
@@ -23,19 +23,13 @@ File databases use up to five. SQLite settings live only in this adapter.
 Database errors return `Unavailable`; an incompatible schema version returns
 `Corrupt`.
 
-Startup acquires an immediate transaction before inspecting the schema. Only a
-new database receives a `schema_version` ledger. New databases reach version 3
-atomically and do not create account tables. Version 1 and 2 databases migrate
-inside the same transaction with foreign keys enabled. Migration preserves all
-game metadata and receipts. Version 2 also retains every outbox row, including its
-ID and published flag. Version 1 receives an empty outbox, without backfilling live
-events. The former `users` table becomes `legacy_users`, an inert archive of
-caller-chosen IDs. These rows do not establish ownership of any Google account.
-The game API never reads or writes that archive.
-
-An existing empty ledger, a missing ledger beside owned tables, missing application
-tables, an unexpected outbox beside version 1, and unknown versions fail closed
-without repairing metadata. Concurrent startup serializes migration.
+Startup acquires an immediate transaction before inspecting the schema. An empty
+database receives the version 5 ledger, tables, constraints, and indexes atomically.
+It does not create account tables. Existing databases must contain the current
+ledger and required application tables. An empty or malformed ledger, a missing
+ledger, missing application tables, and any other version fail closed without
+changing existing data. Startup does not upgrade, rebuild, or delete existing data.
+Concurrent startup serializes initialization.
 
 Game creation and `commit_change` use immediate SQLite transactions.
 `commit_change(&StagedGameChange)` updates the game only at the expected version and
@@ -80,3 +74,42 @@ Contract tests use both in-memory and temporary file SQLite databases. They cove
 constraints, concurrent bootstrap and writers, coherent reads, real statement
 and deferred-commit failures, corrupt history, uncertain commits, failed
 reconciliation, exact replay, and process-independent service restoration.
+
+## Public completed records
+
+`SqliteGameRecords::open(path)` implements the separate `game-record-application`
+read port. It canonicalizes an existing file, opens SQLite with read-only flags,
+and enables `query_only` on every pooled connection. It never creates a file,
+initializes a schema, changes journal mode, or exposes a game write repository.
+Startup requires schema version 5 and the expected game and journal columns.
+The reader uses SQLx from SeaORM's existing driver dependency for SQLite progress
+handlers. The pool has four connections, a two-second acquisition timeout,
+a two-second busy timeout, and a two-second SQLite instruction deadline per request.
+The progress handler interrupts database work, including work left by a cancelled request.
+The next request resets the handler before reusing a connection.
+
+Version 5 requires non-null `rule`, `visibility`, and `final_move_ply`.
+Only an ongoing game may have a null `finished_at`; a completed game must have
+a finish timestamp and a complete result.
+New games explicitly use `standard`, `public`, and a zero move count. Accepted
+moves increment the count. Resignation advances sequence without advancing moves.
+A terminal commit stores UTC microseconds from the writer's wall clock inside
+the transaction that updates version, journal, and outbox. The timestamp marks
+commit preparation, rather than an exact physical commit instant. An exact retry
+returns its original acceptance and does not update metadata.
+
+
+Search selects game metadata only and applies public completion, period, and all
+filters before the limit. Partial indexes support finished-time ordering and
+participant searches. Detail uses one read transaction for metadata and a bounded
+ordered journal. It validates IDs, action syntax, participant colors, alternating
+move turns, contiguous sequences, move counts, and terminal result consistency.
+It does not replay move legality. Neither query returns request IDs, expected
+sequences, acceptance receipts, or outbox data.
+
+The deployment must also grant only read access to the database directory and
+existing WAL and SHM files. Compose's `records` profile mounts the shared volume
+read-only. Start the game writer first and retain its live WAL files. SQLite
+read-only WAL access requires readable, initialized WAL and SHM files. Do not
+replace or unlink a database while either process uses it. Filesystem permissions
+and container volume access remain deployment responsibilities.

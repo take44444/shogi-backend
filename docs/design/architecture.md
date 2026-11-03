@@ -1,6 +1,6 @@
 # 大規模将棋アプリ サーバーサイドアーキテクチャ設計書
 
-- バージョン: 1.8（現行実装と将来設計）
+- バージョン: 1.9（現行実装と将来設計）
 - 更新日: 2026-11-03
 - 対象: Web / iOS / Android
 - 設計目標: 最大同時接続 100,000人
@@ -11,7 +11,7 @@
 
 ## 0. 現在の実装範囲
 
-現在は、`user-server`がHTTPでGoogle認証・ユーザー管理を提供し、単一の`game-server`をTonic / gRPCで利用する。独立したOutbox PublisherからCore NATSへ確定イベントを配信する。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
+現在は、`user-server`がHTTPでGoogle認証・ユーザー管理を提供し、単一の`game-server`をTonic / gRPCで利用する。独立したOutbox PublisherからCore NATSへ確定イベントを配信する。`player-server`は新規対局の終局済み公開棋譜を匿名HTTPで検索・取得する。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
 
 Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッションの採用理由と現行の保証範囲は[ユーザー認証の設計](user-authentication.md)を参照する。
 
@@ -24,7 +24,9 @@ Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッ�
 | `user-http` | Google OpenID Connect、HTTPルート、ログイン処理の組み立て、Cookie・Origin検証 |
 | `user-server` | 設定読込、永続化とGoogleプロバイダーの組み立て、HTTP待ち受け |
 | `game-application` | 対局操作、Actor、保存前のDomain Event生成・固定、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
-| `game-persistence` | SeaORMによるGameRepository、対局用接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
+| `game-persistence` | SeaORMによるGameRepository、対局用接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証、専用読取接続による公開棋譜照会 |
+| `game-record-application` | 終局済み公開棋譜の検索条件・公開型・読取Repositoryと照会ユースケース |
+| `player-http` / `player-server` | 匿名HTTPの棋譜一覧・詳細、入力検証、読取専用アダプターの組み立て |
 | `game-messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
 | `game-grpc` / `game-server` | gRPCで対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
 
@@ -32,6 +34,10 @@ Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッ�
 flowchart LR
   C[gRPC Client] --> RPC[game-grpc / game-server]
   WEB[Browser] --> HTTP[user-http / user-server]
+  WEB --> PLAYER[player-http / player-server]
+  PLAYER --> RECORD[GameRecords / game-record-application]
+  RECORD --> READER[SqliteGameRecords / read-only SQLite]
+  READER --> DB
   HTTP --> UR[AccountRepository / user-application]
   UR -->|実行時の実装| UP[SqliteAccounts / user-persistence]
   UP --> UDB[(User SQLite)]
@@ -67,14 +73,14 @@ flowchart LR
 
 ### 0.3 DB・実行環境
 
-Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。プロフィール変更は対局履歴を変更しない。アカウント削除APIは未実装である。旧DBのユーザーIDにはGoogle本人確認情報がなく、自動では新規アカウントに紐付けない。現行DBドライバーはSQLiteのみである。認証方式は[ユーザー認証の設計](user-authentication.md)、設定と起動は [user-server の README](../../apps/user-server/README.md) を参照する。
+Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。プロフィール変更は対局履歴を変更しない。アカウント削除APIは未実装である。現行DBドライバーはSQLiteのみである。認証方式は[ユーザー認証の設計](user-authentication.md)、設定と起動は [user-server の README](../../apps/user-server/README.md) を参照する。
 
 ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは既定で`game-server`、`outbox-publisher`、Core NATSを起動する。`auth` profileで`user-server`を追加する。対局とOutboxは`shogi-data`、ユーザーDBは独立した`user-data` Volumeに保存する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
 
 ### 0.4 ユーザー認証・プロフィールの現行仕様
 
 - Google OpenID Connectの認可コードフローとPKCE S256を採用する。stateと試行用Cookieで開始元ブラウザーを照合し、nonceとIDトークンの署名・issuer・audience・期限等を検証する。
-- 検証済みのGoogle識別子 `(issuer, subject)` を内部 `UserId` に対応付ける。初回ログイン時に登録し、同じ識別子の再ログインでは既存アカウントを使う。メールアドレスや旧対局DBのIDから自動連携しない。
+- 検証済みのGoogle識別子 `(issuer, subject)` を内部 `UserId` に対応付ける。初回ログイン時に登録し、同じ識別子の再ログインでは既存アカウントを使う。メールアドレスから自動連携しない。
 - ログイン後は独自のCookieセッションを使い、DBにはトークンのハッシュと固定期限を保存する。Googleのトークンをアプリケーションのセッションに使わない。プロフィール取得、表示名変更、現在のセッションのログアウトを提供する。
 - 本番Cookieは `Secure`、`HttpOnly`、`SameSite=Lax`、host-onlyとし、表示名変更とログアウトは公開originとの一致を検証する。Google側のログアウトと独自セッションの失効は連動しない。
 - 起動時とコード交換時のdiscovery・JWKS取得はGoogleへの外部通信に依存する。既存セッションの照会はユーザーDBだけを使う。HTTPログインと対局gRPC・将来のWS認証の接続は未実装である。
@@ -198,19 +204,25 @@ User Serviceは有効なセッションに対応する内部UserIdと有効期�
 
 この方針は初期Webクライアントを対象とする。iOS・Androidのログインと資格情報の受け渡しは別途設計し、WebのCookie方式で対応済みとはしない。内部セッション照会API、内部RPCの送信元認証、WS接続への認証情報の対応付けは未実装である。
 
-### 3.3 Player Serviceと棋譜取得（将来設計・未実装）
+### 3.3 Player Serviceと棋譜取得（棋譜HTTPは実装済み）
 
-`player-server`は、対局者・観戦者向けのHTTP照会と対局準備・解析の受付を組み立てる。棋譜はGame領域、レートはRating領域、成立予約はMatchmaking、解析ジョブはAI APIが正本を持つ。対局の更新はGame Service、レート更新はRating Workerへ責務を残す。User Serviceの内部セッション照会で本人を検証し、ユーザーDBへ直接接続して認証・プロフィール管理を取り込まない。Matchmakingからのレート一括照会は、公開HTTPとは別に認証する内部契約として維持する。
+現行の`player-server`は終局済み公開棋譜だけを匿名HTTPで検索・取得する。レート・マッチング・対局準備・AI解析は未実装である。ユーザーサービスへの認証照会やユーザーDB接続は持たない。新規対局はGame側が`standard`と`public`を明示して作成する。参加者限定棋譜の公開や公開範囲変更APIを導入する場合は、Game側の変更契約と検証済み本人情報による認可を別途実装する。
 
-初期の棋譜取得は終局済み対局の検索・一覧・詳細を対象とする。`game-record-application`が検索条件、公開する棋譜型、照会ユースケースと読取専用Repository契約を所有する。`game-persistence`にその実装を置き、Game領域の確定済みデータをPrimaryから読む。独立した検索DBやイベント投影は初期構成の前提にしない。進行中の対局の同期・観戦はRealtime GatewayとGame Serviceの契約を利用する。
+`game-record-application`が検索条件、公開棋譜型、照会ユースケースと読取専用Repository契約を所有する。Game Actorの操作・復旧契約には依存しない。`game-persistence::SqliteGameRecords`がPrimaryの確定済みデータを読み、`player-http`がHTTPとの変換を担当する。`apps/player-server`が両者を組み立てる。検索DBやイベント投影は追加しない。進行中の同期・観戦はこのAPIの対象外である。
 
-Player Serviceには専用の読取接続・DB権限を渡し、Game Serviceの書込用Repositoryやスキーマ移行を実行する接続を渡さない。移行はGame側が所有し、読取側は対応するスキーマ版を確認する。現行の`GameRepository::load_game`はActor復旧用の全受理記録を返し、検索・認可・取得量の制限を持たない。この型をHTTPの公開契約へそのまま流用せず、内部のrequest_idや再送制御情報を公開棋譜へ含めない。
+Player Serviceは既存ファイルをSQLiteのread-onlyフラグで開き、全接続に`query_only`を設定する。Game Serviceの書込Repositoryや初期化処理を呼ばない。Game側が現行スキーマv5を初期化した後、読取側は対応版と必要なテーブル・列を検証する。Composeの`records`プロファイルはDB・WAL・SHMを含むボリュームを読取専用で渡す。WALとSHMは書込側が初期化し、読取側から参照可能でなければならない。
 
-検索・詳細・履歴の各経路で同じ公開範囲と閲覧権限を検証し、検索候補の絞込みはページングや件数計算より前に行う。閲覧者は検証済みセッションから決め、検索対象のUserIdを本人情報として信頼しない。公開範囲の正本と変更契約はGame領域に置く。公開・参加者限定の方針と、非公開棋譜の存在を応答で漏らさない規則は公開前に確定する。
+`GET /game-records`は`games`のメタデータだけを選択する。参加者は黒白どちらかへの一致、ルールは`standard`、結果は勝者色と終局理由、期間は終局時刻の`[from,to)`、手数は投了を除く最終着手数の上下限で絞る。全条件を同時に指定でき、公開・終局の条件と検索条件をSQLのLIMIT前に適用する。`from`・`to`は非負のUTCマイクロ秒で必須、期間上限は366日、件数は既定30・最大100である。
 
-詳細は参加者、ルール、勝敗・終局理由、終局seqと順序付きの公開履歴を、一つのDB読取Snapshotから返す。履歴を分割取得する場合は、対象棋譜の版と終局seqをカーソルに固定し、訂正や公開範囲変更時には再認可・版の照合を行う。異なる版の混在や連番の欠落を正常な棋譜として返さない。seqは投了を含む受理済み操作の連番であり、指し手の手数とは区別する。
+一覧は`(finished_at DESC, id COLLATE BINARY DESC)`で整列し、末尾キーで次ページを取得する。カーソルは版・キー・正規化した検索条件のダイジェストを含み、条件が変わる継続要求を400にする。件数だけは変更できる。カーソルは署名のない未信頼入力であり、認証情報や改ざん防止機構ではない。ページごとに公開条件を再評価し、複数リクエストにまたがる固定Snapshotは保証しない。総件数は返さない。
 
-検索条件は参加者・期間・結果等から許可する組合せを定め、安定した順序とカーソルでページングする。ページ件数、検索期間、履歴取得範囲、応答サイズと処理時間に上限を設ける。終局時刻・公開範囲・索引等の必要な項目はGame側の保存契約と移行で追加する。現行DBにない値や旧履歴の公開範囲を推測で補わない。これは将来の取得契約であり、現行Workspaceに検索APIや新crateはまだ存在しない。
+`GET /game-records/{id}`は参加者、ルール、勝敗・終局理由、終局時刻、終局seq、最終着手数と順序付き公開履歴を一つのDB読取Snapshotから返す。履歴の連番、USI構文、参加者と色、着手の手番、投了と詰みの終端条件、最終手数を検証し、不整合なら部分成功を返さない。合法手の全再実行は行わない。seqは投了を含む受理済み操作数であり、着手数と区別する。Actor復旧用`GameRepository::load_game`や受理記録はHTTPへ流用せず、request_id・expected_seq・再送結果・Outboxを公開しない。
+
+履歴上限は4096操作、JSON応答上限は1MiB、HTTP同時処理数は16、SQLite接続数は4である。接続取得・busy待機・SQLite命令実行にそれぞれ2秒の上限を設け、SQLite progress handlerで長い処理を中断する。入力不正は400、存在しない・進行中・非公開の対局は同じ404、履歴上限超過は422、保存不整合は500、DB利用不可・期限超過・同時処理上限は503を返す。処理した応答は`Cache-Control: no-store`とする。
+
+スキーマv5では`rule`・`visibility`・`final_move_ply`を必須とし、終局済み対局には`finished_at`と勝敗・終局理由を必須にする。新規対局の着手数はMoveだけ増加し、終局時刻はwriterのUTC時計によるcommit準備時刻としてjournal・version・Outboxと同じトランザクションに保存する。受理済み操作の再送では値を変更しない。
+
+設定・JSON形式・実行例は[player-serverのREADME](../../apps/player-server/README.md)を参照する。
 
 ## 4. Pod・Virtual Shard・Game Actorの関係
 
@@ -575,13 +587,12 @@ flowchart LR
 
 | テーブル | 内容 |
 |---|---|
-| `legacy_users` | 旧DBから退避した未連携ID。新規対局DBには作成しない |
-| `games` | 対局ID、固定された先後のユーザー、version、勝敗・終局理由 |
+| `games` | 対局ID、固定された先後のユーザー、version、勝敗・終局理由、ルール、公開範囲、終局時刻、着手数 |
 | `journal` | 着手・投了を含む受理済みコマンドと元の応答。対局内の連番・request_idはそれぞれ一意 |
 | `outbox_events` | 確定時に固定した型付きイベント、符号化バージョン、対局・連番・種別の一意性、配信済み状態 |
 | `schema_version` | スキーマ初期化・互換性検証用のバージョン |
 
-`games`のversion・結果、`journal`、`outbox_events`は原子的に更新する。対局スキーマバージョンは3であり、新規DBの初期化とv1・v2からの更新は同一トランザクション内で行う。v3ではユーザーへの外部キーを除去し、既存OutboxのID・配信済み状態を保つ。ユーザーサービスは別DBと独自のスキーマ台帳を持つ。v1の既存履歴を保ち、Outboxは空で開始する。イベントは更新後に受理した操作から生成し、既存履歴を遡って配信しない。起動時にはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Leaseは保存していない。
+`games`のversion・結果・棋譜メタデータ、`journal`、`outbox_events`は原子的に更新する。対局スキーマバージョンは5であり、空のDBには台帳・テーブル・制約・インデックスを同一の即時トランザクションで作成する。既存DBは現行バージョン台帳と必要テーブルを検証し、非対応・不完全な形式は変更せず起動を拒否する。既存データの更新・再構築・削除や旧形式からの移行は行わない。ユーザーサービスの別DBは変更しない。対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Leaseは保存していない。
 
 ### 11.2 現行のユーザー用SQLiteスキーマ
 
@@ -811,7 +822,7 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 - 後続イベントがない終局通知の欠落、Gatewayと各画面の反映番号の違い、定期照会失敗、通常の配信遅延からの再同期
 - 対局作成後の応答喪失、マッチングWorker停止、作成とキャンセルの競合、Valkey状態喪失からの永続予約の回収
 - レート更新のCommit前後・Ack前の停止、重複・遅着・同一ユーザーの複数対局、初回行の競合、未知形式と異なる入力の隔離、取得時の未評価・未反映・障害の区別
-- 棋譜の検索・詳細・履歴に共通した認可、ページ間の版変更・公開範囲変更、終局seqと履歴の整合、最大取得量とタイムアウト、旧履歴に不足するメタデータの扱い
+- 棋譜の検索・詳細・履歴に共通した認可、ページ間の版変更・公開範囲変更、終局seqと履歴の整合、最大取得量とタイムアウト、初期化の原子性と再起動時の現行データ保持
 - 終局Outboxの送信先別障害、ストリーム保持期限超過、DB復元後の確定入力との照合・再投入、順序を保存したレート再構築と並行更新中の世代切替
 - Shard所有者切替中の対局作成、旧所有者による作成拒否、配送先再解決後の同一IDでの再送
 - Game Pod強制停止、Shard引き継ぎ、時計復元
@@ -835,7 +846,7 @@ Gatewayの公開前に、3.2節の認証境界を実装する。セッション�
 
 レーティング対局の公開前に、9.4節の固定入力・作成契約の拡張、JetStreamへの永続配信、Rating Worker、取得API、欠落照合と復旧検証を揃える。AI機能の導入時期とは独立した前提とする。
 
-Player Serviceでの棋譜公開前に、3.3節の読取契約・公開範囲・取得上限と必要なメタデータを揃え、検索から履歴まで同じ認可と版の整合性を検証する。
+Player Serviceの匿名公開棋譜は3.3節の範囲で実装済みである。参加者限定・追加ルールは、公開方針と認可の契約を拡張してから導入する。
 
 ### Phase 3: AIと非同期処理
 
@@ -847,7 +858,7 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 
 ## 15. Rustモノレポ構成
 
-現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。対局スキーマは`crates/game-persistence/src/schema.rs`、ユーザースキーマは`crates/user-persistence/src/lib.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`、`apps/player-server`と、対局・棋譜照会用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`、`player-http`からなる。対局スキーマは`crates/game-persistence/src/schema.rs`、ユーザースキーマは`crates/user-persistence/src/lib.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
 
 実行名は対象領域と役割で表し、`user-server`・`game-server`・`player-server`は接尾辞を`-server`で揃える。通信方式は責務の説明とアダプター名で表す。
 
@@ -865,9 +876,12 @@ Cargoマニフェストとユーザーサービスのソースから生成。更
 | `game-application` | [crates/game-application/Cargo.toml](../../crates/game-application/Cargo.toml) | `shogi-domain`, `user-id` |
 | `game-grpc` | [crates/game-grpc/Cargo.toml](../../crates/game-grpc/Cargo.toml) | `game-application`, `shogi-domain` |
 | `game-messaging` | [crates/game-messaging/Cargo.toml](../../crates/game-messaging/Cargo.toml) | `game-application`, `shogi-domain` |
-| `game-persistence` | [crates/game-persistence/Cargo.toml](../../crates/game-persistence/Cargo.toml) | `game-application`, `shogi-domain` |
+| `game-persistence` | [crates/game-persistence/Cargo.toml](../../crates/game-persistence/Cargo.toml) | `game-application`, `game-record-application`, `shogi-domain` |
+| `game-record-application` | [crates/game-record-application/Cargo.toml](../../crates/game-record-application/Cargo.toml) | `shogi-domain`, `user-id` |
 | `game-server` | [apps/game-server/Cargo.toml](../../apps/game-server/Cargo.toml) | `game-application`, `game-grpc`, `game-persistence` |
 | `outbox-publisher` | [apps/outbox-publisher/Cargo.toml](../../apps/outbox-publisher/Cargo.toml) | `game-application`, `game-messaging`, `game-persistence` |
+| `player-http` | [crates/player-http/Cargo.toml](../../crates/player-http/Cargo.toml) | `game-record-application` |
+| `player-server` | [apps/player-server/Cargo.toml](../../apps/player-server/Cargo.toml) | `game-persistence`, `game-record-application`, `player-http` |
 | `shogi-domain` | [crates/shogi-domain/Cargo.toml](../../crates/shogi-domain/Cargo.toml) | なし |
 | `user-application` | [crates/user-application/Cargo.toml](../../crates/user-application/Cargo.toml) | `user-id` |
 | `user-http` | [crates/user-http/Cargo.toml](../../crates/user-http/Cargo.toml) | `user-application` |
@@ -881,6 +895,7 @@ Cargoマニフェストとユーザーサービスのソースから生成。更
 - `/auth/google/start`
 - `/auth/logout`
 - `/me`
+- `/openapi.json`
 
 ユーザーSQLiteのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。
 
@@ -930,7 +945,6 @@ shogi-backend/
 │   ├── game-grpc/          # Tonic
 │   └── common/
 ├── proto/
-├── migrations/
 ├── deploy/
 │   ├── docker/
 │   └── kubernetes/
@@ -943,7 +957,7 @@ shogi-backend/
 
 `matchmaking-application`は、9.3節の候補選定、永続予約の状態遷移、固定した`game_id`での対局作成要求と結果の照合・再試行・復旧を所有する。待機列・予約保存・対局作成に必要な契約もこのcrateに置く。`apps/matchmaking-worker`は、このユースケースと待機列・永続化の実装、`game-routing`を使う対局作成アダプターを組み立てて実行する。いずれも将来の配置案であり、現行Workspaceには含めない。
 
-`game-record-application`は棋譜の検索・取得だけの契約を持ち、Game Actorの操作・復旧契約から独立させる。`game-persistence`がこの契約を実装し、保存形式・スキーマ管理はGame領域内に保つ。`apps/player-server`が棋譜の読取アダプター、Ratingの照会、Matchmaking・AI APIへの要求とHTTP境界を組み立てる。棋譜用の別DB・永続化crateは初期には追加しない。
+`game-record-application`は棋譜の検索・取得だけの契約を持ち、Game Actorの操作・復旧契約から独立させる。`game-persistence`がこの契約を実装し、保存形式・スキーマ管理はGame領域内に保つ。`apps/player-server`は現在、棋譜の読取アダプターと`player-http`のHTTP境界を組み立てる。Ratingの照会、Matchmaking・AI APIへの要求は将来追加する。棋譜用の別DB・永続化crateは初期には追加しない。
 
 `rating-application`は版付きの計算、更新・取得ユースケースとRepository契約を所有する。`rating-persistence`がRating専用schemaを、`rating-messaging`が終局入力の受信を実装する。`apps/rating-worker`が更新側を、`apps/player-server`が読取専用の取得側を組み立てる。終局入力の生成と発行はGame側が所有し、Ratingの計算をGame Actorへ持ち込まない。これらも将来案であり、現行の15.1節の一覧には追加しない。
 
@@ -959,7 +973,7 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 6. **DB拡張**: SQLite以外のアダプター検証、本番DBの選定、レプリカ、パーティショニング、アーカイブの導入タイミング。ユーザーDBの本番配置と複数Pod方式も独立して決める。
 7. **認証境界の拡張**: HTTPセッションを利用する画面の配置、将来のGateway・WS接続認証・内部サービスへの本人情報の伝達方法。ユーザー管理の所有権を維持して設計する。
 8. **レーティング制度と公開条件**: 計算式・パラメーター版、初期値・暫定期間、pool・シーズンの区分、引分け・無効局・不正対局、公開範囲と内部照会の認証、許容反映遅延。初期のDB確定順による適用の競技上の妥当性、結果訂正・再計算・世代切替、既存履歴の移行範囲も導入前に決める。
-9. **棋譜取得の公開契約**: 棋譜の公開・参加者限定の方針、非公開情報を漏らさない応答、検索条件・順序・索引、ページ・履歴・処理時間の上限、必要なメタデータと旧履歴の移行。3.3節の契約を公開前に具体化する。
+9. **棋譜公開の拡張**: 3.3節の匿名公開APIを前提に、参加者限定の認可・公開範囲変更・追加ルール・4096操作を超える履歴の分割取得を導入する条件を決める。
 
 ## 17. 設計方針のまとめ（将来構成）
 

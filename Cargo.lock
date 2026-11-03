@@ -1010,11 +1010,23 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "game-application",
+ "game-record-application",
  "sea-orm",
- "sea-schema",
  "shogi-domain",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "game-record-application"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "serde_json",
+ "sha2 0.10.9",
+ "shogi-domain",
+ "user-id",
 ]
 
 [[package]]
@@ -1870,6 +1882,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
+
+[[package]]
 name = "pem-rfc7468"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1966,6 +1984,36 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
+name = "player-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "game-application",
+ "game-persistence",
+ "game-record-application",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
+name = "player-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "game-persistence",
+ "game-record-application",
+ "player-http",
+ "tokio",
+]
 
 [[package]]
 name = "pluralizer"
@@ -3624,6 +3672,8 @@ dependencies = [
  "url",
  "user-application",
  "user-persistence",
+ "utoipa",
+ "utoipa-axum",
  "uuid",
 ]
 
@@ -3668,6 +3718,43 @@ name = "utf_types"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
+
+[[package]]
+name = "utoipa"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8765fe27aeff71012a3f90fa474cf1df863a7d0dd81ed25de4e63fff2544994f"
+dependencies = [
+ "indexmap 2.14.2",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-axum"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "865319162dc3d0032e1e40ed11bd49d5b78e8ef576740589fd6823e2e9977423"
+dependencies = [
+ "axum",
+ "pastey",
+ "tower-layer",
+ "tower-service",
+ "utoipa",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d935f1c83fdf8b88f09bbe050d0cea78ea4afee6d7b0317403228c1200b2c8ab"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn 3.0.9",
+]
 
 [[package]]
 name = "uuid"
