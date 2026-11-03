@@ -143,10 +143,12 @@ flowchart TB
   USER <-->|独立した所有権| USERDB[(User DB<br/>本番配置は未決定)]
   LB --> API[Application API<br/>棋譜検索・レーティング・AI受付]
   LB --> GW[Realtime Gateway<br/>Axum / WebSocket]
+  GW -->|内部セッション照会| USER
   GW -->|Game ID → Shard → Owner| R[Game Router<br/>Gateway内モジュール]
   R -->|gRPC: MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
   API --> MATCH[Matchmaking<br/>Rust / Valkey]
   MATCH --> GAME
+  MATCH <-->|成立予約・再試行状態| PG
   GAME <-->|棋譜・時計・Lease・Fencing| PG[(PostgreSQL)]
   GAME -->|確定着手 + Outbox| PG
   PG --> OUT[Outbox Publisher]
@@ -165,7 +167,7 @@ flowchart TB
   SM -->|配置/復旧調整| GAME
 ```
 
-上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Application APIへ認証を再統合しない。Gatewayがユーザー認証結果を受け取る方法は未設計であり、この図でWS認証の実装済みを意味しない。AI完了イベントにもOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。
+上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Application APIへ認証を再統合しない。Gatewayの認証境界は3.2節の将来方針に従い、現行のHTTPログインだけでWSを認証できるとはしない。AI完了イベントにもOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。
 
 ### 3.1 アプリケーション単位
 
@@ -174,11 +176,21 @@ flowchart TB
 - **Realtime Gateway**: WebSocketの接続認証、対局/観戦購読、着手の転送、再同期、送信キュー制限
 - **Game Service**: 各Game Actor、時計、合法手、結果確定、Shard復旧
 - **Shard Manager（独立アプリ）**: Game Podの登録・負荷収集、Shard配置・再配置計画、障害復旧の調整
-- **Matchmaking Worker**: Valkey上の待機列を使ったマッチング、二重成立防止
+- **Matchmaking Worker**: Valkey上の待機列から候補を選び、9.3節の永続予約と対局作成の照合により成立を確定する
 - **AI Worker**: USIエンジン実行・解析結果保存、必要に応じてLLM説明
 - **Background Worker**: 通知、統計、監査、不正検知など
 
 Game RouterはGateway内のRustモジュールとして実装する。**Shard Managerは独立したDeployment**で動かし、PostgreSQLによるLeader選出で1インスタンスだけがShard配置の制御を実行する。
+
+### 3.2 Gatewayの認証境界（将来設計・未実装）
+
+初期Web構成では、User ServiceとRealtime Gatewayを同じ公開origin配下に配置する。ブラウザーのWebSocket接続開始時に、Gatewayは許可したOriginと一致することを確認し、セッションCookieを使ってUser Serviceへ内部セッション照会を行う。セッションDBと検証処理の所有権はUser Serviceに残し、GatewayはユーザーDBへ直接アクセスしない。照会が失敗した場合は、認証済み接続として受け付けない。
+
+User Serviceは有効なセッションに対応する内部UserIdと有効期限を返す。GatewayはこのUserIdを接続に対応付け、着手・投了を認証された内部RPC経路でGame Serviceへ渡す。クライアントが申告したUserIdや外部からの本人情報ヘッダーで上書きしない。Game Serviceは内部の送信元を認証し、操作ごとに対局参加者との対応を確認する。購読要求にも公開範囲・参加者等の権限を検証する。
+
+接続開始時の認証だけで、接続中の権限を無期限に維持しない。Gatewayはセッションの有効期限を超えて認証済み接続を継続せず、定期的な内部照会でログアウト等による失効を反映する。再検証に失敗した接続も、認証済みとして継続しない。再検証間隔・照会タイムアウト・最大失効反映遅延を設定項目として定め、Gateway公開前にその上限と障害時動作を検証する。全着手でUser Serviceへ照会する方式は前提にしない。
+
+この方針は初期Webクライアントを対象とする。iOS・Androidのログインと資格情報の受け渡しは別途設計し、WebのCookie方式で対応済みとはしない。内部セッション照会API、内部RPCの送信元認証、WS接続への認証情報の対応付けは未実装である。
 
 ## 4. Pod・Virtual Shard・Game Actorの関係
 
@@ -287,12 +299,24 @@ sequenceDiagram
 
 ### 6.1 観戦途中参加 / 再接続
 
-1. Gatewayがイベント購読を開始し、到着イベントを一時バッファする。
-2. Game Serviceから現在局面のSnapshotと`seq`を取得する。
-3. `seq + 1`以降を順序どおり適用する。
-4. 欠落やバッファ超過があれば再度Snapshotを取得する。
+1. Gatewayがイベント購読を開始し、到着イベントを容量上限付きのバッファにためる。
+2. NATSサーバーが購読登録を処理したことを確認する。確認が失敗した場合はSnapshotとの合流へ進まず、購読をやり直す。
+3. Game Serviceから現在局面のSnapshotと`seq`を取得する。
+4. Snapshotの`seq`以下の盤面更新は再適用せず、それより新しい更新を連番順に適用する。
+5. 欠落やバッファ超過があれば再度Snapshotを取得する。
 
-この順序により、Snapshot取得中の着手を取り逃がさない。
+購読登録の完了確認をSnapshot取得より先に行い、購読準備中の更新をSnapshotと通知の両方で取り逃す競合を防ぐ。現行の購読検証例でも、購読後に[`server_barrier`](../../crates/rpc/examples/outbox_proof.rs)を呼び出して準備完了を確認している。この手順だけでCore NATSの配信欠落すべてを検知・回復できるとはしない。
+
+`seq`は確定した操作の連番であり、イベントごとに異なる番号ではない。詰みの着手は、同じ`seq`の`MoveCommitted`と`GameFinished`を生成する。購読開始後の重複排除には`(game_id, seq, event_kind)`を使い、同じ`seq`を受信したことだけを理由に別種のイベントを破棄しない。盤面は同じ操作で二度更新しない。`MoveCommitted`に含まれる終局結果も盤面状態へ反映する。Snapshotに取り込まれた過去の通知を全件再現する保証は持たず、イベントを全件処理する必要のある用途は別の永続配信経路を使う。
+
+終局など最後のイベントだけを失うと、後続の連番が来ないため番号の飛びから欠落を検知できない。このため、接続を維持している場合も次の二段階で状態を照合する。
+
+- Gatewayは購読中の対局ごとにGame Serviceの最新の確定`seq`を定期照会し、ローカルで連続して反映できた`seq`と比較する。遅れがあればSnapshotを取り直す。照会はGateway内の同一対局の観戦者で共有し、観戦者ごとにGame Serviceへ問い合わせない。
+- 各観戦画面は最後に反映した`seq`を接続ごとに定期報告する。Gatewayは画面ごとの反映番号を比較し、遅れている画面をSnapshotで再同期させる。送信済みであることだけを画面への反映完了とはみなさない。
+
+正しさの基準はGame Serviceの確定状態であり、Gatewayとの一致だけで最新状態を保証しない。Game Serviceへの照会に失敗した場合は、画面にも最新状態を確認できていないことを伝える。照会・報告の間隔、応答待ちの上限、再同期を開始する条件は許容する表示遅延と負荷試験に基づいて決める。通常の配信中にも一時的な遅れは生じるため、番号差の一度の観測だけで通知喪失とは断定しない。
+
+NATSへ再接続した場合は、切断中の欠落を前提に購読を再登録し、準備完了を確認してから購読中の対局を再同期する。WebSocketの再接続時も6.1節の手順を実行する。定期照合は末尾欠落からの復帰を担い、イベント全件の受信保証には使わない。
 
 
 ### 6.2 Game Actorのメッセージ契約
@@ -340,7 +364,7 @@ sequenceDiagram
 
 - 稼働中のActorは単調時計（`tokio::time::Instant`）で経過時間・期限を判定する。
 - 着手受付時にActor内で単調時刻を採取する。クライアント・Gatewayから送られた時刻では判定しない。
-- 次手番開始時刻はActorが確定処理の中で決める。**DB Commit完了時刻と完全には一致しない**ので、コミット・イベント配信遅延も監視する。
+- 次手番がある着手では、Actorが合法性検証後に保存用の変更を固定する時点で、次手番開始の単調時刻と対応するUTC時刻を採取する。着手・残り時間・次手番・開始時刻・Outboxを同じDBトランザクションで保存し、確定を確認してからActorの状態へ反映する。開始時刻はDB Commit完了時刻や相手への通知時刻ではない。保存が成功した場合、その後のDB Commit・配信待ち時間も次の対局者の消費時間に含まれるため、これらの遅延を監視する。
 - 復旧のため`turn_started_at_utc`、両者の残り持ち時間、秒読みルール、`clock_version`、対局状態をDBに保存する。`Instant`自体はPod間で持ち運ばない。
 - 初期は障害中も時計が進むポリシー。復旧後の時刻算出にはUTC時刻と運用上の時計同期が必要。厳密な障害補償は将来検討。
 
@@ -348,9 +372,10 @@ sequenceDiagram
 
 Actorは1対局につき1つのTokio Taskで、Commandを逐次実行する。`tokio::select!`でコマンド受信と`sleep_until`を待ってよいが、**selectの分岐選択そのものを時間内判定の根拠にはしない**。ActorがCommandを実際に取り出したときの時刻と、現在の手番の期限を照合する。
 
-1. Actorが`MakeMove`を取り出したら直ちに受付時刻を採取する。期限未満なら手番・合法性等を検証する。期限以上なら時間切れ扱いにする（境界は**`now >= deadline`で期限切れ**）。
+1. Actorが着手・投了要求を取り出したら直ちに受付時刻を採取する。認証されたユーザーと対局参加者の対応を確認し、対局内の`request_id`を受理済み記録と照合する。同じ種別・ユーザー・`expected_seq`・着手内容で確定済みなら、現在の手番・期限・終局状態で再判定せず元の応答を返す。同じ`request_id`で内容が異なる要求は拒否する。
+   未受理の新しい`MakeMove`だけを、採取した受付時刻と現在の手番の期限で判定する。期限未満なら手番・合法性等を検証する。期限以上なら時間切れ扱いにする（境界は**`now >= deadline`で期限切れ**）。
 2. タイマー発火時はActorが時計状態を再計算する。まだ期限前なら再度スケジュールする。期限到達済みなら、Actorが時間切れ結果をDBへ確定する。
-3. **期限前にGame Serverに到着済みでも、mpscからの取り出しが期限後なら無効**という仕様である。別の`Admission Gate`やPendingカウンタ、Gate閉鎖要求は用いない。
+3. 未受理の新しい着手は、**期限前にGame Serverに到着済みでも、mpscからの取り出しが期限後なら無効**という仕様である。確定済み要求の再送には手順1の照合を適用する。別の`Admission Gate`やPendingカウンタ、Gate閉鎖要求は用いない。
 4. 着手・投了・時間切れはすべてActorの逐次処理とDBのトランザクションで確定する。DB書込みにはShardのFencing世代検証も含め、二重確定を防ぐ。
 5. 着手側に送る`MoveAccepted`/投了成功ReplyはDB Commit後に返す。一方`MoveCommitted`/`GameFinished`は同じCommitで保存したOutboxから非同期配信する。クライアントではReplyを操作結果の管理、Eventを盤面・時計・終局反映に使う。
 
@@ -359,8 +384,10 @@ Actorは1対局につき1つのTokio Taskで、Commandを逐次実行する。`t
 ### 7.4 Pod障害時・Reply欠落時
 
 - Admission Gateおよび永続Inboxは**採用しない**。DB未Commitの着手は障害時に失われ得る。
+- 保存用の着手と次手番の時計は、確定前には仮の状態として扱う。DBのロールバックを確認できた場合は仮の変更を破棄し、元の手番を維持する。障害中も時計が進む方針に従い、保存待ち・再試行待ちの間も元の対局者の時計は進む。再試行の受付が期限後なら時間切れになり得る。
+- DB保存中の通信切断・タイムアウトだけではロールバックを断定しない。結果不明の場合はDBの受理記録と確定状態を再確認し、確定済みなら保存した次手番開始時刻を使って復旧する。未確定と確認できるまでは、仮の変更を確定状態として公開せず、元の手番で処理を再開することもしない。
 - クライアントがReplyを受け取れなければ、成功・失敗を断定せず**結果不明（Unknown）**にする。再接続後にSnapshot・`request_id`の確定記録を確認する。
-- DB確定済みなら重複結果を返す。未確定なら**同じ`request_id`**で再試行できるが、再試行時には新たなActor正式受付時刻で判定する。元の期限内到着時刻は保証されない。
+- DB確定済みなら、7.3節の参加者・要求内容の照合後に元の応答を返す。再送が期限後に到着しても、確定済みの操作を時間切れで拒否しない。未確定なら**同じ`request_id`**で再試行できるが、再試行時には新たなActor正式受付時刻で判定する。元の期限内到着時刻は保証されない。
 - `request_id`の確定記録はPostgreSQLで一意制約を設ける。冪等照会・結果照会とDB原子的更新を用意する。`not_found`だけで未処理の要求が今後Commitしないとは断定しない。
 - Pod再起動時はPostgreSQLの確定時計状態から新しい単調時計Deadlineを再構築する。Shard所有権はLease + Fencingを検証する。
 
@@ -403,7 +430,7 @@ flowchart TD
 | Core NATS | 揮発性の即時配信 | MoveCommitted、観戦イベント |
 | JetStream | Ack・再配信つきの非同期処理 | AI解析、集計、通知、ジョブ |
 
-Core NATSの配信漏れには連番+Snapshotで対応。JetStreamの再配信は重複実行を起こし得るためWorkerを冪等にする。PostgreSQLとメッセージブローカーの二重書き込みにはTransactional Outboxを用いる。
+Core NATSの配信漏れには連番+Snapshotで対応する。最後のイベントの欠落にも対応するため、6.1節の定期照合と再接続時の再同期を行う。JetStreamの再配信は重複実行を起こし得るためWorkerを冪等にする。PostgreSQLとメッセージブローカーの二重書き込みにはTransactional Outboxを用いる。
 
 ### 9.1 Presence（オンライン状態の共有）
 
@@ -439,6 +466,25 @@ Core NATSの配信漏れには連番+Snapshotで対応。JetStreamの再配信�
 
 **Valkey障害時**には、操作の重要度に応じてfail-open / fail-closedを明示的に決める（例：AI解析ジョブは保守的に受付制限）。また、Token Bucketはリクエスト頻度の制限であり、AI Workerの同時実行数制御や費用クォータの代替にはならない。
 
+
+### 9.3 マッチング成立と対局作成（将来設計・未実装）
+
+Valkeyは待機列と候補選択に使い、成立の正本はDBの永続予約とする。予約には`match_id`、固定した`game_id`、参加者、対局ルール、状態を保存する。同一ユーザーが複数の有効な予約へ参加しないようDBの一意制約で保護し、Valkey上の原子的処理だけに重複防止を依存させない。
+
+予約は次の状態で扱い、遷移はDBの現在状態を条件に更新する。
+
+| 状態 | 意味・遷移条件 |
+|---|---|
+| `RESERVED` | 参加者を予約済み。作成開始時に`CREATING`へ移す。作成開始前のキャンセル・期限切れは`CANCELLED`へ移して予約を解放する |
+| `CREATING` | 固定した`game_id`で対局作成中。結果不明もこの状態に残し、照会・再試行で解決する |
+| `MATCHED` | 予約内容と一致する対局の作成を確認済み。同じ成立結果を返す |
+| `CANCELLED` | 対局作成を開始せず予約を取消済み。この予約からの作成を許可しない |
+
+Game Serviceには、同じ`match_id`・`game_id`・参加者・ルールで対局作成を再試行すると既存の同じ結果を返し、内容が異なれば拒否する契約を追加する。現行の`CreateGame`はこの契約を実装していない。応答を失っても新しいIDで別の対局を作らず、保存済みIDで再照会・再試行する。
+
+作成開始とキャンセルが競合した場合は、`RESERVED`からの条件付き遷移で先に確定した操作を有効にする。`CREATING`へ進んだ予約は、期限切れや照会時の`not_found`だけを根拠に取り消して参加者を再割当てしない。作成が進行中の可能性を解消してから結果を確定し、成立済みならキャンセル済みとは返さない。
+
+永続予約と対局作成を同じDBトランザクションで確定できる配置を優先する。異なる処理境界になる場合は、Workerが保存済みの予約状態と対局を照合して処理を再開する。Worker再起動やValkey状態喪失の後も、未解決の永続予約を回収して同じ対局へ収束させる。DBへ成立状態を保存できない場合は、Valkeyの処理成功だけで成立を返さない。
 
 ## 10. AI Platform
 
@@ -495,6 +541,8 @@ flowchart LR
 | テーブル | 内容 |
 |---|---|
 | `player_ratings` | ルール別レーティング |
+| `match_reservations` | 永続match_id、固定game_id、参加者・ルール、成立予約の状態。状態遷移と作成照合は9.3節に従う |
+| `match_participants` | 予約への参加者対応。同一ユーザーの有効予約をDB制約で一意に保つ |
 | `games` | 対局メタ、手番、version、時計の確定状態 |
 | `game_moves` | `(game_id, seq)`をキーとする確定着手履歴、request_id |
 | `game_snapshots` | 局面・時計・連番の復元用Snapshot |
@@ -522,7 +570,7 @@ flowchart LR
 | **Game Router** | **各Gateway Pod内のRustモジュール** | 独立Service不要。所有者PodへTonic / gRPC | Game ID→Shard→所有者endpointをキャッシュし、変更時再解決 |
 | **Game Server / Game Service** | **Deployment** / 複数Pod | 通常Serviceに加え、所有者Podへの**直接RPC endpoint** | Game Actor・Shardを保持。汎用Serviceのランダム分散で着手を配送しない |
 | **Shard Manager** | **独立Deployment** / Leader + Standby（例: 2 Pod） | Pod情報・PostgreSQLへの接続。必要なら内部gRPC | Leaderのみ配置判断。Game Serverとは別にデプロイ・拡縮 |
-| Matchmaking Service / Worker | **Deployment** / 複数Pod | 内部Service / Valkey | 待機列をValkeyで共有し、原子的なマッチング予約・重複防止 |
+| Matchmaking Service / Worker | **Deployment** / 複数Pod | 内部Service / Valkey / PostgreSQL | 待機列はValkey、成立予約はDB。9.3節の一意制約・条件付き遷移・作成再試行で重複を防ぐ |
 | AI Worker | **Deployment** / 専用Worker Pool | JetStream Consumer（通常Ingress不要） | CPU/GPU、待機ジョブ数、解析コストに応じて拡縮 |
 | Background Worker / Outbox Publisher | **Deployment** / 複数Pod | PostgreSQL / JetStream / Core NATS | 冪等性・Outboxの排他取得、Ackと再試行を考慮 |
 | **Valkey** | **Kubernetes外のマネージドサービス推奨** | プライベートendpoint / TLS / 認証 | Redis互換プロトコル。HA・容量・フェイルオーバーを設計 |
@@ -561,6 +609,7 @@ flowchart TB
   GW --> VALKEY
   API --> VALKEY
   MATCH --> VALKEY
+  MATCH <-->|成立予約・再試行状態| PG
   SM <-->|配置表・Manager Leader Lease| PG
   GAME <-->|対局・Shard Lease・Fencing| PG
   BG <-->|Outbox等| PG
@@ -654,7 +703,8 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 - Valkey / NATSの冗長化とクライアント再接続
 - Game ServerのLease失効、Fencing、Snapshot再生
 - Gateway送信キューの上限、遅延観戦者の再同期
-- WebSocketの認証、Origin確認、権限検証、Valkey Token Bucketを中心としたレート制限
+- 3.2節の内部セッション照会、WebSocketのOrigin・購読権限確認、期限・失効の反映、内部RPCの送信元認証
+- Valkey Token Bucketを中心としたレート制限
 - 着手の`expected_seq`、`request_id`、サーバー側合法手・時間判定
 - AI解析のクォータ、同時実行制限、キャッシュ共有
 
@@ -679,6 +729,8 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 - 25,000同時対局、平均2,500着手/秒・ピーク10,000着手/秒（仮定）
 - 人気対局に観戦者20,000人集中
 - 大量再接続とイベント欠落からの復帰
+- 後続イベントがない終局通知の欠落、Gatewayと各画面の反映番号の違い、定期照会失敗、通常の配信遅延からの再同期
+- 対局作成後の応答喪失、マッチングWorker停止、作成とキャンセルの競合、Valkey状態喪失からの永続予約の回収
 - Game Pod強制停止、Shard引き継ぎ、時計復元
 - PostgreSQLフェイルオーバー、NATS切断、AI解析急増
 
@@ -693,6 +745,10 @@ Google認証・ユーザー管理も、独立したAxumサービスと専用SQLi
 ### Phase 2: リアルタイム分離
 
 Transactional Outboxと独立Outbox Publisher、Core NATSへの確定イベント配信は実装済みである。次にRealtime Gateway、WebSocket購読、ValkeyによるPresence/マッチング、Snapshot + Sequence再同期を個別に導入する。
+
+Gatewayの公開前に、3.2節の認証境界を実装する。セッション照会失敗時の接続拒否、外部からのUserId上書き拒否、操作・購読権限、セッション期限、ログアウト後の最大失効反映遅延を検証する。ネイティブクライアントの認証対応は別途スコープを決める。
+
+マッチング導入時には、9.3節の永続予約と冪等な対局作成契約を実装する。待機列の原子的操作だけで成立を確定せず、応答喪失・Worker停止・キャンセル競合・Valkey状態喪失から同じ成立結果へ復旧できることを検証する。
 
 ### Phase 3: AIと非同期処理
 
