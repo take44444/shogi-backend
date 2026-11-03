@@ -1,7 +1,7 @@
 use async_nats::Subscriber;
 use futures_util::StreamExt;
 use game_application::GameId;
-use rpc::proto::{self, game_service_client::GameServiceClient};
+use game_grpc::proto::{self, game_service_client::GameServiceClient};
 use serde_json::{Value, json};
 use std::{process::Command, time::Duration};
 use tonic::transport::Channel;
@@ -32,9 +32,9 @@ async fn subscribe(url: &str, game: &str) -> Result<(async_nats::Client, Subscri
     for _ in 0..100 {
         if let Ok(client) = async_nats::connect(url).await {
             let subscriber = client
-                .subscribe(messaging::game_subject(&GameId::new(game)?))
+                .subscribe(game_messaging::game_subject(&GameId::new(game)?))
                 .await?;
-            messaging::server_barrier(&client).await?;
+            game_messaging::server_barrier(&client).await?;
             return Ok((client, subscriber));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -75,7 +75,7 @@ async fn receive(sub: &mut Subscriber, game: &str, seq: u64, kind: &str) -> Resu
         .ok_or("subscription ended")?;
     assert_eq!(
         message.subject.as_str(),
-        messaging::game_subject(&GameId::new(game)?)
+        game_messaging::game_subject(&GameId::new(game)?)
     );
     let value: Value = serde_json::from_slice(&message.payload)?;
     assert_eq!(value["schema_version"], 1);

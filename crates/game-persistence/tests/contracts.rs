@@ -3,7 +3,7 @@ use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, GameService,
     MakeMove, OutboxRepository, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
 };
-use persistence::{SeaOrmStore, SqliteOutbox};
+use game_persistence::{SeaOrmStore, SqliteOutbox};
 use sea_orm::{ConnectionTrait, Database};
 use shogi_domain::Player;
 use std::sync::{

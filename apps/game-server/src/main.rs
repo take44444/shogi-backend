@@ -1,8 +1,8 @@
 //! Composes SQLite persistence, the application services, and a plaintext gRPC listener.
 
 use game_application::GameService;
-use persistence::SeaOrmStore;
-use rpc::{GameRpc, proto::game_service_server::GameServiceServer};
+use game_grpc::{GameRpc, proto::game_service_server::GameServiceServer};
+use game_persistence::SeaOrmStore;
 use std::{path::Path, sync::Arc};
 
 #[tokio::main]

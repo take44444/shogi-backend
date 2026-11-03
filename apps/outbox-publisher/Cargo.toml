@@ -6,8 +6,8 @@ publish.workspace = true
 
 [dependencies]
 game-application = { path = "../../crates/game-application" }
-persistence = { path = "../../crates/persistence" }
-messaging = { path = "../../crates/messaging" }
+game-persistence = { path = "../../crates/game-persistence" }
+game-messaging = { path = "../../crates/game-messaging" }
 tokio = { workspace = true, features = ["time"] }
 
 [lints]

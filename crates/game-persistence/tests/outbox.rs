@@ -3,7 +3,7 @@ use game_application::{
     ApplicationError as Error, DomainEvent, GameId, GameRecord, GameRepository, GameService,
     MakeMove, OutboxRepository, Participants, RequestId, Resign, StagedGameChange, UserId,
 };
-use persistence::{SeaOrmStore, SqliteOutbox};
+use game_persistence::{SeaOrmStore, SqliteOutbox};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 use std::sync::Arc;
 
@@ -248,7 +248,10 @@ fn publisher_lock_probe() {
     let expected = std::env::var("OUTBOX_LOCK_PROBE_HELD").unwrap() == "1";
     assert_eq!(queue.is_err(), expected);
     if expected {
-        assert!(matches!(queue, Err(persistence::OutboxOpenError::Lock(_))));
+        assert!(matches!(
+            queue,
+            Err(game_persistence::OutboxOpenError::Lock(_))
+        ));
     }
 }
 #[tokio::test]
@@ -282,7 +285,7 @@ async fn database_inode_lock_excludes_a_second_process_and_releases_on_exit() {
     );
     assert!(matches!(
         SqliteOutbox::connect("sqlite::memory:").await,
-        Err(persistence::OutboxOpenError::FileRequired)
+        Err(game_persistence::OutboxOpenError::FileRequired)
     ));
 }
 

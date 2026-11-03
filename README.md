@@ -14,7 +14,7 @@ cargo run -p game-server
 In another terminal, run the client.
 
 ```sh
-cargo run -p rpc --example play
+cargo run -p game-grpc --example play
 ```
 
 The client binds two example participant IDs to a game, plays `7g7f 3c3d 8h2b+ 3a2b B*4e`,
@@ -30,7 +30,7 @@ A positional address overrides `GAME_SERVER_ADDR`.
 
 ```sh
 DATABASE_URL='sqlite://data/demo.db?mode=rwc' cargo run -p game-server -- 127.0.0.1:50052
-cargo run -p rpc --example play -- http://127.0.0.1:50052 my-game
+cargo run -p game-grpc --example play -- http://127.0.0.1:50052 my-game
 ```
 
 ## Prove persistence across container recreation
@@ -42,11 +42,11 @@ change the host port. These commands assume the default port.
 
 ```sh
 docker compose up --build -d
-cargo run -p rpc --example persistence_proof -- seed http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
+cargo run -p game-grpc --example persistence_proof -- seed http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
 docker compose up -d --force-recreate game-server
-cargo run -p rpc --example persistence_proof -- resume http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
+cargo run -p game-grpc --example persistence_proof -- resume http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
 docker compose restart game-server
-cargo run -p rpc --example persistence_proof -- finished http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
+cargo run -p game-grpc --example persistence_proof -- finished http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
 ```
 
 Wait for `game-server listening on 0.0.0.0:50051` in
@@ -139,7 +139,7 @@ cargo doc -p game-application --no-deps --open
 
 The crate pages describe domain rules, application commands and errors, the
 storage contract, and the gRPC adapter. Protocol message comments originate in
-`proto/game.proto` and appear in the generated `rpc::proto` reference.
+`proto/game.proto` and appear in the generated `game_grpc::proto` reference.
 
 Include private modules when inspecting actor recovery and schema migrations.
 
@@ -164,8 +164,8 @@ cargo test --workspace
 
 The [application contract](crates/game-application/README.md) covers participant
 binding, sequencing, replay, cancellation, and recovery. The
-[storage reference](crates/persistence/README.md) covers SQLite transactions and
-schema startup. The [RPC reference](crates/rpc/README.md) covers wire fields and
+[storage reference](crates/game-persistence/README.md) covers SQLite transactions and
+schema startup. The [RPC reference](crates/game-grpc/README.md) covers wire fields and
 status codes. The [domain crate](crates/shogi-domain/README.md) owns shogi rules.
 
 User registration, Google login, profile updates, and session management belong

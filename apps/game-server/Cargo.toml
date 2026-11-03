@@ -5,9 +5,9 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-persistence = { path = "../../crates/persistence" }
+game-persistence = { path = "../../crates/game-persistence" }
 game-application = { path = "../../crates/game-application" }
-rpc = { path = "../../crates/rpc" }
+game-grpc = { path = "../../crates/game-grpc" }
 tokio.workspace = true
 tonic.workspace = true
 

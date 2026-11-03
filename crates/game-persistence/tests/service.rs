@@ -298,7 +298,7 @@ fn participants() -> Participants {
 }
 async fn setup() -> GameService {
     let store = Arc::new(
-        persistence::SeaOrmStore::connect("sqlite::memory:")
+        game_persistence::SeaOrmStore::connect("sqlite::memory:")
             .await
             .unwrap(),
     );

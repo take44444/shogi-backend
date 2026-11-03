@@ -1,9 +1,9 @@
 use game_application::GameService;
-use persistence::SeaOrmStore;
-use rpc::{
+use game_grpc::{
     GameRpc,
     proto::{self, game_service_client::GameServiceClient, game_service_server::GameServiceServer},
 };
+use game_persistence::SeaOrmStore;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use tokio_stream::wrappers::TcpListenerStream;

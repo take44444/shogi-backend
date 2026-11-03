@@ -30,7 +30,7 @@
 //! It assumes a running server and a fresh game ID. Game creation is not idempotent.
 //!
 //! ```no_run
-//! use rpc::proto::{CreateGameRequest, game_service_client::GameServiceClient};
+//! use game_grpc::proto::{CreateGameRequest, game_service_client::GameServiceClient};
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {

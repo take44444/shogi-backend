@@ -1,5 +1,5 @@
 [package]
-name = "persistence"
+name = "game-persistence"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

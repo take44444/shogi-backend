@@ -12,5 +12,5 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 docker compose -p "$project" up -d --build
-cargo run --locked -p rpc --example outbox_proof -- \
+cargo run --locked -p game-grpc --example outbox_proof -- \
     "http://127.0.0.1:$GAME_SERVER_PORT" "nats://127.0.0.1:$NATS_PORT" "$project"

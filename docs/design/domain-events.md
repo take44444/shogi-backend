@@ -30,7 +30,7 @@ Actorは局面のコピー上で合法性と参加者を検証し、受理記録
 
 ## 受理記録とイベントを同時に確定する
 
-`persistence`は対局メタデータのversion条件付き更新、受理記録、渡されたイベント全件を同じSQLiteトランザクションで保存する。
+`game-persistence`は対局メタデータのversion条件付き更新、受理記録、渡されたイベント全件を同じSQLiteトランザクションで保存する。
 イベントを生成・再計算せず、受け取った順序と内容を保存する。
 これにより、対局操作だけが確定して通知対象が欠落する状態を防ぐ。
 Actorは保存成功を確認してからコピーした局面をキャッシュへ反映し、応答する。NATSへ直接送信しない。
@@ -48,7 +48,7 @@ Outbox行は`encoding_version=1`の型付きフィールドを保持する。JSO
 未配信イベントを可変の対局履歴から再生成せず、固定した行から復元する。
 未知の保存形式や不正なフィールドはエラーにし、先頭行を飛ばさない。
 
-`messaging`がSubjectとJSONを所有する。
+`game-messaging`がSubjectとJSONを所有する。
 Subjectは`shogi.games.<hex-game-id>.events`で、対局IDのUTF-8バイト列を小文字hexへ変換する。
 これにより、ドット、NATSのワイルドカード、Unicode、NULを含むIDもSubjectの構文を壊さない。
 JSONの`game_id`は元の文字列を保持する。
@@ -59,7 +59,7 @@ JSONの`game_id`は元の文字列を保持する。
 `result`は継続中ならnull、終局なら`winner`と`reason`を持つ。
 勝者は`black`または`white`、理由は`checkmate`または`resignation`である。
 将来のエンコーダー変更でも、保存形式1から通信形式1への対応を維持する。
-定義と通信形式のテストは[messaging](../../crates/messaging/src/lib.rs)にある。
+定義と通信形式のテストは[game-messaging](../../crates/game-messaging/src/lib.rs)にある。
 
 新規DBはスキーマversion 2を原子的に作成する。
 version 1からの移行はユーザー、対局、履歴を維持し、空のOutboxを追加する。過去のイベントは補完しない。
@@ -126,6 +126,6 @@ hardlinkは対応しない。
 
 - [イベントと配信ユースケースのテスト](../../crates/game-application/src/events.rs)が生成順、識別子、失敗時の再送を確認する。
 - [Actorのテスト](../../crates/game-application/src/actor/tests.rs)が保存前の生成、再送・拒否時の呼出抑止を確認する。
-- [Outboxの永続化テスト](../../crates/persistence/tests/outbox.rs)が原子性、固定内容、移行、不確定commit、プロセス排他を確認する。
-- [NATSアダプターのテスト](../../crates/messaging/src/lib.rs)が通信形式、実イベントのecho、権限拒否、再接続の抑止を確認する。
+- [Outboxの永続化テスト](../../crates/game-persistence/tests/outbox.rs)が原子性、固定内容、移行、不確定commit、プロセス排他を確認する。
+- [NATSアダプターのテスト](../../crates/game-messaging/src/lib.rs)が通信形式、実イベントのecho、権限拒否、再接続の抑止を確認する。
 - [Compose検証スクリプト](../../scripts/prove-outbox.sh)が実際の配信、Publisher停止中の蓄積、サーバー再作成、NATS停止後の復旧を確認する。前提条件と実行方法は[README](../../README.md#publish-committed-game-events)にある。

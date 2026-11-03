@@ -181,6 +181,6 @@ WS 認証、Realtime Gateway、Game Router、Valkey の Presence・マッチン�
 | [`google/tests.rs`](../../crates/user-http/src/google/tests.rs) | `openid profile`、state、nonce、PKCE S256 の認可要求と verifier を含む実 HTTP のコード交換。RSA 署名付きトークンを使った issuer・audience・nonce・exp・azp・署名・at_hash の検証。 |
 | [`user-http/src/tests.rs`](../../crates/user-http/src/tests.rs) | 試行のブラウザー対応と再利用拒否、Cookie、Origin、プロフィール、再起動、ログアウト。ローカル TCP での一連のブラウザーフロー。 |
 | [`user-persistence`](../../crates/user-persistence/src/lib.rs) | 試行とセッションの期限境界、並行した初回登録とコールバック消費、スキーマ不整合の拒否。 |
-| [`persistence/tests/contracts.rs`](../../crates/persistence/tests/contracts.rs) | 対局 DB の移行、棋譜と Outbox の保持、ユーザー DB に依存しない対局作成。 |
+| [`game-persistence/tests/contracts.rs`](../../crates/game-persistence/tests/contracts.rs) | 対局 DB の移行、棋譜と Outbox の保持、ユーザー DB に依存しない対局作成。 |
 
 自動テストは実 Google アカウントの継続的な可用性を保証しない。再実行コマンドは [user-server の検証手順](../../apps/user-server/README.md#verification)、手動ログインの入口は[ローカル起動手順](../../apps/user-server/README.md#run-locally)に置く。

@@ -1,4 +1,4 @@
-# persistence
+# game-persistence
 
 `SeaOrmStore::connect(&str).await` connects and migrates before returning the shared adapter.
 `SeaOrmStore` implements `GameRepository`. Its database contains only game state

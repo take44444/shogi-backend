@@ -2,7 +2,7 @@
 
 `GameService::new(Arc<dyn GameRepository>)` owns game use cases and actors.
 The application and domain contain no SQL or ORM types. Production composition
-injects `Arc<persistence::SeaOrmStore>`. There is no default in-memory store.
+injects `Arc<game_persistence::SeaOrmStore>`. There is no default in-memory store.
 
 `GameService::create(GameId, Participants { black, white })` binds two distinct user IDs
 permanently to the game's sides. Equal IDs return `InvalidParticipants`.

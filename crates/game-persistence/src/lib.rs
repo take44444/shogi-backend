@@ -20,7 +20,7 @@
 //!
 //! ```
 //! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId};
-//! use persistence::SeaOrmStore;
+//! use game_persistence::SeaOrmStore;
 //! use std::sync::Arc;
 //!
 //! # #[tokio::main]

@@ -1,6 +1,6 @@
 use game_application::OutboxPublisher;
-use messaging::NatsEventPublisher;
-use persistence::SqliteOutbox;
+use game_messaging::NatsEventPublisher;
+use game_persistence::SqliteOutbox;
 use std::time::Duration;
 
 type Error = Box<dyn std::error::Error>;

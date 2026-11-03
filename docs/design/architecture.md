@@ -24,13 +24,13 @@ Google OpenID Connect の認可コードフロー、PKCE、独自 Cookie セッ�
 | `user-http` | Google OpenID Connect、HTTPルート、ログイン処理の組み立て、Cookie・Origin検証 |
 | `user-server` | 設定読込、永続化とGoogleプロバイダーの組み立て、HTTP待ち受け |
 | `game-application` | 対局操作、Actor、保存前のDomain Event生成・固定、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
-| `persistence` | SeaORMによるGameRepository、対局用接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
-| `messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
-| `rpc` / `game-server` | gRPCで対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
+| `game-persistence` | SeaORMによるGameRepository、対局用接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
+| `game-messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
+| `game-grpc` / `game-server` | gRPCで対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
 
 ```mermaid
 flowchart LR
-  C[gRPC Client] --> RPC[rpc / game-server]
+  C[gRPC Client] --> RPC[game-grpc / game-server]
   WEB[Browser] --> HTTP[user-http / user-server]
   HTTP --> UR[AccountRepository / user-application]
   UR -->|実行時の実装| UP[SqliteAccounts / user-persistence]
@@ -42,7 +42,7 @@ flowchart LR
   GR --> PERSIST
   PERSIST --> DB[(SQLite)]
   DB --> OUT[Outbox Publisher]
-  OUT --> MSG[messaging / Core NATS adapter]
+  OUT --> MSG[game-messaging / Core NATS adapter]
   MSG --> NATS[Core NATS]
 ```
 
@@ -305,7 +305,7 @@ sequenceDiagram
 4. Snapshotの`seq`以下の盤面更新は再適用せず、それより新しい更新を連番順に適用する。
 5. 欠落やバッファ超過があれば再度Snapshotを取得する。
 
-購読登録の完了確認をSnapshot取得より先に行い、購読準備中の更新をSnapshotと通知の両方で取り逃す競合を防ぐ。現行の購読検証例でも、購読後に[`server_barrier`](../../crates/rpc/examples/outbox_proof.rs)を呼び出して準備完了を確認している。この手順だけでCore NATSの配信欠落すべてを検知・回復できるとはしない。
+購読登録の完了確認をSnapshot取得より先に行い、購読準備中の更新をSnapshotと通知の両方で取り逃す競合を防ぐ。現行の購読検証例でも、購読後に[`server_barrier`](../../crates/game-grpc/examples/outbox_proof.rs)を呼び出して準備完了を確認している。この手順だけでCore NATSの配信欠落すべてを検知・回復できるとはしない。
 
 `seq`は確定した操作の連番であり、イベントごとに異なる番号ではない。詰みの着手は、同じ`seq`の`MoveCommitted`と`GameFinished`を生成する。購読開始後の重複排除には`(game_id, seq, event_kind)`を使い、同じ`seq`を受信したことだけを理由に別種のイベントを破棄しない。盤面は同じ操作で二度更新しない。`MoveCommitted`に含まれる終局結果も盤面状態へ反映する。Snapshotに取り込まれた過去の通知を全件再現する保証は持たず、イベントを全件処理する必要のある用途は別の永続配信経路を使う。
 
@@ -337,7 +337,7 @@ NATSへ再接続した場合は、切断中の欠落を前提に購読を再登�
 
 生成・保存・配信の責務とSQLiteの運用制約は[Domain EventとTransactional Outboxの設計](domain-events.md)を参照する。
 
-- `game-application`が保存前のイベント生成・内容の固定、型付きイベント、配信ユースケース・Traitを所有する。`persistence`が渡された受理記録・イベントの原子的保存、未配信行の取得、配信済み記録を担う。`messaging`がCore NATSのSubject・JSON変換と送信を担い、`outbox-publisher`が独立プロセスとして組み立てる。
+- `game-application`が保存前のイベント生成・内容の固定、型付きイベント、配信ユースケース・Traitを所有する。`game-persistence`が渡された受理記録・イベントの原子的保存、未配信行の取得、配信済み記録を担う。`game-messaging`がCore NATSのSubject・JSON変換と送信を担い、`outbox-publisher`が独立プロセスとして組み立てる。
 - イベント識別子は`(game_id, seq, event_kind)`である。詰みの着手では同じ`seq`の2イベントを種別で区別する。ペイロードには元の`request_id`と`user_id`も保持する。
 - Publisherは未配信行を挿入順に1件ずつ処理する。イベントのSubjectを購読してから送信し、同じ接続で同一ペイロードのechoを確認して、その行だけを配信済みとする。このためイベントSubjectへのPublishとSubscribeの権限が必要である。ソケットのflushだけをサーバー処理の確認に使わない。接続を自動で張り直さず、失敗時はプロセスを終了し、Composeの再起動で未配信行から再開する。送信成功後の記録失敗などでは同じ識別子を再送し得る。
 - SQLite版はLinuxのローカルファイルシステム上で単一Publisherを使う。`SqliteOutbox`が実DBファイルのOSロックを保持して二重起動を拒否する。配信待ちの間にDBトランザクションを保持せず、ShardやLeaseを導入しない。終了時は通信処理を停止してからロックを解放する。
@@ -765,7 +765,9 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 
 ## 15. Rustモノレポ構成
 
-現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。対局スキーマは`crates/persistence/src/schema.rs`、ユーザースキーマは`crates/user-persistence/src/lib.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。対局スキーマは`crates/game-persistence/src/schema.rs`、ユーザースキーマは`crates/user-persistence/src/lib.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+
+crate名はOSS製品名よりも、所有する領域と責務を優先して表す。`game-persistence`は対局とOutboxの永続化、`game-messaging`は対局イベントのメッセージングを所有する。現行の`game-messaging`はCore NATSのSubject・JSON変換と送信を担う。`game-grpc`と`user-http`のgRPC・HTTPは製品名ではなく、公開するプロトコル境界を表す。`shogi-domain`は将棋ルールを、`game-application`は対局ユースケースを所有する。`user-id`は対局とユーザー管理で共有する値型として独立させる。
 
 ### 15.1 現行Workspaceとユーザーサービスの公開境界
 
@@ -777,11 +779,11 @@ Cargoマニフェストとユーザーサービスのソースから生成。更
 | Workspaceパッケージ | マニフェスト | 本番の内部依存 |
 |---|---|---|
 | `game-application` | [crates/game-application/Cargo.toml](../../crates/game-application/Cargo.toml) | `shogi-domain`, `user-id` |
-| `game-server` | [apps/game-server/Cargo.toml](../../apps/game-server/Cargo.toml) | `game-application`, `persistence`, `rpc` |
-| `messaging` | [crates/messaging/Cargo.toml](../../crates/messaging/Cargo.toml) | `game-application`, `shogi-domain` |
-| `outbox-publisher` | [apps/outbox-publisher/Cargo.toml](../../apps/outbox-publisher/Cargo.toml) | `game-application`, `messaging`, `persistence` |
-| `persistence` | [crates/persistence/Cargo.toml](../../crates/persistence/Cargo.toml) | `game-application`, `shogi-domain` |
-| `rpc` | [crates/rpc/Cargo.toml](../../crates/rpc/Cargo.toml) | `game-application`, `shogi-domain` |
+| `game-grpc` | [crates/game-grpc/Cargo.toml](../../crates/game-grpc/Cargo.toml) | `game-application`, `shogi-domain` |
+| `game-messaging` | [crates/game-messaging/Cargo.toml](../../crates/game-messaging/Cargo.toml) | `game-application`, `shogi-domain` |
+| `game-persistence` | [crates/game-persistence/Cargo.toml](../../crates/game-persistence/Cargo.toml) | `game-application`, `shogi-domain` |
+| `game-server` | [apps/game-server/Cargo.toml](../../apps/game-server/Cargo.toml) | `game-application`, `game-grpc`, `game-persistence` |
+| `outbox-publisher` | [apps/outbox-publisher/Cargo.toml](../../apps/outbox-publisher/Cargo.toml) | `game-application`, `game-messaging`, `game-persistence` |
 | `shogi-domain` | [crates/shogi-domain/Cargo.toml](../../crates/shogi-domain/Cargo.toml) | なし |
 | `user-application` | [crates/user-application/Cargo.toml](../../crates/user-application/Cargo.toml) | `user-id` |
 | `user-http` | [crates/user-http/Cargo.toml](../../crates/user-http/Cargo.toml) | `user-application` |
@@ -813,8 +815,8 @@ Cargoマニフェストとユーザーサービスのソースから生成。更
 shogi-backend/
 ├── Cargo.toml
 ├── apps/
-│   ├── user-server/            # 現行のユーザーHTTPサービス
-│   ├── outbox-publisher/       # 現行の確定イベント配信
+│   ├── user-server/        # 現行のユーザーHTTPサービス
+│   ├── outbox-publisher/   # 現行の確定イベント配信
 │   ├── api-server/
 │   ├── realtime-gateway/
 │   ├── game-server/
@@ -823,19 +825,19 @@ shogi-backend/
 │   ├── ai-worker/
 │   └── background-worker/
 ├── crates/
-│   ├── shogi-domain/         # 局面・合法手・詰み・投了（時計は未実装）
-│   ├── game-application/     # Game Actorとユースケース
-│   ├── user-id/              # 現行の共有ID値型
-│   ├── user-application/     # 現行のユーザー型・Repository契約
-│   ├── user-persistence/     # 現行の専用SQLite
-│   ├── user-http/            # 現行のGoogle OIDC・HTTP
-│   ├── shard-management/     # Shard / Lease / Fencing
-│   ├── game-routing/         # Gateway・Matchmaking共通のGame ID → 担当Pod解決
-│   ├── persistence/          # SeaORM / SQL / Outbox
-│   ├── messaging/            # Core NATS / JetStream
-│   ├── cache/                # Valkey / Presence
-│   ├── rate-limit/           # Token Bucket / Fixed Window
-│   ├── rpc/                  # Tonic
+│   ├── shogi-domain/       # 局面・合法手・詰み・投了（時計は未実装）
+│   ├── game-application/   # Game Actorとユースケース
+│   ├── user-id/            # 現行の共有ID値型
+│   ├── user-application/   # 現行のユーザー型・Repository契約
+│   ├── user-persistence/   # 現行の専用SQLite
+│   ├── user-http/          # 現行のGoogle OIDC・HTTP
+│   ├── shard-management/   # Shard / Lease / Fencing
+│   ├── game-routing/       # Gateway・Matchmaking共通のGame ID → 担当Pod解決
+│   ├── game-persistence/   # SeaORM / SQL / Outbox
+│   ├── game-messaging/     # Core NATS / JetStream
+│   ├── cache/              # Valkey / Presence
+│   ├── rate-limit/         # Token Bucket / Fixed Window
+│   ├── game-grpc/          # Tonic
 │   └── common/
 ├── proto/
 ├── migrations/
