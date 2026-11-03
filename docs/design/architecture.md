@@ -53,7 +53,7 @@ flowchart LR
 - 平手初期局面から開始し、通常の駒移動、成り、持ち駒、王手回避、詰み、投了を扱う。二歩・打ち歩詰め・王手放置などの不正着手はエラーとして拒否し、対局は継続する。
 - 詰みは「王手され、合法手がない」場合のみ。王手でない合法手なし局面、千日手、連続王手の千日手、入玉宣言勝ち等の判定は対象外。タイマー・時間切れも未実装である。
 - 対局作成時に、異なる2ユーザーIDを先手・後手へ固定する。ユーザーDBへの存在確認は行わない。着手側は`user_id`とこの紐付けから決める。投了は手番によらず可能である。
-- Google認証とユーザー管理は独立したHTTPサービスで提供する。対局gRPCのユーザーIDは依然として呼出元の申告値であり、信頼できる内部ネットワークで利用する。HTTPログインは対局gRPCやWSを認証しない。マッチング、Shard管理、Lease、Game Router、Gateway、クライアントへの観戦配信は現在のスコープに含めない。
+- Google認証とユーザー管理は独立したHTTPサービスで提供する。対局gRPCのユーザーIDは依然として呼出元の申告値であり、信頼できる内部ネットワークで利用する。HTTPログインは対局gRPCやWSを認証しない。マッチング、レート更新・取得、Shard管理、Lease、Game Router、Gateway、クライアントへの観戦配信は現在のスコープに含めない。
 
 ### 0.2 確定・再送・復旧
 
@@ -114,7 +114,7 @@ Core NATSへの確定イベント配信と、AxumによるGoogle認証・ユー�
 | 領域 | 採用技術 | 主な役割 |
 |---|---|---|
 | 言語 | **Rust** | サーバー実装 |
-| Web API | **Axum** | 現在は独立したユーザーHTTPサービス。その他のApplication APIは将来 |
+| Web API | **Axum** | 現在は独立したユーザーHTTPサービス。棋譜・レート取得や対局準備のPlayer Serviceは将来 |
 | ユーザー認証 | **Google OpenID Connect / openidconnect** | 認可コードフロー・PKCE・IDトークン検証。アプリセッションは専用SQLiteで管理 |
 | 非同期基盤 | **Tokio** | 現在はGame ActorとHTTP・外部通信。WebSocket・タイマーは将来 |
 | RPC | **Tonic / gRPC** | 現在の対局操作。Gateway接続は将来 |
@@ -124,7 +124,7 @@ Core NATSへの確定イベント配信と、AxumによるGoogle認証・ユー�
 | RDBMS | **SQLite（現行） / PostgreSQL（将来候補）** | 現在の正本はSQLite。時計・Shard Leaseは未実装 |
 | 一時データ | **Valkey** | Presence、マッチング、キャッシュ、Token Bucketによるレート制限 |
 | 低遅延イベント | **Core NATS** | 現在は確定イベントを発行。Gatewayへの配信は将来 |
-| 永続イベント/ジョブ | **NATS JetStream** | AI解析、統計、通知等の非同期ジョブ |
+| 永続イベント/ジョブ | **NATS JetStream** | レーティング更新、AI解析、統計、通知等の非同期ジョブ |
 | 将棋AI | **やねうら王等のUSIエンジン** | 局面評価・候補手・棋譜解析 |
 | 解説AI | **LLM（別Worker/外部推論）** | エンジン結果に根拠を置いた自然言語説明 |
 | コンテナ | **Docker** | 環境の統一 |
@@ -141,12 +141,13 @@ flowchart TB
   LB --> USER[User Service / user-server<br/>Google認証・プロフィール・セッション]
   USER --> GOOGLE[Google OpenID Connect]
   USER <-->|独立した所有権| USERDB[(User DB<br/>本番配置は未決定)]
-  LB --> API[Application API<br/>棋譜検索・レーティング・AI受付]
+  LB --> API[Player Service / player-server<br/>棋譜・レート取得、対局準備・解析受付]
   LB --> GW[Realtime Gateway<br/>Axum / WebSocket]
   GW -->|内部セッション照会| USER
   GW -->|Game ID → Shard → Owner| R[Game Router<br/>各Gateway・Matchmaking内の共通モジュール]
   R -->|所有者へgRPC: CreateGame / GetSnapshot / MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
-  API --> MATCH[Matchmaking<br/>Rust / Valkey]
+  API -->|マッチング申請・取消| MATCH[Matchmaking<br/>Rust / Valkey]
+  API -->|終局済み棋譜・読取専用| PG
   MATCH -->|固定Game IDで所有者を解決| R
   MATCH <-->|成立予約・再試行状態| PG
   GAME <-->|棋譜・時計・Lease・Fencing| PG[(PostgreSQL)]
@@ -159,6 +160,10 @@ flowchart TB
   API -->|解析要求| AAPI[AI API]
   AAPI -->|Job + Outbox| PG
   OUT --> JS[NATS JetStream]
+  JS --> RATE[Rating Worker<br/>レート更新]
+  RATE -->|両対局者のレート・適用履歴| RDB[(Rating schema / PostgreSQL)]
+  API -->|読取専用| RDB
+  MATCH -->|内部レート一括照会| API
   JS --> AI[AI Workers<br/>USI Engine / LLM]
   JS --> BG[Background Workers<br/>統計 / 通知等]
   AI --> PG
@@ -167,16 +172,17 @@ flowchart TB
   SM -->|配置/復旧調整| GAME
 ```
 
-上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Application APIへ認証を再統合しない。Gatewayの認証境界は3.2節の将来方針に従い、現行のHTTPログインだけでWSを認証できるとはしない。AI完了イベントにもOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。
+上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Player Serviceへ認証を再統合しない。Gatewayの認証境界は3.2節の将来方針に従い、現行のHTTPログインだけでWSを認証できるとはしない。AI完了イベントにもOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。
 
 ### 3.1 アプリケーション単位
 
 - **User Service**: Google認証、登録、プロフィール、独自セッション。現行の `user-server` の責務を維持する
-- **Application API**: 棋譜検索、レーティング、対局設定、AI解析受付。ユーザー認証・プロフィールの正本は持たない
+- **Player Service（`player-server`）**: 対局者・観戦者向けHTTPの照会と受付。棋譜検索・詳細、レート取得、対局設定、マッチング申請・取消、AI解析受付・結果取得を各領域の契約で提供する。取得専用サービスではなく、対局準備の要求も受け付ける。詳細は3.3節
 - **Realtime Gateway**: WebSocketの接続認証、対局/観戦購読、着手の転送、再同期、送信キュー制限
 - **Game Service**: 各Game Actor、時計、合法手、結果確定、Shard復旧
 - **Shard Manager（独立アプリ）**: Game Podの登録・負荷収集、Shard配置・再配置計画、障害復旧の調整
 - **Matchmaking Worker**: Valkey上の待機列から候補を選び、9.3節の永続予約と対局作成の照合により成立を確定する
+- **Rating Worker**: 永続配信された終局結果から両対局者のレートを更新する。計算、適用履歴、重複排除、復旧はRating領域が所有する。取得はPlayer Serviceが担当する。詳細は9.4節
 - **AI Worker**: USIエンジン実行・解析結果保存、必要に応じてLLM説明
 - **Background Worker**: 通知、統計、監査、不正検知など
 
@@ -191,6 +197,20 @@ User Serviceは有効なセッションに対応する内部UserIdと有効期�
 接続開始時の認証だけで、接続中の権限を無期限に維持しない。Gatewayはセッションの有効期限を超えて認証済み接続を継続せず、定期的な内部照会でログアウト等による失効を反映する。再検証に失敗した接続も、認証済みとして継続しない。再検証間隔・照会タイムアウト・最大失効反映遅延を設定項目として定め、Gateway公開前にその上限と障害時動作を検証する。全着手でUser Serviceへ照会する方式は前提にしない。
 
 この方針は初期Webクライアントを対象とする。iOS・Androidのログインと資格情報の受け渡しは別途設計し、WebのCookie方式で対応済みとはしない。内部セッション照会API、内部RPCの送信元認証、WS接続への認証情報の対応付けは未実装である。
+
+### 3.3 Player Serviceと棋譜取得（将来設計・未実装）
+
+`player-server`は、対局者・観戦者向けのHTTP照会と対局準備・解析の受付を組み立てる。棋譜はGame領域、レートはRating領域、成立予約はMatchmaking、解析ジョブはAI APIが正本を持つ。対局の更新はGame Service、レート更新はRating Workerへ責務を残す。User Serviceの内部セッション照会で本人を検証し、ユーザーDBへ直接接続して認証・プロフィール管理を取り込まない。Matchmakingからのレート一括照会は、公開HTTPとは別に認証する内部契約として維持する。
+
+初期の棋譜取得は終局済み対局の検索・一覧・詳細を対象とする。`game-record-application`が検索条件、公開する棋譜型、照会ユースケースと読取専用Repository契約を所有する。`game-persistence`にその実装を置き、Game領域の確定済みデータをPrimaryから読む。独立した検索DBやイベント投影は初期構成の前提にしない。進行中の対局の同期・観戦はRealtime GatewayとGame Serviceの契約を利用する。
+
+Player Serviceには専用の読取接続・DB権限を渡し、Game Serviceの書込用Repositoryやスキーマ移行を実行する接続を渡さない。移行はGame側が所有し、読取側は対応するスキーマ版を確認する。現行の`GameRepository::load_game`はActor復旧用の全受理記録を返し、検索・認可・取得量の制限を持たない。この型をHTTPの公開契約へそのまま流用せず、内部のrequest_idや再送制御情報を公開棋譜へ含めない。
+
+検索・詳細・履歴の各経路で同じ公開範囲と閲覧権限を検証し、検索候補の絞込みはページングや件数計算より前に行う。閲覧者は検証済みセッションから決め、検索対象のUserIdを本人情報として信頼しない。公開範囲の正本と変更契約はGame領域に置く。公開・参加者限定の方針と、非公開棋譜の存在を応答で漏らさない規則は公開前に確定する。
+
+詳細は参加者、ルール、勝敗・終局理由、終局seqと順序付きの公開履歴を、一つのDB読取Snapshotから返す。履歴を分割取得する場合は、対象棋譜の版と終局seqをカーソルに固定し、訂正や公開範囲変更時には再認可・版の照合を行う。異なる版の混在や連番の欠落を正常な棋譜として返さない。seqは投了を含む受理済み操作の連番であり、指し手の手数とは区別する。
+
+検索条件は参加者・期間・結果等から許可する組合せを定め、安定した順序とカーソルでページングする。ページ件数、検索期間、履歴取得範囲、応答サイズと処理時間に上限を設ける。終局時刻・公開範囲・索引等の必要な項目はGame側の保存契約と移行で追加する。現行DBにない値や旧履歴の公開範囲を推測で補わない。これは将来の取得契約であり、現行Workspaceに検索APIや新crateはまだ存在しない。
 
 ## 4. Pod・Virtual Shard・Game Actorの関係
 
@@ -425,10 +445,10 @@ flowchart TD
 
 | 技術 | 役割 | 主な利用例 |
 |---|---|---|
-| PostgreSQL | 正本・整合性 | 着手、時計、対局結果、Shard Lease、Fencing、Outbox |
+| PostgreSQL | 正本・整合性 | 着手、時計、対局結果、レート・適用履歴、Shard Lease、Fencing、Outbox |
 | Valkey | 高速一時状態 | Presence、Matchmaking、Cache、Rate Limit |
 | Core NATS | 揮発性の即時配信 | MoveCommitted、観戦イベント |
-| JetStream | Ack・再配信つきの非同期処理 | AI解析、集計、通知、ジョブ |
+| JetStream | Ack・再配信つきの非同期処理 | レーティング更新、AI解析、集計、通知、ジョブ |
 
 Core NATSの配信漏れには連番+Snapshotで対応する。最後のイベントの欠落にも対応するため、6.1節の定期照合と再接続時の再同期を行う。JetStreamの再配信は重複実行を起こし得るためWorkerを冪等にする。PostgreSQLとメッセージブローカーの二重書き込みにはTransactional Outboxを用いる。
 
@@ -462,7 +482,7 @@ Core NATSの配信漏れには連番+Snapshotで対応する。最後のイベ�
 - 時刻基準にはValkey側の時刻を使い、異なるAPI/Gateway Pod間の時計ずれを避ける。
 - Valkeyのキーは不要になったとき自動削除できるようTTLを付ける。容量（capacity）と補充速度（refill rate）は操作別のポリシーで設定する。
 
-**実装上の配置**：API ServerとRealtime Gatewayで共有できる`RateLimiter`をRustの共通Crateとして実装し、HTTPではAxum Middleware等から呼び出す。WebSocketメッセージごとに常にValkeyへアクセスする設計にはせず、接続ごとの軽量制限はGatewayのメモリで実施する。Ingress側にも粗い流量制限を設け、多層防御とする。
+**実装上の配置**：Player ServiceとRealtime Gatewayで共有できる`RateLimiter`をRustの共通Crateとして実装し、HTTPではAxum Middleware等から呼び出す。WebSocketメッセージごとに常にValkeyへアクセスする設計にはせず、接続ごとの軽量制限はGatewayのメモリで実施する。Ingress側にも粗い流量制限を設け、多層防御とする。
 
 **Valkey障害時**には、操作の重要度に応じてfail-open / fail-closedを明示的に決める（例：AI解析ジョブは保守的に受付制限）。また、Token Bucketはリクエスト頻度の制限であり、AI Workerの同時実行数制御や費用クォータの代替にはならない。
 
@@ -489,6 +509,45 @@ Game Serviceには、同じ`match_id`・`game_id`・参加者・ルールで対�
 作成開始とキャンセルが競合した場合は、`RESERVED`からの条件付き遷移で先に確定した操作を有効にする。`CREATING`へ進んだ予約は、期限切れや照会時の`not_found`だけを根拠に取り消して参加者を再割当てしない。作成が進行中の可能性を解消してから結果を確定し、成立済みならキャンセル済みとは返さない。
 
 永続予約と対局作成を同じDBトランザクションで確定できる配置を優先する。異なる処理境界になる場合は、Workerが保存済みの予約状態と対局を照合して処理を再開する。Worker再起動やValkey状態喪失の後も、未解決の永続予約を回収して同じ対局へ収束させる。DBへ成立状態を保存できない場合は、Valkeyの処理成功だけで成立を返さない。
+
+レーティング対局の候補選択には、9.4節の内部一括取得APIから得たpool別の値・評価状態・versionを使い、予約に取得値と取得時刻を記録する。レーティング対象の可否、pool、判定ポリシー版も予約と対局作成の一致条件に含める。クライアントの申告値を採用せず、取得失敗は未評価者や初期値として扱わず待機・再試行する。
+
+### 9.4 レーティングの更新と取得（将来設計・未実装）
+
+レート更新と取得は、同じRating領域の契約を使う別の実行単位に分ける。既存の将来Player Serviceに取得を置き、更新は独立したRating Workerで処理する。取得専用サービスを追加する案は、独立した負荷・運用上の要件が生じた時点で検討する。
+
+| 実行単位 | 責務・境界 |
+|---|---|
+| Rating Worker（`rating-worker`） | 確定済み終局結果の検証、レート計算、両対局者の原子的更新、適用履歴と再送・復旧。Ratingデータの唯一の書込み担当 |
+| Player Service（`player-server`） | 公開HTTPでのユーザー別取得と、Matchmaking向け内部一括取得。Ratingの照会契約と読取専用DB権限を使う |
+| Game Service | 参加者・ルール・対象判定・終局結果の正本。終局と更新入力を同じトランザクションで確定し、レート計算は行わない |
+| User Service | 認証・プロフィール・セッションを維持する。Ratingは内部UserIdで参照し、ユーザーDBのテーブル・接続・スキーマ管理を共有しない |
+
+#### 更新入力と永続配信
+
+poolはルール・持ち時間等で分けるレーティング区分を表す。信頼されたMatchmakingの予約に基づき、対局作成時に両参加者、pool、対象判定とそのポリシー版を固定する。Game Serviceは終局時に、これらと勝敗・終局理由、終局seq・確定時刻、イベントID・通信形式版をOutboxへ固定する。計算には適用直前の両者のレートを使い、マッチング時の表示値で上書きしない。
+
+現行の`CreateGame`と`GameFinished`には、この設定や両参加者を含む更新入力が揃っていない。導入時に作成契約・保存形式・通信形式を拡張する。現行イベントの`user_id`は操作した参加者であり、両対局者を示さない。入力の不足する旧イベントを推測で適用せず、初期導入は新契約で作成した対象対局から開始する。既存履歴の遡及計算は別途移行を設計する。
+
+終局入力はGame側OutboxからJetStreamの永続ストリームへ直接発行する。Core NATSの購読から転送する経路に依存しない。Publisherはストリームへの永続化確認Ackを受けてから配信済みを記録し、Ack不明時は同じID・内容で再送する。観戦用Core NATSとJetStreamでは配信状態・取得・再試行を分け、一方の完了や停止が他方の未配信結果を消したり配信を止めたりしないようにする。これは6.3節の現行Core NATS Publisherとは別に必要な拡張である。
+
+#### 適用の一意性・順序・復旧
+
+Rating Workerはdurable consumerで受信し、Rating専用schema内の一つのDBトランザクションで、poolの状態行をロックし、適用済み確認、両参加者の初期行作成・現在値更新、入力と更新前後の値・計算版・適用番号の記録を行う。`(世代, game_id)`を一意にし、イベントIDや申告poolが変わっても同じ対局を再加算しない。同一対局の異なる入力や未知の形式は適用せず、永続的に隔離・警報して調査する。対象外という判定も記録する。
+
+ConsumerへのAckはDB Commit後に返す。Commit前の停止は再実行し、Commit後からAckまでの停止は適用履歴で重複排除する。結果不明のCommitは同じキーで照合する。両者を別トランザクションで更新せず、ブローカーの重複排除期間だけに依存しない。
+
+初期は逐次処理とし、DBのpool単位の排他でも重複稼働・同一ユーザーの複数対局による更新消失を防ぐ。適用順はpoolごとのDB確定順とし、同じトランザクションで単調増加する適用番号を採番する。終局時刻順や複数Game Actorを横断したseq順は保証せず、遅着した結果は後から適用する。再構築には保存した順序・入力・計算版を使う。同じpoolの水平並列化や時刻順への変更は、計算結果と競合制御を検証してから導入する。
+
+ストリームの保持期限・障害による欠落に備え、配信済みフラグにかかわらずGame側の確定入力全件とRatingの適用履歴を定期照合し、未適用の対局を同じIDで再投入する。確定入力と計算版は再構築可能な期間だけ保存・アーカイブし、削除前に適用完了と復旧対象期間を照合する。ストリームの保持容量、DBのバックアップ・復元、停止中に蓄積した結果の回収を運用要件とする。結果訂正や計算方式変更による再計算は通常の再送と分離する。別世代への再構築・検証・切替には、並行して到着する新結果を取りこぼさない境界と追従手順が必要であり、導入前に具体化する。
+
+#### 取得とMatchmakingの整合性
+
+公開取得はUserIdとpoolを指定し、値、未評価・暫定等の評価状態、適用対局数、レートのversion・計算版・最終適用番号・更新時刻を返す。認可はAPI境界で行い、本人のセッションはUser Serviceの内部照会で検証する。レート未作成と存在しないユーザーを区別するため、将来の内部ユーザー照会契約も用意する。存在する未評価者にはpool設定の初期状態を返し、初回対象対局の適用時に必要な行を原子的に作成する。認証・プロフィール登録のトランザクションにレート作成を加えない。
+
+終局確定と更新は非同期であり、終局の成功応答はレート更新完了を意味しない。取得は適用済みの値とその版を返し、更新待ち中は以前の値を返し得る。初期はRating schemaのPrimaryを読み、内部一括取得は一つのDB読取Snapshotで行う。Matchmakingは予約時の確定済み値による候補選択を許容し、その後の更新で予約を取り消さない。前局反映前の再マッチを禁止する保証は持たない。キャッシュや読取レプリカを導入する際は許容する反映遅延を定め、障害や遅延を未評価・初期値で隠さない。
+
+更新APIは信頼された終局入力の処理に限定し、クライアントが勝敗や更新後のレートを直接指定するAPIは公開しない。計算式、初期値、暫定期間、pool分割、引分け・無効局・不正対局の扱いは16章の未決定事項とし、レーティング対局の公開前に確定する。
 
 ## 10. AI Platform
 
@@ -544,19 +603,23 @@ flowchart LR
 
 | テーブル | 内容 |
 |---|---|
-| `player_ratings` | ルール別レーティング |
-| `match_reservations` | 永続match_id、固定game_id、参加者・ルール、成立予約の状態。状態遷移と作成照合は9.3節に従う |
+| `rating_pool_state` | Rating領域所有。poolの設定・計算版、有効世代、適用番号。pool単位の更新排他にも使う |
+| `player_ratings` | Rating領域所有。`(世代, user_id, pool_id)`ごとの現在値、評価状態、対局数、version |
+| `rating_applications` | Rating領域所有。`(世代, game_id)`が一意。固定入力、pool、両者の更新前後の状態、計算版・適用番号、対象外判定を保持する適用台帳 |
+| `match_reservations` | 永続match_id、固定game_id、参加者・ルール・レーティング設定、候補照会時のレートとversion、成立予約の状態。状態遷移と作成照合は9.3節に従う |
 | `match_participants` | 予約への参加者対応。同一ユーザーの有効予約をDB制約で一意に保つ |
-| `games` | 対局メタ、手番、version、時計の確定状態 |
+| `games` | 参加者・ルール・pool・対象判定等の対局メタ、手番、version、時計の確定状態。3.3節の棋譜検索に必要な時刻・公開範囲もGame側で管理 |
 | `game_moves` | `(game_id, seq)`をキーとする確定着手履歴、request_id |
 | `game_snapshots` | 局面・時計・連番の復元用Snapshot |
-| `game_results` | 勝敗と終局理由 |
+| `game_results` | Game領域所有。勝敗・終局理由と9.4節の固定した更新入力。レート未適用結果の照合・再投入元 |
 | `shard_leases` | shard_id、owner_id、generation、期限、状態 |
-| `outbox_events` | DB確定済み・未配信イベント |
+| `outbox_events` | DB確定済みイベント。Core NATS・JetStream等の送信先別に配信状態と再試行を管理 |
 | `analysis_jobs` | AI解析要求と実行状態 |
 | `analysis_results` | 局面別解析結果 |
 
 着手永続化は、`game_moves`追加、`games`更新、`outbox_events`追加を同一トランザクションで行う。`shard_leases`の所有権・期限・世代を同TX内で検証する。
+
+Ratingのテーブルは専用schemaと独立したスキーマ管理・DB権限で分離する。初期はGame領域と同じPostgreSQLに配置できるが、更新はRating Worker、取得はPlayer Serviceの読取専用契約に限定する。ユーザーDBへの外部キーや直接接続は持たない。Ratingの更新トランザクションと、Game Serviceによる結果・Outboxの確定トランザクションは独立する。
 
 大量着手履歴については、インデックス・パーティショニング・アーカイブを計画する。単純に2,500手/秒が24時間継続すると約2億1,600万手/日となるが、これは負荷試験上の上限シナリオであって実トラフィック予測ではない。
 
@@ -569,12 +632,13 @@ flowchart LR
 | コンポーネント | 実行形態 | Service / 接続 | スケーリング・注意点 |
 |---|---|---|---|
 | User Service（`user-server`） | **独立Deployment候補** | 専用のHTTP ServiceとIngress、GoogleへのHTTPS通信 | ユーザーDBの配置・複数Pod運用は別途設計。現行SQLiteをそのまま複数Podで共有できるとはしない |
-| Application API（Axum） | **Deployment** / 複数Pod | ClusterIP Service + Ingress / Load Balancer | ステートレス。HPAでCPU・リクエスト数等を参照 |
+| Player Service（Axum） | **Deployment** / 複数Pod | ClusterIP Service + Ingress / Load Balancer | ステートレス。HPAでCPU・リクエスト数等を参照 |
 | Realtime Gateway（Axum / WS） | **Deployment** / 複数Pod | ClusterIP Service + WebSocket対応Ingress | 接続数・メモリ・送信キュー・帯域を監視。Graceful Drainが必要 |
 | **Game Router** | **各Gateway・Matchmaking Pod内の共通Rustモジュール** | 独立Service不要。所有者PodへTonic / gRPC | 対局作成・照会・操作に共通のGame ID→Shard→所有者解決を使い、変更時に再解決 |
 | **Game Server / Game Service** | **Deployment** / 複数Pod | 通常Serviceに加え、所有者Podへの**直接RPC endpoint** | Game Actor・Shardを保持。対局作成・照会・着手は汎用Serviceのランダム分散で配送しない |
 | **Shard Manager** | **独立Deployment** / Leader + Standby（例: 2 Pod） | Pod情報・PostgreSQLへの接続。必要なら内部gRPC | Leaderのみ配置判断。Game Serverとは別にデプロイ・拡縮 |
 | Matchmaking Service / Worker | **Deployment** / 複数Pod | 内部Service / Valkey / PostgreSQL | 待機列はValkey、成立予約はDB。9.3節の一意制約・条件付き遷移・作成再試行で重複を防ぐ |
+| Rating Worker | **独立Deployment** | JetStream durable consumer / Rating schema。公開Ingress不要 | 初期は逐次適用。DBでもpool単位に直列化し、滞留だけを理由に同一poolのWriterを増やさない |
 | AI Worker | **Deployment** / 専用Worker Pool | JetStream Consumer（通常Ingress不要） | CPU/GPU、待機ジョブ数、解析コストに応じて拡縮 |
 | Background Worker / Outbox Publisher | **Deployment** / 複数Pod | PostgreSQL / JetStream / Core NATS | 冪等性・Outboxの排他取得、Ackと再試行を考慮 |
 | **Valkey** | **Kubernetes外のマネージドサービス推奨** | プライベートendpoint / TLS / 認証 | Redis互換プロトコル。HA・容量・フェイルオーバーを設計 |
@@ -590,9 +654,10 @@ flowchart TB
   CLIENT[Web / iOS / Android] --> INGRESS[Ingress / Load Balancer]
   subgraph K8S[Kubernetes Cluster]
     INGRESS --> USER[User Service Deployment / Service]
-    INGRESS --> API[Application API Deployment / Service]
+    INGRESS --> API[Player Service Deployment / Service]
     INGRESS --> GW[Gateway Deployment / Service<br/>各PodにGame Router]
     MATCH[Matchmaking Deployment<br/>各PodにGame Router]
+    RATE[Rating Worker Deployment]
     GAME[Game Server Deployment<br/>Podごとに複数ShardとGame Actor]
     SM[Shard Manager Deployment<br/>Leader + Standby]
     AI[AI Worker Deployment]
@@ -600,20 +665,26 @@ flowchart TB
     NATS[NATS Cluster / Core NATS + JetStream<br/>永続Volume]
     GW -->|所有者Pod endpointへ gRPC| GAME
     API --> MATCH
+    API -->|終局済み棋譜・読取専用| PG
     MATCH -->|Game Routerで解決した所有者Podへ対局作成・照会 gRPC| GAME
     SM -->|配置・Draining調整| GAME
     NATS --> GW
     NATS --> AI
     NATS --> BG
+    NATS -->|終局入力の永続配信| RATE
   end
   subgraph MANAGED[Managed Services / Private Network]
     VALKEY[(Managed Valkey)]
     PG[(Managed PostgreSQL)]
+    RDB[(Rating専用schema / PostgreSQL)]
   end
   GW --> VALKEY
   API --> VALKEY
   MATCH --> VALKEY
   MATCH <-->|成立予約・再試行状態| PG
+  MATCH -->|内部レート一括照会| API
+  RATE -->|レート・適用履歴| RDB
+  API -->|読取専用| RDB
   SM <-->|配置表・Manager Leader Lease| PG
   GAME <-->|対局・Shard Lease・Fencing| PG
   BG <-->|Outbox等| PG
@@ -623,7 +694,7 @@ flowchart TB
   USER <--> USERDB[(User DB / 配置方式は未決定)]
 ```
 
-User Serviceの接続先も将来配置の検討対象であり、独立したユーザーDBのDB製品や複数Pod方式は未決定である。これは実行配置の概念図であり、すべての通信を網羅しない。NATSのCore配信とJetStreamは**同じNATSサーバークラスタ上の異なる機能**である。
+図のRating専用schemaはGame領域と同じManaged PostgreSQL内に配置でき、別クラスタを必須としない。User Serviceの接続先も将来配置の検討対象であり、独立したユーザーDBのDB製品や複数Pod方式は未決定である。これは実行配置の概念図であり、すべての通信を網羅しない。NATSのCore配信とJetStreamは**同じNATSサーバークラスタ上の異なる機能**である。
 
 ### 12.3 Game Server Podの発見・Shardの引き継ぎ
 
@@ -637,10 +708,11 @@ User Serviceの接続先も将来配置の検討対象であり、独立した�
 ### 12.4 可用性と更新・スケーリング
 
 - **User Service**: 独立したユーザーDBの永続化とバックアップを設計する。複数Pod運用は対応するDBアダプターと競合制御を検証してから決定する。Googleへのdiscovery依存も起動・ログインの可用性条件に含める。
-- **Application API**: Readiness / Liveness / Startup ProbeとHPAを構成する。
+- **Player Service**: Readiness / Liveness / Startup ProbeとHPAを構成する。
 - **Realtime Gateway**: ローリングアップデート時は新規接続受付を停止し、既存WebSocketをDrainingしてクライアントに再接続・再同期させる。CPUだけでなく接続数・送信キュー・帯域を観測する。
 - **Game Server**: Pod終了前にDrainingを開始しShardを移管する。突然の停止ではLease + Fencingで復旧。Pod追加とShard再配置を連動させるため、HPA自動化は負荷試験後に導入する。
 - **Shard Manager**: LeaderとStandbyを別ノードに配置し、Leader LeaseをDB時刻で管理する。Leader切り替え中でも既存対局を継続できるようにする。
+- **Rating Worker**: 終局から適用までの遅延と未適用結果を監視する。停止・再配信・DB復元後は確定入力と適用台帳を照合する。更新停止は対局の結果確定を妨げないが、取得値の反映は遅れる。
 - **NATS**: 公式Helm Chart等でNATS Clusterを運用。JetStreamの永続ボリューム、ストリームのReplica、AZ分散、バックアップと復旧を確認する。
 - **共通**: Resource requests / limits、PodDisruptionBudget、Topology Spread / Anti-Affinity、NetworkPolicy、TLS、Secret管理、OpenTelemetryを適用する。
 
@@ -658,11 +730,12 @@ User Serviceの接続先も将来配置の検討対象であり、独立した�
 Kubernetes Cluster
 ├── shogi-app
 │   ├── user-server               (独立Deployment候補 + Service; DB配置は未決定)
-│   ├── api-server                (Deployment + Service)
+│   ├── player-server             (Deployment + Service)
 │   ├── realtime-gateway          (Deployment + Service; Game Router内蔵)
 │   ├── game-server               (Deployment; Pod固有gRPC endpoint)
 │   ├── shard-manager             (独立Deployment; Leader + Standby)
 │   ├── matchmaking-worker        (Deployment; Game Router内蔵)
+│   ├── rating-worker             (独立Deployment; JetStream Consumer)
 │   ├── ai-worker                 (Deployment)
 │   ├── background-worker         (Deployment)
 │   └── outbox-publisher          (Deployment、またはBackground Worker内実装)
@@ -682,11 +755,12 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 | 対象 | 仮の試験開始値 | 主な指標 |
 |---|---:|---|
 | User Service | 未決定 | Google通信、セッションDB照会、DB配置と競合制御 |
-| Application API | 3 Pod | HTTPレイテンシ・CPU |
+| Player Service | 3 Pod | HTTPレイテンシ・CPU |
 | Gateway | 20〜30 Pod | 10万接続時の接続密度・送信帯域 |
 | Game Server | 8 Pod | 25,000局時のActor負荷・着手p99 |
 | Shard Manager | 2 Pod（Leader + Standby） | リーダー切替・再配置遅延 |
 | Matchmaking | 2〜3 Pod | 待機人数・成立までの時間 |
+| Rating Worker | 初期は逐次処理 | 最古の未適用結果の経過時間、適用時間、poolのDBロック待ち。台数は負荷試験で決定 |
 | AI Worker | 可変 | JetStream滞留・CPU/GPU予算 |
 | Background Worker | 2〜3 Pod | ジョブ処理時間・再試行 |
 | NATS | 3 Pod | Core配信・JetStreamレプリカ |
@@ -723,6 +797,7 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 | PostgreSQL | Commit遅延、ロック待ち、WAL量、接続数、レプリカ遅延 |
 | NATS | 配信遅延、購読数、欠落・再同期回数 |
 | JetStream | 未Ack件数、滞留、再配信、デッドレタージョブ |
+| Rating | 終局から適用までの遅延、未適用件数・最古時刻、重複・不整合・隔離件数、照合で回収した件数、取得失敗 |
 | AI | 解析待ち時間、実行時間、CPU/GPU利用率 |
 
 SLO候補として、着手確定と観戦配信のp99を定義する。ただしネットワーク往復や地域を明示してから正式な数値目標を確定する。
@@ -735,6 +810,9 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 - 大量再接続とイベント欠落からの復帰
 - 後続イベントがない終局通知の欠落、Gatewayと各画面の反映番号の違い、定期照会失敗、通常の配信遅延からの再同期
 - 対局作成後の応答喪失、マッチングWorker停止、作成とキャンセルの競合、Valkey状態喪失からの永続予約の回収
+- レート更新のCommit前後・Ack前の停止、重複・遅着・同一ユーザーの複数対局、初回行の競合、未知形式と異なる入力の隔離、取得時の未評価・未反映・障害の区別
+- 棋譜の検索・詳細・履歴に共通した認可、ページ間の版変更・公開範囲変更、終局seqと履歴の整合、最大取得量とタイムアウト、旧履歴に不足するメタデータの扱い
+- 終局Outboxの送信先別障害、ストリーム保持期限超過、DB復元後の確定入力との照合・再投入、順序を保存したレート再構築と並行更新中の世代切替
 - Shard所有者切替中の対局作成、旧所有者による作成拒否、配送先再解決後の同一IDでの再送
 - Game Pod強制停止、Shard引き継ぎ、時計復元
 - PostgreSQLフェイルオーバー、NATS切断、AI解析急増
@@ -755,9 +833,13 @@ Gatewayの公開前に、3.2節の認証境界を実装する。セッション�
 
 マッチング導入時には、9.3節の永続予約と冪等な対局作成契約を実装する。待機列の原子的操作だけで成立を確定せず、応答喪失・Worker停止・キャンセル競合・Valkey状態喪失から同じ成立結果へ復旧できることを検証する。
 
+レーティング対局の公開前に、9.4節の固定入力・作成契約の拡張、JetStreamへの永続配信、Rating Worker、取得API、欠落照合と復旧検証を揃える。AI機能の導入時期とは独立した前提とする。
+
+Player Serviceでの棋譜公開前に、3.3節の読取契約・公開範囲・取得上限と必要なメタデータを揃え、検索から履歴まで同じ認可と版の整合性を検証する。
+
 ### Phase 3: AIと非同期処理
 
-JetStream、AI Worker、解析ジョブ共有、自然言語解説を追加。OutboxとPublisherを解析ジョブ・完了通知にも拡張する。
+AI向けのJetStream利用、AI Worker、解析ジョブ共有、自然言語解説を追加。OutboxとPublisherを解析ジョブ・完了通知にも拡張する。
 
 ### Phase 4: 10万人規模
 
@@ -766,6 +848,8 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 ## 15. Rustモノレポ構成
 
 現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。対局スキーマは`crates/game-persistence/src/schema.rs`、ユーザースキーマは`crates/user-persistence/src/lib.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+
+実行名は対象領域と役割で表し、`user-server`・`game-server`・`player-server`は接尾辞を`-server`で揃える。通信方式は責務の説明とアダプター名で表す。
 
 crate名はOSS製品名よりも、所有する領域と責務を優先して表す。`game-persistence`は対局とOutboxの永続化、`game-messaging`は対局イベントのメッセージングを所有する。現行の`game-messaging`はCore NATSのSubject・JSON変換と送信を担う。`game-grpc`と`user-http`のgRPC・HTTPは製品名ではなく、公開するプロトコル境界を表す。`shogi-domain`は将棋ルールを、`game-application`は対局ユースケースを所有する。`user-id`は対局とユーザー管理で共有する値型として独立させる。
 
@@ -817,23 +901,29 @@ shogi-backend/
 ├── apps/
 │   ├── user-server/        # 現行のユーザーHTTPサービス
 │   ├── outbox-publisher/   # 現行の確定イベント配信
-│   ├── api-server/
+│   ├── player-server/      # 棋譜・レート取得、対局準備・解析受付
 │   ├── realtime-gateway/
 │   ├── game-server/
 │   ├── shard-manager/
-│   ├── matchmaking-worker/
+│   ├── matchmaking-worker/ # マッチング処理の組み立て・実行
+│   ├── rating-worker/      # レート更新・永続イベント処理
 │   ├── ai-worker/
 │   └── background-worker/
 ├── crates/
 │   ├── shogi-domain/       # 局面・合法手・詰み・投了（時計は未実装）
 │   ├── game-application/   # Game Actorとユースケース
+│   ├── game-record-application/
 │   ├── user-id/            # 現行の共有ID値型
 │   ├── user-application/   # 現行のユーザー型・Repository契約
 │   ├── user-persistence/   # 現行の専用SQLite
 │   ├── user-http/          # 現行のGoogle OIDC・HTTP
+│   ├── matchmaking-application/
+│   ├── rating-application/ # レート計算・更新と取得の契約
+│   ├── rating-persistence/ # Rating専用schemaの更新・読取
+│   ├── rating-messaging/   # 終局入力の検証・変換とAck
 │   ├── shard-management/   # Shard / Lease / Fencing
 │   ├── game-routing/       # Gateway・Matchmaking共通のGame ID → 担当Pod解決
-│   ├── game-persistence/   # SeaORM / SQL / Outbox
+│   ├── game-persistence/   # 対局・Outbox保存と棋譜の読取アダプター
 │   ├── game-messaging/     # Core NATS / JetStream
 │   ├── cache/              # Valkey / Presence
 │   ├── rate-limit/         # Token Bucket / Fixed Window
@@ -851,6 +941,12 @@ shogi-backend/
     └── load/
 ```
 
+`matchmaking-application`は、9.3節の候補選定、永続予約の状態遷移、固定した`game_id`での対局作成要求と結果の照合・再試行・復旧を所有する。待機列・予約保存・対局作成に必要な契約もこのcrateに置く。`apps/matchmaking-worker`は、このユースケースと待機列・永続化の実装、`game-routing`を使う対局作成アダプターを組み立てて実行する。いずれも将来の配置案であり、現行Workspaceには含めない。
+
+`game-record-application`は棋譜の検索・取得だけの契約を持ち、Game Actorの操作・復旧契約から独立させる。`game-persistence`がこの契約を実装し、保存形式・スキーマ管理はGame領域内に保つ。`apps/player-server`が棋譜の読取アダプター、Ratingの照会、Matchmaking・AI APIへの要求とHTTP境界を組み立てる。棋譜用の別DB・永続化crateは初期には追加しない。
+
+`rating-application`は版付きの計算、更新・取得ユースケースとRepository契約を所有する。`rating-persistence`がRating専用schemaを、`rating-messaging`が終局入力の受信を実装する。`apps/rating-worker`が更新側を、`apps/player-server`が読取専用の取得側を組み立てる。終局入力の生成と発行はGame側が所有し、Ratingの計算をGame Actorへ持ち込まない。これらも将来案であり、現行の15.1節の一覧には追加しない。
+
 Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Actorと永続化の境界をTraitで切り、単一プロセス版から分散版へ進化できるようにする。
 
 ## 16. 今後の未決定事項
@@ -862,16 +958,19 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 5. **AI予算とSLO**: 解析深度、同時実行、課金/制限、エンジンのライセンス。
 6. **DB拡張**: SQLite以外のアダプター検証、本番DBの選定、レプリカ、パーティショニング、アーカイブの導入タイミング。ユーザーDBの本番配置と複数Pod方式も独立して決める。
 7. **認証境界の拡張**: HTTPセッションを利用する画面の配置、将来のGateway・WS接続認証・内部サービスへの本人情報の伝達方法。ユーザー管理の所有権を維持して設計する。
+8. **レーティング制度と公開条件**: 計算式・パラメーター版、初期値・暫定期間、pool・シーズンの区分、引分け・無効局・不正対局、公開範囲と内部照会の認証、許容反映遅延。初期のDB確定順による適用の競技上の妥当性、結果訂正・再計算・世代切替、既存履歴の移行範囲も導入前に決める。
+9. **棋譜取得の公開契約**: 棋譜の公開・参加者限定の方針、非公開情報を漏らさない応答、検索条件・順序・索引、ページ・履歴・処理時間の上限、必要なメタデータと旧履歴の移行。3.3節の契約を公開前に具体化する。
 
 ## 17. 設計方針のまとめ（将来構成）
 
-- **ユーザー管理・認証**: 独立した `user-server`、Google OIDCとPKCE、専用DBのCookieセッション。Application API・Game Serviceへ再統合しない
+- **ユーザー管理・認証**: 独立した `user-server`、Google OIDCとPKCE、専用DBのCookieセッション。Player Service・Game Serviceへ再統合しない
 - **対局の権威**: Rust/TokioのGame Actor（mpsc + oneshot、Actor取出し時点で正式受付、Admission Gateなし）
 - **分散配置**: Virtual Shard + **独立DeploymentのRust Shard Manager（Leader / Standby）**
 - **所有権の整合性**: PostgreSQL Lease + Fencing Token
 - **リクエスト配送**: Gateway・Matchmaking内の共通Game Router + 所有者PodへのgRPC。対局作成にも同じ配送規則を使う
 - **観戦リアルタイム配信**: WebSocket + Core NATS + Snapshot/Sequence
 - **非同期AI**: JetStream + 専用AI Worker
+- **レーティング**: Rating Workerで非同期更新、Player Serviceで取得。永続終局入力、両者の原子的更新、適用台帳で再送・復旧を扱う
 - **データの正本**: 現在はSQLite。将来の分散構成ではPostgreSQLを候補とし、Domain / Application層はDB製品に依存させない
 - **一時状態・マッチング・Presence**: Valkey
 - **レート制限**: Valkey Token Bucketを基本、ログイン失敗等はカウンター方式を併用
