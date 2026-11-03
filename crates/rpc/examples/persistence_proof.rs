@@ -64,13 +64,6 @@ async fn main() -> Result<()> {
     match mode {
         "seed" => {
             fs::create_dir_all(dir)?;
-            for side in ["black", "white"] {
-                client
-                    .create_user(proto::CreateUserRequest {
-                        user_id: format!("{game}-{side}"),
-                    })
-                    .await?;
-            }
             let initial = client
                 .create_game(proto::CreateGameRequest {
                     game_id: game.clone(),
@@ -99,7 +92,6 @@ async fn main() -> Result<()> {
         "resume" => {
             let expected: proto::Snapshot = load(&dir.join("ongoing.bin"))?;
             assert_eq!(snapshot(&mut client, game).await?, expected);
-            verify_users(&mut client, game).await?;
             let first: proto::Acceptance = load(&dir.join("first.bin"))?;
             assert_eq!(
                 client
@@ -141,7 +133,6 @@ async fn main() -> Result<()> {
         "finished" => {
             let expected: proto::Snapshot = load(&dir.join("finished.bin"))?;
             assert_eq!(snapshot(&mut client, game).await?, expected);
-            verify_users(&mut client, game).await?;
             let first: proto::Acceptance = load(&dir.join("first.bin"))?;
             let finish: proto::Acceptance = load(&dir.join("resign.bin"))?;
             assert_eq!(
@@ -158,23 +149,6 @@ async fn main() -> Result<()> {
             );
         }
         _ => return Err("mode must be seed, resume, or finished".into()),
-    }
-    Ok(())
-}
-
-async fn verify_users(client: &mut Client, game: &str) -> Result<()> {
-    for side in ["black", "white"] {
-        let user_id = format!("{game}-{side}");
-        assert_eq!(
-            client
-                .get_user(proto::GetUserRequest {
-                    user_id: user_id.clone()
-                })
-                .await?
-                .into_inner()
-                .user_id,
-            user_id
-        );
     }
     Ok(())
 }

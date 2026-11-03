@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use game_application::{
     ApplicationError as Error, DomainEvent, GameId, GameRecord, GameRepository, GameService,
     MakeMove, OutboxRepository, Participants, RequestId, Resign, StagedGameChange, UserId,
-    UserService,
 };
 use persistence::{SeaOrmStore, SqliteOutbox};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
@@ -27,10 +26,6 @@ fn url(dir: &tempfile::TempDir) -> String {
 }
 async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService, DatabaseConnection) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
-    let users = UserService::new(store.clone());
-    for u in ["black", "white"] {
-        users.create_user(user(u)).await.unwrap();
-    }
     let service = GameService::new(store.clone());
     service
         .create(
@@ -135,17 +130,44 @@ async fn failed_enqueue_rolls_back_metadata_journal_and_events() {
 async fn v1_migration_preserves_history_without_backfill_and_rejects_incomplete_schemas() {
     let dir = tempfile::tempdir().unwrap();
     let url = url(&dir);
-    let (store, service, raw) = setup(&url).await;
-    service.make_move(&id(), command()).await.unwrap();
-    let before = store.load_game(&id()).await.unwrap();
-    raw.execute_unprepared("DROP TABLE outbox_events")
+    let raw = Database::connect(&url).await.unwrap();
+    raw.execute_unprepared(include_str!("fixtures/game_v1.sql"))
         .await
         .unwrap();
-    raw.execute_unprepared("UPDATE schema_version SET version = 1")
+    raw.execute_unprepared("INSERT INTO users VALUES ('black'), ('white')")
         .await
         .unwrap();
-    let migrated = SeaOrmStore::connect(&url).await.unwrap();
+    raw.execute_unprepared("INSERT INTO games VALUES ('game', 'black', 'white', 1, NULL, NULL)")
+        .await
+        .unwrap();
+    raw.execute_unprepared(
+        "INSERT INTO journal VALUES ('game', 1, 'move', 'black', 0, 1, '7g7f', 0, NULL, NULL)",
+    )
+    .await
+    .unwrap();
+    let before = GameRecord {
+        id: id(),
+        participants: Participants {
+            black: user("black"),
+            white: user("white"),
+        },
+        version: 1,
+        result: None,
+        journal: vec![game_application::Receipt {
+            request_id: RequestId::new("move").unwrap(),
+            user_id: user("black"),
+            expected_seq: 0,
+            action: game_application::Action::Move("7g7f".parse().unwrap()),
+            acceptance: game_application::Acceptance {
+                seq: 1,
+                in_check: false,
+                result: None,
+            },
+        }],
+    };
+    let migrated = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
     assert_eq!(migrated.load_game(&id()).await.unwrap(), before);
+    let service = GameService::new(migrated);
     assert_eq!(count(&raw, "outbox_events").await, 0);
     service
         .resign(

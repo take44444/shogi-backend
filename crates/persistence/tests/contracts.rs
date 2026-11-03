@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, GameService,
-    MakeMove, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId, UserService,
+    MakeMove, OutboxRepository, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
 };
-use persistence::SeaOrmStore;
+use persistence::{SeaOrmStore, SqliteOutbox};
 use sea_orm::{ConnectionTrait, Database};
 use shogi_domain::Player;
 use std::sync::{
@@ -43,61 +43,26 @@ fn file_url(dir: &tempfile::TempDir) -> String {
 }
 async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
-    let users = UserService::new(store.clone());
     let service = GameService::new(store.clone());
-    for name in ["black", "white", "outsider"] {
-        users.create_user(user(name)).await.unwrap();
-    }
     service.create(id(), participants()).await.unwrap();
     (store, service)
 }
 
 #[tokio::test]
-async fn user_and_game_services_share_one_pool_including_shutdown() {
+async fn closing_the_pool_makes_the_game_service_unavailable() {
     let (store, games) = setup("sqlite::memory:").await;
-    let users = UserService::new(store.clone());
-    assert_eq!(
-        users.get_user(&user("black")).await.unwrap().id,
-        user("black")
-    );
     assert_eq!(games.snapshot(&id()).await.unwrap().seq, 0);
 
     store.close().await.unwrap();
 
-    assert_eq!(
-        users.get_user(&user("black")).await,
-        Err(Error::Unavailable)
-    );
     assert_eq!(games.snapshot(&id()).await, Err(Error::Unavailable));
 }
 
 #[tokio::test]
-async fn user_constraints_and_immutable_participants() {
+async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable() {
     for url in ["sqlite::memory:", &file_url(&tempfile::tempdir().unwrap())] {
         let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
-        let users = UserService::new(store.clone());
         let service = GameService::new(store);
-        assert_eq!(
-            users.get_user(&user("black")).await,
-            Err(Error::UserNotFound)
-        );
-        assert_eq!(
-            users.create_user(user("black")).await.unwrap().id,
-            user("black")
-        );
-        assert_eq!(
-            users.create_user(user("black")).await,
-            Err(Error::AlreadyExists)
-        );
-        assert_eq!(
-            service.create(id(), participants()).await,
-            Err(Error::UserNotFound)
-        );
-        users.create_user(user("white")).await.unwrap();
-        assert_eq!(
-            users.get_user(&user("white")).await.unwrap().id,
-            user("white")
-        );
         assert_eq!(
             service
                 .create(
@@ -166,14 +131,9 @@ async fn file_restart_restores_position_hands_promotion_and_receipts_even_after_
     drop(service);
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let users = UserService::new(store.clone());
     let service = GameService::new(store.clone());
     assert_eq!(service.snapshot(&id()).await.unwrap(), ongoing);
     assert_eq!(service.make_move(&id(), first.clone()).await, Ok(receipt));
-    assert_eq!(
-        users.get_user(&user("black")).await.unwrap().id,
-        user("black")
-    );
     let finish = service.resign(&id(), resign()).await.unwrap();
     assert_eq!(finish.result.unwrap().winner, Player::White);
     let finished = service.snapshot(&id()).await.unwrap();
@@ -236,7 +196,7 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
         let (store, service) = setup(&url).await;
         let raw = Database::connect(&url).await.unwrap();
         if commit_failure {
-            raw.execute_unprepared("CREATE TABLE deferred_failure (user_id TEXT REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)").await.unwrap();
+            raw.execute_unprepared("CREATE TABLE deferred_failure (game_id TEXT REFERENCES games(id) DEFERRABLE INITIALLY DEFERRED)").await.unwrap();
             raw.execute_unprepared("CREATE TRIGGER fail_commit_change AFTER INSERT ON journal BEGIN INSERT INTO deferred_failure VALUES ('absent'); END").await.unwrap();
         } else {
             raw.execute_unprepared("CREATE TRIGGER fail_commit_change BEFORE INSERT ON journal BEGIN SELECT RAISE(ABORT, 'injected write failure'); END").await.unwrap();
@@ -542,9 +502,9 @@ async fn sqlite_enforces_result_pairs_foreign_keys_and_distinct_participants() {
         "UPDATE journal SET winner = 1, reason = NULL",
         "UPDATE journal SET winner = NULL, reason = 2",
         "UPDATE games SET black = white",
-        "UPDATE games SET black = 'absent'",
-        "UPDATE journal SET user_id = 'absent'",
-        "DELETE FROM users WHERE id = 'black'",
+        "DELETE FROM games WHERE id = 'game'",
+        "UPDATE journal SET game_id = 'absent'",
+        "DELETE FROM journal WHERE seq = 1",
     ] {
         assert!(raw.execute_unprepared(sql).await.is_err(), "{sql}");
     }
@@ -595,4 +555,234 @@ async fn joined_history_load_remains_coherent_during_concurrent_commits() {
         service.snapshot(&id()).await.unwrap();
     }
     writing.await.unwrap();
+}
+
+async fn legacy_database(url: &str, version: i32) -> sea_orm::DatabaseConnection {
+    let db = Database::connect(url).await.unwrap();
+    db.execute_unprepared(include_str!("fixtures/game_v1.sql"))
+        .await
+        .unwrap();
+    if version == 2 {
+        db.execute_unprepared(include_str!("fixtures/outbox_v2.sql"))
+            .await
+            .unwrap();
+    }
+    db.execute_unprepared("INSERT INTO users VALUES ('black'), ('white'), ('legacy-only')")
+        .await
+        .unwrap();
+    db.execute_unprepared("INSERT INTO games VALUES ('game', 'black', 'white', 2, 1, 2)")
+        .await
+        .unwrap();
+    db.execute_unprepared(
+        "INSERT INTO journal VALUES
+        ('game', 1, 'first', 'black', 0, 1, '7g7f', 0, NULL, NULL),
+        ('game', 2, 'end', 'white', 1, 2, NULL, 0, 1, 2)",
+    )
+    .await
+    .unwrap();
+    if version == 2 {
+        db.execute_unprepared(
+            "INSERT INTO outbox_events VALUES
+            (23, 'game', 1, 0, 1, 'first', 'black', '7g7f', 0, NULL, NULL, 1),
+            (90, 'game', 2, 1, 1, 'end', 'white', NULL, NULL, 1, 2, 0)",
+        )
+        .await
+        .unwrap();
+    }
+    db
+}
+
+async fn integer_query(db: &sea_orm::DatabaseConnection, sql: &str) -> i64 {
+    db.query_one_raw(sea_orm::Statement::from_string(
+        sea_orm::DbBackend::Sqlite,
+        sql,
+    ))
+    .await
+    .unwrap()
+    .unwrap()
+    .try_get("", "value")
+    .unwrap()
+}
+
+#[tokio::test]
+async fn legacy_upgrades_preserve_game_receipts_outbox_cursors_and_archived_ids() {
+    for version in [1, 2] {
+        let dir = tempfile::tempdir().unwrap();
+        let url = file_url(&dir);
+        let raw = legacy_database(&url, version).await;
+        for attempt in 0..2 {
+            let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
+            let service = GameService::new(store.clone());
+            let snapshot = service.snapshot(&id()).await.unwrap();
+            assert_eq!(snapshot.seq, 2);
+            assert_eq!(snapshot.participants, participants());
+            assert_eq!(snapshot.result.unwrap().winner, Player::Black);
+            let first = service
+                .make_move(&id(), movement("first", 0, "black", "7g7f"))
+                .await
+                .unwrap();
+            assert_eq!(first.seq, 1);
+            assert_eq!(first.result, None);
+            let end = service
+                .resign(
+                    &id(),
+                    Resign {
+                        request_id: RequestId::new("end").unwrap(),
+                        expected_seq: 1,
+                        user_id: user("white"),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(end.seq, 2);
+            assert_eq!(end.result, snapshot.result);
+            assert_eq!(store.load_game(&id()).await.unwrap().journal.len(), 2);
+            assert_eq!(
+                integer_query(&raw, "SELECT version AS value FROM schema_version").await,
+                3
+            );
+            assert_eq!(
+                integer_query(&raw, "SELECT COUNT(*) AS value FROM legacy_users").await,
+                3
+            );
+            assert_eq!(
+                integer_query(
+                    &raw,
+                    "SELECT COUNT(*) AS value FROM sqlite_master WHERE name = 'users'"
+                )
+                .await,
+                0
+            );
+            let rows = raw
+                .query_all_raw(sea_orm::Statement::from_string(
+                    sea_orm::DbBackend::Sqlite,
+                    "SELECT * FROM outbox_events ORDER BY id",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), if version == 2 { 2 } else { 0 });
+            if version == 2 {
+                assert_eq!(rows[0].try_get::<i64>("", "id").unwrap(), 23);
+                assert!(rows[0].try_get::<bool>("", "published").unwrap());
+                assert_eq!(rows[0].try_get::<String>("", "usi").unwrap(), "7g7f");
+                assert_eq!(rows[1].try_get::<i64>("", "id").unwrap(), 90);
+                assert!(!rows[1].try_get::<bool>("", "published").unwrap());
+                assert_eq!(rows[1].try_get::<String>("", "request_id").unwrap(), "end");
+            }
+            assert!(
+                raw.query_all_raw(sea_orm::Statement::from_string(
+                    sea_orm::DbBackend::Sqlite,
+                    "PRAGMA foreign_key_check",
+                ))
+                .await
+                .unwrap()
+                .is_empty()
+            );
+            service
+                .create(
+                    GameId::new(format!("new-{version}-{attempt}")).unwrap(),
+                    Participants {
+                        black: user("new-black"),
+                        white: user("new-white"),
+                    },
+                )
+                .await
+                .unwrap();
+            drop(service);
+            store.close().await.unwrap();
+        }
+        let mut queue = SqliteOutbox::connect(&url).await.unwrap();
+        if version == 2 {
+            let pending = queue.next_pending().await.unwrap().unwrap();
+            assert_eq!(pending.event.game_id, id());
+            assert_eq!(pending.event.seq, 2);
+            assert_eq!(pending.event.request_id, RequestId::new("end").unwrap());
+            assert_eq!(pending.event.user_id, user("white"));
+            queue.mark_published(&pending).await.unwrap();
+            assert_eq!(
+                integer_query(
+                    &raw,
+                    "SELECT published AS value FROM outbox_events WHERE id = 90"
+                )
+                .await,
+                1
+            );
+        }
+        assert!(queue.next_pending().await.unwrap().is_none());
+        drop(queue);
+        raw.execute_unprepared("DELETE FROM legacy_users")
+            .await
+            .unwrap();
+        let service = GameService::new(Arc::new(SeaOrmStore::connect(&url).await.unwrap()));
+        assert_eq!(service.snapshot(&id()).await.unwrap().seq, 2);
+        assert!(
+            raw.execute_unprepared("DELETE FROM games WHERE id = 'game'")
+                .await
+                .is_err()
+        );
+        if version == 2 {
+            assert!(
+                raw.execute_unprepared("DELETE FROM journal WHERE game_id = 'game' AND seq = 1")
+                    .await
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn fresh_game_database_has_no_account_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = file_url(&dir);
+    let (_store, _service) = setup(&url).await;
+    let raw = Database::connect(&url).await.unwrap();
+    assert_eq!(
+        integer_query(
+            &raw,
+            "SELECT COUNT(*) AS value FROM sqlite_master WHERE name IN ('users', 'legacy_users')"
+        )
+        .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_failed_legacy_rebuild_rolls_back_schema_rows_and_ledger() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = file_url(&dir);
+    let raw = legacy_database(&url, 2).await;
+    raw.execute_unprepared("PRAGMA ignore_check_constraints = ON")
+        .await
+        .unwrap();
+    raw.execute_unprepared("UPDATE games SET version = -1")
+        .await
+        .unwrap();
+    assert_eq!(
+        SeaOrmStore::connect(&url).await.map(|_| ()),
+        Err(Error::Unavailable)
+    );
+    assert_eq!(
+        integer_query(&raw, "SELECT version AS value FROM schema_version").await,
+        2
+    );
+    assert_eq!(
+        integer_query(&raw, "SELECT COUNT(*) AS value FROM users").await,
+        3
+    );
+    assert_eq!(
+        integer_query(&raw, "SELECT COUNT(*) AS value FROM journal").await,
+        2
+    );
+    assert_eq!(
+        integer_query(&raw, "SELECT COUNT(*) AS value FROM outbox_events").await,
+        2
+    );
+    assert_eq!(
+        integer_query(
+            &raw,
+            "SELECT COUNT(*) AS value FROM sqlite_master WHERE name = 'legacy_users'"
+        )
+        .await,
+        0
+    );
 }

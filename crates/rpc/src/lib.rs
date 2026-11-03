@@ -1,10 +1,10 @@
 //! gRPC transport for durable shogi commands, with generated [`proto`] clients and servers.
 //!
-//! [`GameRpc`] adapts [`game_application::UserService`] and
-//! [`game_application::GameService`] to `shogi.v1.GameService`.
+//! [`GameRpc`] adapts [`game_application::GameService`] to `shogi.v1.GameService`.
 //! The schema lives in `proto/game.proto`; vendored protoc generates Rust at build
 //! time. The supplied server uses plaintext gRPC. User IDs are supplied claims,
-//! not authentication credentials.
+//! not authentication credentials. Deploy this unauthenticated listener for trusted
+//! internal callers. The separate HTTP user service does not authenticate gRPC calls.
 //!
 //! Move and resignation requests require `expected_seq`. Protobuf optional presence distinguishes
 //! omission from valid zero. IDs contain 1 through 128 UTF-8 bytes without Unicode
@@ -17,9 +17,9 @@
 //! | Outcome | gRPC code |
 //! | --- | --- |
 //! | Malformed ID, move, missing sequence, or equal participants | `InvalidArgument` |
-//! | Unknown user or game | `NotFound` |
+//! | Unknown game | `NotFound` |
 //! | Nonparticipant | `PermissionDenied` |
-//! | Duplicate user or game, or changed accepted request | `AlreadyExists` |
+//! | Duplicate game, or changed accepted request | `AlreadyExists` |
 //! | Stale sequence | `Aborted`, with `actual-seq` metadata |
 //! | Wrong turn, illegal move, or finished game | `FailedPrecondition` |
 //! | Storage failure or uncertain commit | `Unavailable` |
@@ -27,16 +27,18 @@
 //! | Internal invariant violation, rules failure, or sequence exhaustion | `Internal` |
 //!
 //! This client example compiles without connecting during documentation tests.
-//! It assumes a running server and a fresh user ID. User creation is not idempotent.
+//! It assumes a running server and a fresh game ID. Game creation is not idempotent.
 //!
 //! ```no_run
-//! use rpc::proto::{CreateUserRequest, game_service_client::GameServiceClient};
+//! use rpc::proto::{CreateGameRequest, game_service_client::GameServiceClient};
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut client = GameServiceClient::connect("http://127.0.0.1:50051").await?;
-//! let user = client.create_user(CreateUserRequest { user_id: "new-user".into() }).await?;
-//! assert_eq!(user.into_inner().user_id, "new-user");
+//! let game = client.create_game(CreateGameRequest {
+//!     game_id: "new-game".into(), black_user_id: "black".into(), white_user_id: "white".into(),
+//! }).await?;
+//! assert_eq!(game.into_inner().seq, 0);
 //! # Ok(())
 //! # }
 //! ```

@@ -14,7 +14,7 @@ pub(crate) fn application_status(error: ApplicationError) -> Status {
         ApplicationError::NonParticipant => Status::permission_denied(message),
         ApplicationError::InvalidParticipants => Status::invalid_argument(message),
         ApplicationError::Corrupt => Status::data_loss(message),
-        ApplicationError::NotFound | ApplicationError::UserNotFound => Status::not_found(message),
+        ApplicationError::NotFound => Status::not_found(message),
         ApplicationError::Unavailable => Status::unavailable(message),
         ApplicationError::SequenceMismatch { actual, .. } => {
             let mut status = Status::aborted(message);

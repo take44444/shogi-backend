@@ -1,17 +1,14 @@
 syntax = "proto3";
 package shogi.v1;
 
-// Durable shogi commands. User IDs are caller claims, not authentication.
+// Durable shogi commands for trusted internal callers. This API is unauthenticated.
+// User IDs are caller claims. The separate HTTP user service does not authenticate gRPC.
 // IDs contain 1 through 128 UTF-8 bytes with no Unicode whitespace.
 // Cancelled or lost responses can follow a committed command. For MakeMove and
 // Resign, retry identical contents with the same request ID and expected sequence.
-// CreateUser and CreateGame are not exact-retry APIs; duplicates return AlreadyExists.
+// CreateGame is not an exact-retry API; duplicates return AlreadyExists.
 service GameService {
-  // Registers a new internal user; duplicate IDs return AlreadyExists.
-  rpc CreateUser(CreateUserRequest) returns (User);
-  // Loads an existing user; unknown IDs return NotFound.
-  rpc GetUser(GetUserRequest) returns (User);
-  // Binds two distinct existing users and creates a sequence-zero game.
+  // Binds two distinct user IDs and creates a sequence-zero game.
   rpc CreateGame(CreateGameRequest) returns (Snapshot);
   // Returns current participants, board, hands, legal moves, and sequence.
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
@@ -21,29 +18,14 @@ service GameService {
   rpc Resign(ResignRequest) returns (Acceptance);
 }
 
-// Creates a user. Repeated creation returns AlreadyExists.
-message CreateUserRequest {
-  // New user ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
-  string user_id = 1;
-}
-// Looks up a registered user. Unknown users return NotFound.
-message GetUserRequest {
-  // Registered user ID with the same byte and whitespace bounds as creation.
-  string user_id = 1;
-}
-// A registered internal user, without authentication credentials.
-message User {
-  // The registered internal user ID.
-  string user_id = 1;
-}
-// Creates a standard game with immutable bindings to two distinct existing users.
+// Creates a standard game with immutable bindings to two distinct user IDs.
 // Duplicate game IDs return AlreadyExists. Creation is not an exact-retry API.
 message CreateGameRequest {
   // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
   string game_id = 1;
-  // Existing user permanently bound to Black, distinct from the White user.
+  // User ID permanently bound to Black, distinct from the White user.
   string black_user_id = 2;
-  // Existing user permanently bound to White, distinct from the Black user.
+  // User ID permanently bound to White, distinct from the Black user.
   string white_user_id = 3;
 }
 // Reads a game after the server checks its durable version.
@@ -113,9 +95,9 @@ message Snapshot {
   GameResult result = 7;
   // Legal USI moves including optional nonpromotions; empty after completion.
   repeated string legal_moves = 8;
-  // Existing user permanently bound to Black, distinct from the White user.
+  // User ID permanently bound to Black, distinct from the White user.
   string black_user_id = 9;
-  // Existing user permanently bound to White, distinct from the Black user.
+  // User ID permanently bound to White, distinct from the Black user.
   string white_user_id = 10;
 }
 // An occupied square in absolute coordinates. Empty squares are omitted.

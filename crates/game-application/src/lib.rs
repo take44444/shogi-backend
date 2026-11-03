@@ -1,8 +1,8 @@
-//! User and game use cases backed by [`UserRepository`] and [`GameRepository`].
+//! Game use cases backed by [`GameRepository`].
 //!
-//! [`UserService`] registers and looks up users. [`GameService`] binds two existing
-//! users to a game and derives their sides from [`Participants`]. User IDs are caller
-//! claims, not authentication credentials.
+//! [`GameService`] binds two distinct user IDs to a game and derives their sides
+//! from [`Participants`]. The caller supplies trusted IDs. Account management and
+//! authentication belong to a separate service.
 //! The application contains no database types and has no default in-memory store.
 //!
 //! Each game service registry runs one actor per game with a 64-command mailbox.
@@ -20,7 +20,7 @@
 //! scoped to a game. After checking participant membership, exact retries match
 //! action kind, user, expected sequence, and typed move. They return the original
 //! [`Acceptance`] before stale-sequence or finished-game checks, even after restart.
-//! Rejected request IDs remain reusable. Creating a user or game is not idempotent.
+//! Rejected request IDs remain reusable. Creating a game is not idempotent.
 //!
 //! A command stages a cloned game and receipt. The actor constructs a
 //! [`StagedGameChange`] to generate and freeze events before persistence. The repository
@@ -44,7 +44,6 @@ mod events;
 pub use events::*;
 mod repository;
 mod types;
-mod user;
 
 use actor::{Actor, Command, Pending};
 pub use repository::*;
@@ -54,7 +53,6 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 pub use types::*;
-pub use user::UserService;
 
 const MAILBOX_CAPACITY: usize = 64;
 
@@ -83,7 +81,6 @@ impl GameService {
     /// # Errors
     ///
     /// Returns [`ApplicationError::InvalidParticipants`] for equal users,
-    /// [`ApplicationError::UserNotFound`] for a missing user,
     /// [`ApplicationError::AlreadyExists`] for a duplicate game, or storage, actor,
     /// or restoration errors from [`Self::snapshot`].
     ///

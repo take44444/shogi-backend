@@ -1,18 +1,17 @@
 # persistence
 
 `SeaOrmStore::connect(&str).await` connects and migrates before returning the shared adapter.
-`SeaOrmStore` implements `UserRepository` and `GameRepository` separately. Both
-implementations use the same connection pool; application services receive only
-the repository trait they need.
+`SeaOrmStore` implements `GameRepository`. Its database contains only game state
+and the durable event outbox. It does not query or connect to the user service.
 SeaORM 2.0.4 is pinned with default features disabled. SQLite is the only compiled
 and tested database driver. No PostgreSQL service or driver is required.
 The port is backend neutral; another adapter or driver needs its own validation.
 
-The adapter uses SeaORM connections and SeaQuery statements. The `users` table
-stores IDs. `games` stores immutable participant bindings, the current version,
+The adapter uses SeaORM connections and SeaQuery statements.
+`games` stores immutable participant IDs, the current version,
 and the final result. `journal` stores each accepted request's user, expected
 sequence, typed action encoded as canonical USI or resignation, and receipt.
-Foreign keys protect users and games. A distinct-participant check rejects equal
+Foreign keys bind each journal entry to its game and each outbox row to its journal entry. A distinct-participant check rejects equal
 bindings. Composite uniqueness protects game sequence and game request ID.
 Explicit result-pair checks reject either missing half of a terminal result.
 All durable sequence conversions check the signed 64-bit range.
@@ -25,13 +24,18 @@ Database errors return `Unavailable`; an incompatible schema version returns
 `Corrupt`.
 
 Startup acquires an immediate transaction before inspecting the schema. Only a
-new database receives a `schema_version` ledger. New databases reach version 2
-atomically. Version 1 databases gain an empty `outbox_events` table and advance
-to version 2 in the same transaction. Existing users and game history remain
-unchanged. Historical commands are not backfilled as live events. An existing
-empty ledger, a missing ledger beside owned tables, missing application tables,
-an unexpected outbox beside version 1, and unknown versions fail closed without
-repairing metadata. Concurrent startup serializes migration.
+new database receives a `schema_version` ledger. New databases reach version 3
+atomically and do not create account tables. Version 1 and 2 databases migrate
+inside the same transaction with foreign keys enabled. Migration preserves all
+game metadata and receipts. Version 2 also retains every outbox row, including its
+ID and published flag. Version 1 receives an empty outbox, without backfilling live
+events. The former `users` table becomes `legacy_users`, an inert archive of
+caller-chosen IDs. These rows do not establish ownership of any Google account.
+The game API never reads or writes that archive.
+
+An existing empty ledger, a missing ledger beside owned tables, missing application
+tables, an unexpected outbox beside version 1, and unknown versions fail closed
+without repairing metadata. Concurrent startup serializes migration.
 
 Game creation and `commit_change` use immediate SQLite transactions.
 `commit_change(&StagedGameChange)` updates the game only at the expected version and

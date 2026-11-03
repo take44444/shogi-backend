@@ -1,4 +1,4 @@
-//! Drives a complete game through a running gRPC server using freshly created users and a game.
+//! Drives a complete game through a running gRPC server using a new game and caller-supplied participant IDs.
 
 use rpc::proto::{self, game_service_client::GameServiceClient};
 
@@ -20,13 +20,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = GameServiceClient::connect(endpoint).await?;
     let black = format!("{game_id}-black");
     let white = format!("{game_id}-white");
-    for user_id in [&black, &white] {
-        client
-            .create_user(proto::CreateUserRequest {
-                user_id: user_id.clone(),
-            })
-            .await?;
-    }
     let mut snapshot = client
         .create_game(proto::CreateGameRequest {
             game_id: game_id.clone(),

@@ -2,13 +2,11 @@
 
 The generated `shogi.v1.GameService` API uses plaintext gRPC. The schema is
 [`proto/game.proto`](../../proto/game.proto). Vendored protoc builds Rust clients
-and servers. `GameRpc::new(UserService, GameService)` dispatches user and game operations
-to their respective application services. The protobuf service remains unified.
+and servers. `GameRpc::new(GameService)` dispatches game operations.
+User management belongs to the separate HTTP service and has no gRPC methods.
 
 | Method | Required request fields | Response |
 |---|---|---|
-| `CreateUser` | `user_id` | `User { user_id }` |
-| `GetUser` | `user_id` | `User { user_id }` |
 | `CreateGame` | `game_id`, `black_user_id`, `white_user_id` | `Snapshot` |
 | `GetSnapshot` | `game_id` | `Snapshot` |
 | `MakeMove` | `game_id`, `request_id`, `expected_seq`, `user_id`, `usi` | `Acceptance` |
@@ -17,7 +15,9 @@ to their respective application services. The protobuf service remains unified.
 IDs contain 1 through 128 bytes without whitespace. `expected_seq` is protobuf
 optional solely to distinguish omission from valid zero. Both mutation methods
 reject an omitted sequence. `MakeMove` accepts strict USI move notation.
-User IDs are supplied claims; there is no authentication in this API.
+User IDs are supplied claims. This API is unauthenticated and intended for trusted
+internal callers. Creating a game requires two valid, distinct IDs and performs no
+account lookup. The new HTTP user service does not authenticate these gRPC calls.
 
 Mutation input field 4 and the name `player` are reserved. `MakeMove.user_id` is
 field 6 and `Resign.user_id` is field 5. Clients choose a bound user, and the server
@@ -33,9 +33,9 @@ Exact retries return the original acceptance, including after restart or finish.
 | Application outcome | gRPC code |
 |---|---|
 | Malformed ID, move, missing sequence, or equal participants | `InvalidArgument` |
-| Unknown user or game | `NotFound` |
+| Unknown game | `NotFound` |
 | User is not a participant | `PermissionDenied` |
-| Duplicate user or game, or conflicting accepted request ID | `AlreadyExists` |
+| Duplicate game, or conflicting accepted request ID | `AlreadyExists` |
 | Stale sequence | `Aborted`, with `actual-seq` metadata |
 | Wrong turn, illegal move, or finished game | `FailedPrecondition` |
 | Storage failure or uncertain outcome | `Unavailable` |

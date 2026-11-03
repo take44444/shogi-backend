@@ -42,13 +42,6 @@ async fn subscribe(url: &str, game: &str) -> Result<(async_nats::Client, Subscri
     Err("NATS did not become ready".into())
 }
 async fn create(client: &mut Client, game: &str) -> Result<()> {
-    for side in ["black", "white"] {
-        client
-            .create_user(proto::CreateUserRequest {
-                user_id: format!("{game}-{side}"),
-            })
-            .await?;
-    }
     let response = client
         .create_game(proto::CreateGameRequest {
             game_id: game.into(),

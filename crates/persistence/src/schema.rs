@@ -1,7 +1,7 @@
 //! SQLite schema bootstrap and version validation under an immediate transaction.
 //! Tables, constraints, and the version ledger commit together for a new database.
 
-use sea_orm::sea_query::{Alias, ColumnDef, Expr, ExprTrait, ForeignKey, Index, Query, Table};
+use sea_orm::sea_query::{Alias, ColumnDef, Expr, ExprTrait, Query, Table};
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DbBackend, DbErr, SqliteTransactionMode,
     TransactionOptions, TransactionTrait,
@@ -42,7 +42,7 @@ pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationErro
         .iter()
         .map(|row| row.try_get::<String>("", "table_name"))
         .collect::<Result<Vec<_>, _>>()?;
-    let owned = ["users", "games", "journal", "outbox_events"];
+    let owned = ["users", "legacy_users", "games", "journal", "outbox_events"];
     let exists = |name: &str| names.iter().any(|table| table == name);
     if !exists("schema_version") {
         if owned.iter().any(|table| exists(table)) {
@@ -101,85 +101,75 @@ pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationErro
             if owned.iter().any(|table| exists(table)) {
                 return Err(MigrationError::Corrupt);
             }
-            tx.execute(
-                Table::create().table(a("users")).col(
-                    ColumnDef::new(a("id"))
-                        .string_len(128)
-                        .not_null()
-                        .primary_key(),
-                ),
-            )
-            .await?;
-            tx.execute(Table::create().table(a("games"))
-                .col(ColumnDef::new(a("id")).string_len(128).not_null().primary_key())
-                .col(ColumnDef::new(a("black")).string_len(128).not_null())
-                .col(ColumnDef::new(a("white")).string_len(128).not_null())
-                .col(ColumnDef::new(a("version")).big_integer().not_null())
-                .col(ColumnDef::new(a("winner")).integer())
-                .col(ColumnDef::new(a("reason")).integer())
-                .check(Expr::col(a("black")).ne(Expr::col(a("white"))))
-                .check(Expr::col(a("version")).gte(0))
-                .check(Expr::cust("(winner IS NULL AND reason IS NULL) OR (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1, 2) AND reason IN (1, 2))"))
-                .foreign_key(ForeignKey::create().from(a("games"), a("black")).to(a("users"), a("id")))
-                .foreign_key(ForeignKey::create().from(a("games"), a("white")).to(a("users"), a("id")))).await?;
-            tx.execute(Table::create().table(a("journal"))
-                .col(ColumnDef::new(a("game_id")).string_len(128).not_null())
-                .col(ColumnDef::new(a("seq")).big_integer().not_null())
-                .col(ColumnDef::new(a("request_id")).string_len(128).not_null())
-                .col(ColumnDef::new(a("user_id")).string_len(128).not_null())
-                .col(ColumnDef::new(a("expected_seq")).big_integer().not_null())
-                .col(ColumnDef::new(a("action")).integer().not_null())
-                .col(ColumnDef::new(a("usi")).string_len(5))
-                .col(ColumnDef::new(a("in_check")).boolean().not_null())
-                .col(ColumnDef::new(a("winner")).integer())
-                .col(ColumnDef::new(a("reason")).integer())
-                .primary_key(Index::create().col(a("game_id")).col(a("seq")))
-                .index(Index::create().unique().col(a("game_id")).col(a("request_id")))
-                .check(Expr::col(a("seq")).gt(0))
-                .check(Expr::col(a("expected_seq")).gte(0))
-                .check(Expr::cust("expected_seq = seq - 1"))
-                .check(Expr::cust("(action = 1 AND usi IS NOT NULL) OR (action = 2 AND usi IS NULL)"))
-                .check(Expr::cust("(winner IS NULL AND reason IS NULL) OR (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1, 2) AND reason IN (1, 2))"))
-                .foreign_key(ForeignKey::create().from(a("journal"), a("game_id")).to(a("games"), a("id")))
-                .foreign_key(ForeignKey::create().from(a("journal"), a("user_id")).to(a("users"), a("id")))).await?;
         }
-        1 => {
+        1 | 2 => {
             if !["users", "games", "journal"]
                 .iter()
                 .all(|table| exists(table))
-                || exists("outbox_events")
+                || exists("legacy_users")
+                || exists("outbox_events") != (version == 2)
             {
                 return Err(MigrationError::Corrupt);
             }
         }
-        2 => {
-            if !owned.iter().all(|table| exists(table)) {
+        3 => {
+            if !["games", "journal", "outbox_events"]
+                .iter()
+                .all(|table| exists(table))
+            {
                 return Err(MigrationError::Corrupt);
             }
         }
         _ => return Err(MigrationError::Corrupt),
     }
-    if version < 2 {
-        tx.execute_unprepared("CREATE TABLE outbox_events (
-            id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, seq BIGINT NOT NULL,
-            event_kind INTEGER NOT NULL CHECK(event_kind IN (0, 1)),
-            encoding_version INTEGER NOT NULL, request_id TEXT NOT NULL, user_id TEXT NOT NULL,
-            usi TEXT, in_check BOOLEAN, winner INTEGER, reason INTEGER,
-            published BOOLEAN NOT NULL DEFAULT 0 CHECK(published IN (0, 1)),
-            UNIQUE(game_id, seq, event_kind),
-            FOREIGN KEY(game_id, seq) REFERENCES journal(game_id, seq),
-            CHECK((winner IS NULL AND reason IS NULL) OR
-                (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2))),
-            CHECK((event_kind = 0 AND usi IS NOT NULL AND in_check IS NOT NULL
-                    AND in_check IN (0,1) AND (reason IS NULL OR reason = 1))
-                OR (event_kind = 1 AND usi IS NULL AND in_check IS NULL AND winner IS NOT NULL))
-        )").await?;
+    if version < 3 {
+        if version > 0 {
+            if !tx
+                .query_all_raw(sea_orm::Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA foreign_key_check",
+                ))
+                .await?
+                .is_empty()
+            {
+                return Err(MigrationError::Corrupt);
+            }
+            // Child-first removal keeps foreign-key enforcement active throughout migration.
+            if version == 2 {
+                tx.execute_unprepared(
+                    "CREATE TEMP TABLE migrate_outbox AS SELECT * FROM outbox_events",
+                )
+                .await?;
+                tx.execute_unprepared("DROP TABLE outbox_events").await?;
+            }
+            tx.execute_unprepared("CREATE TEMP TABLE migrate_journal AS SELECT * FROM journal")
+                .await?;
+            tx.execute_unprepared("DROP TABLE journal").await?;
+            tx.execute_unprepared("CREATE TEMP TABLE migrate_games AS SELECT * FROM games")
+                .await?;
+            tx.execute_unprepared("DROP TABLE games").await?;
+            tx.execute_unprepared("ALTER TABLE users RENAME TO legacy_users")
+                .await?;
+        }
+        tx.execute_unprepared(GAMES).await?;
+        tx.execute_unprepared(JOURNAL).await?;
+        tx.execute_unprepared(OUTBOX).await?;
         tx.execute_unprepared("CREATE INDEX outbox_pending ON outbox_events(published, id)")
             .await?;
+        if version > 0 {
+            tx.execute_unprepared("INSERT INTO games (id, black, white, version, winner, reason) SELECT id, black, white, version, winner, reason FROM migrate_games").await?;
+            tx.execute_unprepared("INSERT INTO journal (game_id, seq, request_id, user_id, expected_seq, action, usi, in_check, winner, reason) SELECT game_id, seq, request_id, user_id, expected_seq, action, usi, in_check, winner, reason FROM migrate_journal").await?;
+            if version == 2 {
+                tx.execute_unprepared("INSERT INTO outbox_events (id, game_id, seq, event_kind, encoding_version, request_id, user_id, usi, in_check, winner, reason, published) SELECT id, game_id, seq, event_kind, encoding_version, request_id, user_id, usi, in_check, winner, reason, published FROM migrate_outbox").await?;
+                tx.execute_unprepared("DROP TABLE migrate_outbox").await?;
+            }
+            tx.execute_unprepared("DROP TABLE migrate_journal").await?;
+            tx.execute_unprepared("DROP TABLE migrate_games").await?;
+        }
         tx.execute(
             Query::update()
                 .table(a("schema_version"))
-                .value(a("version"), 2)
+                .value(a("version"), 3)
                 .and_where(Expr::col(a("id")).eq(0)),
         )
         .await?;
@@ -187,3 +177,38 @@ pub(crate) async fn migrate(db: &DatabaseConnection) -> Result<(), MigrationErro
     tx.commit().await?;
     Ok(())
 }
+
+const GAMES: &str = "CREATE TABLE games (
+    id TEXT PRIMARY KEY NOT NULL, black TEXT NOT NULL, white TEXT NOT NULL,
+    version BIGINT NOT NULL CHECK(version >= 0), winner INTEGER, reason INTEGER,
+    CHECK(black != white),
+    CHECK((winner IS NULL AND reason IS NULL) OR
+        (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2)))
+)";
+
+const JOURNAL: &str = "CREATE TABLE journal (
+    game_id TEXT NOT NULL REFERENCES games(id), seq BIGINT NOT NULL CHECK(seq > 0),
+    request_id TEXT NOT NULL, user_id TEXT NOT NULL,
+    expected_seq BIGINT NOT NULL CHECK(expected_seq >= 0), action INTEGER NOT NULL,
+    usi TEXT, in_check BOOLEAN NOT NULL, winner INTEGER, reason INTEGER,
+    PRIMARY KEY(game_id, seq), UNIQUE(game_id, request_id),
+    CHECK(expected_seq = seq - 1),
+    CHECK((action = 1 AND usi IS NOT NULL) OR (action = 2 AND usi IS NULL)),
+    CHECK((winner IS NULL AND reason IS NULL) OR
+        (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2)))
+)";
+
+const OUTBOX: &str = "CREATE TABLE outbox_events (
+    id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, seq BIGINT NOT NULL,
+    event_kind INTEGER NOT NULL CHECK(event_kind IN (0,1)), encoding_version INTEGER NOT NULL,
+    request_id TEXT NOT NULL, user_id TEXT NOT NULL, usi TEXT, in_check BOOLEAN,
+    winner INTEGER, reason INTEGER,
+    published BOOLEAN NOT NULL DEFAULT 0 CHECK(published IN (0,1)),
+    UNIQUE(game_id, seq, event_kind),
+    FOREIGN KEY(game_id, seq) REFERENCES journal(game_id, seq),
+    CHECK((winner IS NULL AND reason IS NULL) OR
+        (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2))),
+    CHECK((event_kind = 0 AND usi IS NOT NULL AND in_check IS NOT NULL
+            AND in_check IN (0,1) AND (reason IS NULL OR reason = 1))
+        OR (event_kind = 1 AND usi IS NULL AND in_check IS NULL AND winner IS NOT NULL))
+)";
