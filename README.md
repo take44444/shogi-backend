@@ -168,5 +168,7 @@ status codes. The [domain crate](crates/shogi-domain/README.md) owns shogi rules
 
 User IDs are caller-supplied identity claims. This service has no authentication.
 Matchmaking, shards, leases, game clocks, Game Router, and Realtime Gateway remain
-outside this implementation. The [architecture document](architecture.md)
+outside this implementation. The [architecture document](docs/design/architecture.md)
 distinguishes this implementation from the proposed distributed system.
+The [domain event and outbox design](docs/design/domain-events.md) explains event
+ownership, publication guarantees, and SQLite deployment constraints.

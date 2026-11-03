@@ -58,7 +58,7 @@ flowchart LR
 
 Domain層とApplication層はSQL・ORMに依存せず、Application層が定義する`UserRepository` / `GameRepository`を注入する。Actorには`GameRepository`のみを渡し、ユーザー作成・取得の操作を公開しない。`SeaOrmStore`は両Traitを実装し、同じ接続プールを共有する。対局作成時のユーザー存在確認はDB内の同一トランザクションで行う。現行の永続化アダプターで組み込み・検証しているDBドライバーはSQLiteのみであり、PostgreSQL対応を実装済みとはしない。将来のDB変更はアダプター側で対応・検証する。
 
-ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`、`outbox-publisher`、Core NATSを起動する。対局とOutboxは共有SQLite Volumeに保存し、コンテナ再作成後も復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](README.md)を参照する。
+ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`、`outbox-publisher`、Core NATSを起動する。対局とOutboxは共有SQLite Volumeに保存し、コンテナ再作成後も復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
 
 ## 1. 要件と負荷モデル
 
@@ -279,9 +279,11 @@ sequenceDiagram
 - Actorが`StagedGameChange::new(game_id, receipt)`を呼び、保存前に受理記録からDomain Eventを生成・固定する。着手は`MoveCommitted`、投了は`GameFinished`、詰みの着手はその順で両方を生成する。対局作成・拒否・受理済み要求の再送・履歴復元では新しいイベントを生成しない。
 - `GameRepository::commit_change(&change)`は渡された受理記録・生成済みイベントとメタデータを同じDBトランザクションで保存し、イベントを生成しない。ActorからNATSへ直接送信しない。応答とイベントの到着順・到着可否は独立とする。`CheckTimeout`と`Ready`は未実装である。
 
-実装の定義は[Actor](crates/game-application/src/actor.rs)、[要求・応答型](crates/game-application/src/types.rs)、[gRPC定義](proto/game.proto)を参照する。
+実装の定義は[Actor](../../crates/game-application/src/actor.rs)、[要求・応答型](../../crates/game-application/src/types.rs)、[gRPC定義](../../proto/game.proto)を参照する。
 
 ### 6.3 現行Outbox Publisherの契約
+
+生成・保存・配信の責務とSQLiteの運用制約は[Domain EventとTransactional Outboxの設計](domain-events.md)を参照する。
 
 - `game-application`が保存前のイベント生成・内容の固定、型付きイベント、配信ユースケース・Traitを所有する。`persistence`が渡された受理記録・イベントの原子的保存、未配信行の取得、配信済み記録を担う。`messaging`がCore NATSのSubject・JSON変換と送信を担い、`outbox-publisher`が独立プロセスとして組み立てる。
 - イベント識別子は`(game_id, seq, event_kind)`である。詰みの着手では同じ`seq`の2イベントを種別で区別する。ペイロードには元の`request_id`と`user_id`も保持する。
