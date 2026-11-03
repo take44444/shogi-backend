@@ -144,10 +144,10 @@ flowchart TB
   LB --> API[Application API<br/>棋譜検索・レーティング・AI受付]
   LB --> GW[Realtime Gateway<br/>Axum / WebSocket]
   GW -->|内部セッション照会| USER
-  GW -->|Game ID → Shard → Owner| R[Game Router<br/>Gateway内モジュール]
-  R -->|gRPC: MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
+  GW -->|Game ID → Shard → Owner| R[Game Router<br/>各Gateway・Matchmaking内の共通モジュール]
+  R -->|所有者へgRPC: CreateGame / GetSnapshot / MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
   API --> MATCH[Matchmaking<br/>Rust / Valkey]
-  MATCH --> GAME
+  MATCH -->|固定Game IDで所有者を解決| R
   MATCH <-->|成立予約・再試行状態| PG
   GAME <-->|棋譜・時計・Lease・Fencing| PG[(PostgreSQL)]
   GAME -->|確定着手 + Outbox| PG
@@ -180,7 +180,7 @@ flowchart TB
 - **AI Worker**: USIエンジン実行・解析結果保存、必要に応じてLLM説明
 - **Background Worker**: 通知、統計、監査、不正検知など
 
-Game RouterはGateway内のRustモジュールとして実装する。**Shard Managerは独立したDeployment**で動かし、PostgreSQLによるLeader選出で1インスタンスだけがShard配置の制御を実行する。
+Game RouterはGatewayとMatchmaking Workerが共有するRustモジュールとして実装し、各プロセス内で動かす。上図のGame Routerは共通の配送ロジックを表し、独立したサービスやGateway経由の中継を意味しない。**Shard Managerは独立したDeployment**で動かし、PostgreSQLによるLeader選出で1インスタンスだけがShard配置の制御を実行する。対局作成RPCの中継は担わない。
 
 ### 3.2 Gatewayの認証境界（将来設計・未実装）
 
@@ -230,7 +230,7 @@ Shardごとの担当Podは固定式ではなく、Shard Managerが決めてPostg
 | コンポーネント | 役割 |
 |---|---|
 | Shard Manager | 稼働Podと負荷を見てShard→Podの配置を決め、移動・障害復旧を調整 |
-| Game Router | Game IDからShard IDを計算し、配置表から担当Podを見つけてgRPCで配送 |
+| Game Router | Gateway・Matchmaking内でGame IDからShard IDを計算し、配置表から担当Podを見つけて対局作成・照会・操作をgRPCで配送 |
 | Lease | PodにShardの管理権限を期限付きで与える |
 | Fencing Token | 旧所有者が復帰しても、古い世代での書き込みを拒否する |
 
@@ -242,7 +242,7 @@ Shardごとの担当Podは固定式ではなく、Shard Managerが決めてPostg
 4. Pod停止時はLeaseの期限切れを確認し、別Podに再割り当てする。
 5. 後にCPU、Actorキュー長、処理時間などを加味し、ヒステリシスとクールダウンを設ける。
 
-**通常の着手のたびにShard Managerへ問い合わせない。** Game Routerが配置表をキャッシュし、所有者変更やエラー時に更新する。
+対局作成・照会・着手の各要求をShard Manager経由で中継しない。Game RouterがPostgreSQLの配置表を参照・キャッシュし、所有者変更やエラー時に更新する。新規対局も作成前に固定したGame IDからShardを計算できるため、作成済みの対局レコードを配送先の解決条件にしない。
 
 ### 5.3 PostgreSQLのLease概念
 
@@ -471,6 +471,10 @@ Core NATSの配信漏れには連番+Snapshotで対応する。最後のイベ�
 
 Valkeyは待機列と候補選択に使い、成立の正本はDBの永続予約とする。予約には`match_id`、固定した`game_id`、参加者、対局ルール、状態を保存する。同一ユーザーが複数の有効な予約へ参加しないようDBの一意制約で保護し、Valkey上の原子的処理だけに重複防止を依存させない。
 
+分散構成では、Matchmaking Worker内のGame Routerが固定した`game_id`からShardを計算し、配置表で解決した所有者Podへ`CreateGame`を直接gRPC送信する。Shard ManagerはShardの配置を管理し、作成要求を中継しない。所有者が未配置・復旧中の場合は再試行可能な状態として待ち、任意のPodへ作成する代替経路は設けない。
+
+Game Serviceは対局作成時も、対象Shardの所有者・Lease期限・Fencing世代を対局保存と同じトランザクションで検証し、所有権を持たないPodでは作成しない。配送先が古い場合はRouterが配置表を再解決する。再照会・作成再試行も同じ`game_id`を使い、その時点の所有者へ配送する。これらは将来の分散構成の契約であり、現行の単一Game ServiceにはRouterやShard所有権検証はない。
+
 予約は次の状態で扱い、遷移はDBの現在状態を条件に更新する。
 
 | 状態 | 意味・遷移条件 |
@@ -567,8 +571,8 @@ flowchart LR
 | User Service（`user-server`） | **独立Deployment候補** | 専用のHTTP ServiceとIngress、GoogleへのHTTPS通信 | ユーザーDBの配置・複数Pod運用は別途設計。現行SQLiteをそのまま複数Podで共有できるとはしない |
 | Application API（Axum） | **Deployment** / 複数Pod | ClusterIP Service + Ingress / Load Balancer | ステートレス。HPAでCPU・リクエスト数等を参照 |
 | Realtime Gateway（Axum / WS） | **Deployment** / 複数Pod | ClusterIP Service + WebSocket対応Ingress | 接続数・メモリ・送信キュー・帯域を監視。Graceful Drainが必要 |
-| **Game Router** | **各Gateway Pod内のRustモジュール** | 独立Service不要。所有者PodへTonic / gRPC | Game ID→Shard→所有者endpointをキャッシュし、変更時再解決 |
-| **Game Server / Game Service** | **Deployment** / 複数Pod | 通常Serviceに加え、所有者Podへの**直接RPC endpoint** | Game Actor・Shardを保持。汎用Serviceのランダム分散で着手を配送しない |
+| **Game Router** | **各Gateway・Matchmaking Pod内の共通Rustモジュール** | 独立Service不要。所有者PodへTonic / gRPC | 対局作成・照会・操作に共通のGame ID→Shard→所有者解決を使い、変更時に再解決 |
+| **Game Server / Game Service** | **Deployment** / 複数Pod | 通常Serviceに加え、所有者Podへの**直接RPC endpoint** | Game Actor・Shardを保持。対局作成・照会・着手は汎用Serviceのランダム分散で配送しない |
 | **Shard Manager** | **独立Deployment** / Leader + Standby（例: 2 Pod） | Pod情報・PostgreSQLへの接続。必要なら内部gRPC | Leaderのみ配置判断。Game Serverとは別にデプロイ・拡縮 |
 | Matchmaking Service / Worker | **Deployment** / 複数Pod | 内部Service / Valkey / PostgreSQL | 待機列はValkey、成立予約はDB。9.3節の一意制約・条件付き遷移・作成再試行で重複を防ぐ |
 | AI Worker | **Deployment** / 専用Worker Pool | JetStream Consumer（通常Ingress不要） | CPU/GPU、待機ジョブ数、解析コストに応じて拡縮 |
@@ -577,7 +581,7 @@ flowchart LR
 | **PostgreSQL** | **Kubernetes外のマネージドサービス推奨** | プライベートendpoint / 接続プール | Primary中心に着手・Lease・Fencingを処理。HA / バックアップ |
 | **NATS（Core NATS + JetStream）** | **Helmによるクラスタ運用**（例: 3 Pod） | NATS用ClusterIP Service | JetStreamは永続ボリュームとレプリカ構成が必要 |
 
-**採用方針**: Game RouterはGateway内、Shard Managerは独立Deployment。**KubernetesはPodのライフサイクルを管理するが、Shardの所有権と再配置はアプリ + PostgreSQLが管理する。**
+**採用方針**: Game RouterはGateway・Matchmaking内の共通モジュール、Shard Managerは独立Deployment。**KubernetesはPodのライフサイクルを管理するが、Shardの所有権と再配置はアプリ + PostgreSQLが管理する。**
 
 ### 12.2 配置イメージ
 
@@ -588,7 +592,7 @@ flowchart TB
     INGRESS --> USER[User Service Deployment / Service]
     INGRESS --> API[Application API Deployment / Service]
     INGRESS --> GW[Gateway Deployment / Service<br/>各PodにGame Router]
-    MATCH[Matchmaking Deployment]
+    MATCH[Matchmaking Deployment<br/>各PodにGame Router]
     GAME[Game Server Deployment<br/>Podごとに複数ShardとGame Actor]
     SM[Shard Manager Deployment<br/>Leader + Standby]
     AI[AI Worker Deployment]
@@ -596,7 +600,7 @@ flowchart TB
     NATS[NATS Cluster / Core NATS + JetStream<br/>永続Volume]
     GW -->|所有者Pod endpointへ gRPC| GAME
     API --> MATCH
-    MATCH -->|対局作成 gRPC| GAME
+    MATCH -->|Game Routerで解決した所有者Podへ対局作成・照会 gRPC| GAME
     SM -->|配置・Draining調整| GAME
     NATS --> GW
     NATS --> AI
@@ -658,7 +662,7 @@ Kubernetes Cluster
 │   ├── realtime-gateway          (Deployment + Service; Game Router内蔵)
 │   ├── game-server               (Deployment; Pod固有gRPC endpoint)
 │   ├── shard-manager             (独立Deployment; Leader + Standby)
-│   ├── matchmaking-worker        (Deployment)
+│   ├── matchmaking-worker        (Deployment; Game Router内蔵)
 │   ├── ai-worker                 (Deployment)
 │   ├── background-worker         (Deployment)
 │   └── outbox-publisher          (Deployment、またはBackground Worker内実装)
@@ -731,6 +735,7 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 - 大量再接続とイベント欠落からの復帰
 - 後続イベントがない終局通知の欠落、Gatewayと各画面の反映番号の違い、定期照会失敗、通常の配信遅延からの再同期
 - 対局作成後の応答喪失、マッチングWorker停止、作成とキャンセルの競合、Valkey状態喪失からの永続予約の回収
+- Shard所有者切替中の対局作成、旧所有者による作成拒否、配送先再解決後の同一IDでの再送
 - Game Pod強制停止、Shard引き継ぎ、時計復元
 - PostgreSQLフェイルオーバー、NATS切断、AI解析急増
 
@@ -825,7 +830,7 @@ shogi-backend/
 │   ├── user-persistence/     # 現行の専用SQLite
 │   ├── user-http/            # 現行のGoogle OIDC・HTTP
 │   ├── shard-management/     # Shard / Lease / Fencing
-│   ├── game-routing/         # Game ID → 担当Pod
+│   ├── game-routing/         # Gateway・Matchmaking共通のGame ID → 担当Pod解決
 │   ├── persistence/          # SeaORM / SQL / Outbox
 │   ├── messaging/            # Core NATS / JetStream
 │   ├── cache/                # Valkey / Presence
@@ -862,7 +867,7 @@ Domain層はAxum、SeaORM、Valkey、NATSなどに依存させない。Game Acto
 - **対局の権威**: Rust/TokioのGame Actor（mpsc + oneshot、Actor取出し時点で正式受付、Admission Gateなし）
 - **分散配置**: Virtual Shard + **独立DeploymentのRust Shard Manager（Leader / Standby）**
 - **所有権の整合性**: PostgreSQL Lease + Fencing Token
-- **リクエスト配送**: Gateway内のGame Router + gRPC
+- **リクエスト配送**: Gateway・Matchmaking内の共通Game Router + 所有者PodへのgRPC。対局作成にも同じ配送規則を使う
 - **観戦リアルタイム配信**: WebSocket + Core NATS + Snapshot/Sequence
 - **非同期AI**: JetStream + 専用AI Worker
 - **データの正本**: 現在はSQLite。将来の分散構成ではPostgreSQLを候補とし、Domain / Application層はDB製品に依存させない
