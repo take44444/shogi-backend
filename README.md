@@ -17,14 +17,14 @@ In another terminal, run the client.
 cargo run -p rpc --example play
 ```
 
-The client creates two users and a game, plays `7g7f 3c3d 8h2b+ 3a2b B*4e`,
+The client binds two example participant IDs to a game, plays `7g7f 3c3d 8h2b+ 3a2b B*4e`,
 and resigns White. It verifies capture, promotion, recapture, a bishop drop,
 snapshots, and exact retries. The final line reports `black wins at sequence 6`.
 Each invocation needs a new game ID. Omitting the ID generates one.
 
 The server defaults to `127.0.0.1:50051` and
 `DATABASE_URL=sqlite://data/shogi.db?mode=rwc`. Startup creates the database's
-parent directory and migrates the schema before listening. Users, participant
+parent directory and migrates the schema before listening. Participant
 bindings, positions, results, and accepted request receipts survive restart.
 A positional address overrides `GAME_SERVER_ADDR`.
 
@@ -104,9 +104,11 @@ the hexadecimal game ID, sequence, and event type with colons.
 Pending rows preserve typed event fields rather than serialized JSON bytes.
 Future encoder changes must preserve this version-one wire mapping.
 
-Existing version 1 databases migrate to version 2 automatically. Their history
-is preserved, and the outbox starts empty. Event production begins with commands
-accepted after migration. There is no historical event backfill.
+Existing version 1 and 2 game databases migrate to version 3 automatically.
+History and existing outbox IDs and publication state are preserved. Version 1
+databases gain an empty outbox. There is no historical event backfill.
+Version 3 removes foreign keys to user accounts. Legacy user rows are archived as `legacy_users`
+and do not establish ownership of a Google account.
 
 Run the Compose proof from the repository root.
 
@@ -166,7 +168,22 @@ binding, sequencing, replay, cancellation, and recovery. The
 schema startup. The [RPC reference](crates/rpc/README.md) covers wire fields and
 status codes. The [domain crate](crates/shogi-domain/README.md) owns shogi rules.
 
-User IDs are caller-supplied identity claims. This service has no authentication.
+User registration, Google login, profile updates, and session management belong
+to the independent HTTP user service. See [the user service guide](docs/user-service.md)
+for Google OAuth client setup, environment variables, and HTTP endpoints.
+It uses a separate SQLite database and shares only the `user-id` value type
+with game code. User management has no gRPC endpoints.
+
+For local development, set the variables in `.env.example` in your shell and run
+`cargo run -p user-server`. Cargo does not load `.env` automatically.
+With Docker Compose, copy `.env.example` to `.env`, supply your Google credentials,
+and run `docker compose --profile auth up --build -d user-server`. The user service
+defaults to `http://localhost:8080` and stores accounts in its own `user-data` volume.
+The default Compose profile still runs only the game services.
+
+Game gRPC still accepts caller-supplied identity claims and belongs on a trusted
+internal network. The user service does not authenticate game gRPC requests.
+Game creation binds two distinct user IDs without consulting the user database.
 Matchmaking, shards, leases, game clocks, Game Router, and Realtime Gateway remain
 outside this implementation. The [architecture document](docs/design/architecture.md)
 distinguishes this implementation from the proposed distributed system.

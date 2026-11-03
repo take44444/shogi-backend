@@ -1,4 +1,22 @@
 services:
+  user-server:
+    build: .
+    profiles: [auth]
+    entrypoint: ["user-server"]
+    environment:
+      USER_BIND_ADDR: 0.0.0.0:8080
+      USER_PUBLIC_ORIGIN: ${USER_PUBLIC_ORIGIN:-http://localhost:8080}
+      USER_ALLOW_LOOPBACK_HTTP: ${USER_ALLOW_LOOPBACK_HTTP:-true}
+      USER_DATABASE_URL: sqlite:///data/users.db?mode=rwc
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    ports:
+      - "127.0.0.1:${USER_SERVER_PORT:-8080}:8080"
+    volumes:
+      - user-data:/data
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 15s
   game-server:
     build: .
     environment:
@@ -32,3 +50,4 @@ services:
       - "127.0.0.1:${NATS_PORT:-4222}:4222"
 volumes:
   shogi-data:
+  user-data:

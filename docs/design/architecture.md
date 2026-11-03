@@ -1,6 +1,6 @@
 # 大規模将棋アプリ サーバーサイドアーキテクチャ設計書
 
-- バージョン: 1.6（現行実装と将来設計）
+- バージョン: 1.7（現行実装と将来設計）
 - 更新日: 2026-11-03
 - 対象: Web / iOS / Android
 - 設計目標: 最大同時接続 100,000人
@@ -11,25 +11,29 @@
 
 ## 0. 現在の実装範囲
 
-現在は、単一の`game-server`をTonic / gRPCで利用し、独立したOutbox PublisherからCore NATSへ確定イベントを配信する構成である。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
+現在は、`user-server`がHTTPでGoogle認証・ユーザー管理を提供し、単一の`game-server`をTonic / gRPCで利用する。独立したOutbox PublisherからCore NATSへ確定イベントを配信する。以下が実装済みの仕様であり、以降の大規模構成図・時計・観戦・Shard・AI・Kubernetes運用は将来設計として読む。
 
 | 実装単位 | 現在の責務 |
 |---|---|
 | `shogi-domain` | 局面、合法手、王手、詰み、投了。内部のrsshogiは非公開アダプターで包み、公開型を外部ライブラリから独立させる |
-| `game-application` | ユーザー・対局操作、Actor、保存前のDomain Event生成・固定、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
-| `persistence` | SeaORMによるRepository、共有接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
+| `user-id` | 内部ユーザーIDの検証済み値型。対局とユーザーサービスで共有する |
+| `user-application` / `user-persistence` | ユーザー、Google識別子、ログイン試行、セッションと独立したSQLite保存 |
+| `user-http` / `user-server` | Google OpenID Connect、HTTPのログイン・プロフィール・ログアウト、起動設定 |
+| `game-application` | 対局操作、Actor、保存前のDomain Event生成・固定、Repositoryとイベント配信のTrait、逐次Outbox配信ユースケース |
+| `persistence` | SeaORMによるGameRepository、対局用接続プール、SQLite保存、Outboxの原子的追加・配信状態・Publisher排他、スキーマ更新・検証 |
 | `messaging` / `outbox-publisher` | Core NATSのSubject・JSON変換と送信、独立プロセスによる未配信イベントの処理 |
-| `rpc` / `game-server` | gRPCでユーザー作成・取得、対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
+| `rpc` / `game-server` | gRPCで対局作成・Snapshot取得、着手・投了を公開し、永続化アダプターを組み立てる |
 
 ```mermaid
 flowchart LR
   C[gRPC Client] --> RPC[rpc / game-server]
-  RPC --> USERS[UserService]
+  WEB[Browser] --> HTTP[user-http / user-server]
+  HTTP --> USERS[user-application]
+  USERS --> UP[user-persistence]
+  UP --> UDB[(User SQLite)]
   RPC --> APP[GameService / Game Actor]
   APP --> DOMAIN[shogi-domain / rsshogi adapter]
-  USERS --> UR[UserRepository]
   APP --> GR[GameRepository]
-  UR --> PERSIST[persistence / SeaORM]
   GR --> PERSIST
   PERSIST --> DB[(SQLite)]
   DB --> OUT[Outbox Publisher]
@@ -41,22 +45,22 @@ flowchart LR
 
 - 平手初期局面から開始し、通常の駒移動、成り、持ち駒、王手回避、詰み、投了を扱う。二歩・打ち歩詰め・王手放置などの不正着手はエラーとして拒否し、対局は継続する。
 - 詰みは「王手され、合法手がない」場合のみ。王手でない合法手なし局面、千日手、連続王手の千日手、入玉宣言勝ち等の判定は対象外。タイマー・時間切れも未実装である。
-- 対局作成時に、登録済みの異なる2ユーザーを先手・後手へ固定する。着手側は`user_id`とこの紐付けから決める。投了は手番によらず可能である。
-- ユーザーIDは呼出元の申告値であり、認証は未実装である。マッチング、Shard管理、Lease、Game Router、Gateway、クライアントへの観戦配信は現在のスコープに含めない。
+- 対局作成時に、異なる2ユーザーIDを先手・後手へ固定する。ユーザーDBへの存在確認は行わない。着手側は`user_id`とこの紐付けから決める。投了は手番によらず可能である。
+- Google認証とユーザー管理は独立したHTTPサービスで提供する。対局gRPCのユーザーIDは依然として呼出元の申告値であり、信頼できる内部ネットワークで利用する。HTTPログインは対局gRPCやWSを認証しない。マッチング、Shard管理、Lease、Game Router、Gateway、クライアントへの観戦配信は現在のスコープに含めない。
 
 ### 0.2 確定・再送・復旧
 
 - 1対局につき`GameService`の共有レジストリ内に1つのActorを置き、容量64のbounded `mpsc`と要求ごとの`oneshot`で逐次処理する。`GameService`のcloneはレジストリを共有するが、別途生成したサービス間でActorの一意性を保証する仕組みやLease・Fencingはない。
 - Snapshot取得時と変更前にはDBのversionを確認し、キャッシュが未復元・無効、またはversionが異なる場合に履歴を再読込する。キャッシュがあってもDB読込エラーは返す。
 - `seq`は0から始まり、受理した着手・投了ごとに1増える。上限は`i64::MAX`である。変更には`expected_seq`と`request_id`が必要で、参加者以外の変更は拒否する。
-- 受理済み要求だけが対局内の`request_id`を予約する。同じ種別・ユーザー・期待連番・着手内容での再送には元の結果を返し、内容が違えば拒否する。ユーザー作成・対局作成はこの再送契約の対象外である。
+- 受理済み要求だけが対局内の`request_id`を予約する。同じ種別・ユーザー・期待連番・着手内容での再送には元の結果を返し、内容が違えば拒否する。対局作成はこの再送契約の対象外である。
 - 局面のコピーで変更を検証し、versionの条件付き更新、結果、受理記録、Domain Eventを同一トランザクションで保存してからActorへ反映する。保存エラー時は履歴を再読込して照合し、結果を確認できない場合は成功・ロールバックを断定しない。応答喪失時は同じ要求を再送する。
 - 再起動後は平手初期局面から受理済み履歴を再実行し、連番・参加者・合法性・各応答・最終結果を検証して復元する。DBに局面Snapshotを保存する方式ではない。
 - キュー投入後の呼出元のキャンセルや返信先の破棄では処理を取り消さない。メッセージ契約は[6.2節](#62-game-actorのメッセージ契約)を参照する。
 
 ### 0.3 DB・実行環境
 
-Domain層とApplication層はSQL・ORMに依存せず、Application層が定義する`UserRepository` / `GameRepository`を注入する。Actorには`GameRepository`のみを渡し、ユーザー作成・取得の操作を公開しない。`SeaOrmStore`は両Traitを実装し、同じ接続プールを共有する。対局作成時のユーザー存在確認はDB内の同一トランザクションで行う。現行の永続化アダプターで組み込み・検証しているDBドライバーはSQLiteのみであり、PostgreSQL対応を実装済みとはしない。将来のDB変更はアダプター側で対応・検証する。
+Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとSQLite接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。退会やプロフィール変更は対局履歴を変更しない。旧DBのユーザーIDにはGoogle本人確認情報がなく、自動では新規アカウントに紐付けない。現行DBドライバーはSQLiteのみである。認証方式と設定は[ユーザーサービスの手順](../user-service.md)を参照する。
 
 ローカル実行とテストはSQLiteを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは`game-server`、`outbox-publisher`、Core NATSを起動する。対局とOutboxは共有SQLite Volumeに保存し、コンテナ再作成後も復元する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
 
@@ -91,9 +95,9 @@ Valkey、NATS、AI、Kubernetes、観測基盤は将来導入する構成であ�
 | 領域 | 採用技術 | 主な役割 |
 |---|---|---|
 | 言語 | **Rust** | サーバー実装 |
-| Web API | **Axum（将来）** | HTTP API / 認証 |
+| Web API | **Axum** | HTTP API / 認証 |
 | 非同期基盤 | **Tokio** | 現在はGame Actor。WebSocket・タイマーは将来 |
-| RPC | **Tonic / gRPC** | 現在の対局・ユーザー操作。Gateway接続は将来 |
+| RPC | **Tonic / gRPC** | 現在の対局操作。Gateway接続は将来 |
 | 将棋ルール | **rsshogi** | 非公開アダプター経由で利用 |
 | ORM | **SeaORM** | ユーザー・対局・受理済み履歴の保存 |
 | SQL | **SeaQuery / SeaORM経由のSQLx** | スキーマ構築、トランザクション、versionの条件付き更新 |
@@ -438,13 +442,13 @@ flowchart LR
 
 | テーブル | 内容 |
 |---|---|
-| `users` | 登録済みユーザーID |
+| `legacy_users` | 旧DBから退避した未連携ID。新規対局DBには作成しない |
 | `games` | 対局ID、固定された先後のユーザー、version、勝敗・終局理由 |
 | `journal` | 着手・投了を含む受理済みコマンドと元の応答。対局内の連番・request_idはそれぞれ一意 |
 | `outbox_events` | 確定時に固定した型付きイベント、符号化バージョン、対局・連番・種別の一意性、配信済み状態 |
 | `schema_version` | スキーマ初期化・互換性検証用のバージョン |
 
-`games`のversion・結果、`journal`、`outbox_events`は原子的に更新する。スキーマバージョンは2であり、新規DBの初期化とv1からの更新は同一トランザクション内で行う。v1の既存履歴を保ち、Outboxは空で開始する。イベントは更新後に受理した操作から生成し、既存履歴を遡って配信しない。起動時にはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Leaseは保存していない。
+`games`のversion・結果、`journal`、`outbox_events`は原子的に更新する。対局スキーマバージョンは3であり、新規DBの初期化とv1・v2からの更新は同一トランザクション内で行う。v3ではユーザーへの外部キーを除去し、既存OutboxのID・配信済み状態を保つ。ユーザーサービスは別DBと独自のスキーマ台帳を持つ。v1の既存履歴を保ち、Outboxは空で開始する。イベントは更新後に受理した操作から生成し、既存履歴を遡って配信しない。起動時にはバージョン台帳と必要テーブルの存在を確認する。列・制約の網羅的な検査は行わず、対局履歴はロード時に再実行して検証する。時計、永続Snapshot、Leaseは保存していない。
 
 ### 11.2 将来の拡張候補
 
@@ -629,9 +633,9 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 
 ### Phase 1: 対局MVP
 
-現在はRust / Tokio / Tonic / SeaORM / SQLiteで、単一Game Service、Game Actor（bounded mpsc + oneshot）、通常の合法手・詰み・投了、ユーザー登録・対局者固定、履歴永続化と再起動復元、受理済み要求の冪等再送まで実装済みである。
+現在はRust / Tokio / Tonic / SeaORM / SQLiteで、単一Game Service、Game Actor（bounded mpsc + oneshot）、通常の合法手・詰み・投了、対局者固定、履歴永続化と再起動復元、受理済み要求の冪等再送まで実装済みである。
 
-次の拡張は認証、時計などを個別にスコープ決定して進める。時計の導入時には第7章の方針に従い、期限境界、mpsc待機、タイマー競合を検証する。AxumやPostgreSQLの導入は現行MVPの前提ではない。
+Google認証・ユーザー管理は独立したAxumサービスで実装する。次の拡張は時計などを個別にスコープ決定して進める。時計の導入時には第7章の方針に従い、期限境界、mpsc待機、タイマー競合を検証する。PostgreSQLの導入は現行MVPの前提ではない。
 
 ### Phase 2: リアルタイム分離
 
@@ -647,7 +651,7 @@ Virtual Shard、Shard Manager、Lease/Fencing、Kubernetes水平展開、マル�
 
 ## 15. Rustモノレポ構成
 
-現行Workspaceの実装単位は`apps/game-server`、`apps/outbox-publisher`と、`crates/shogi-domain`、`game-application`、`persistence`、`messaging`、`rpc`である。スキーマ処理は`crates/persistence/src/schema.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
+現行Workspaceは`apps/game-server`、`apps/outbox-publisher`、`apps/user-server`と、対局用の各crate、`user-id`、`user-application`、`user-persistence`、`user-http`からなる。スキーマ処理は`crates/persistence/src/schema.rs`、gRPC定義は`proto/game.proto`に置く。ルートの`Dockerfile`と`compose.yaml`でコンテナ確認を行う。
 
 以下は将来拡張を含む配置案であり、すべてのディレクトリが存在するわけではない。
 
