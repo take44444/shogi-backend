@@ -189,11 +189,12 @@ impl std::fmt::Display for PublishError {
 }
 impl std::error::Error for PublishError {}
 
-/// Publishes application events through a transport boundary.
+/// Publishes committed events as transient notifications.
 #[async_trait]
-pub trait EventPublisher: Send {
-    /// Success means socket flush and an exact event echo from the server succeeded.
-    /// Core NATS does not acknowledge subscriber delivery.
+pub trait NotificationPublisher: Send {
+    /// Success means the notification service accepted the event.
+    /// It does not promise subscriber delivery, processing, or durable storage.
+    /// An uncertain failure must leave the outbox item pending and may duplicate it.
     async fn publish(&mut self, event: &CommittedEvent) -> Result<(), PublishError>;
 }
 
@@ -202,7 +203,7 @@ pub trait EventPublisher: Send {
 pub enum DispatchError {
     /// A queue read or mark failed, possibly after a mark committed.
     Repository(ApplicationError),
-    /// Publishing or flushing failed, possibly after sending.
+    /// Notification acceptance failed, possibly after sending.
     Publish(PublishError),
 }
 impl std::fmt::Display for DispatchError {
@@ -221,7 +222,7 @@ pub struct OutboxPublisher<R, P> {
     repository: R,
     publisher: P,
 }
-impl<R: OutboxRepository, P: EventPublisher> OutboxPublisher<R, P> {
+impl<R: OutboxRepository, P: NotificationPublisher> OutboxPublisher<R, P> {
     /// Takes ownership of the queue and transport to serialize dispatch.
     pub fn new(repository: R, publisher: P) -> Self {
         Self {
@@ -404,7 +405,7 @@ mod tests {
         fail: bool,
     }
     #[async_trait]
-    impl EventPublisher for Sink {
+    impl NotificationPublisher for Sink {
         async fn publish(&mut self, event: &CommittedEvent) -> Result<(), PublishError> {
             self.observed.lock().unwrap().push(event.seq);
             if std::mem::take(&mut self.fail) {

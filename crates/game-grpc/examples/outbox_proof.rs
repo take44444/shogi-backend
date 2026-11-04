@@ -1,7 +1,7 @@
-use async_nats::Subscriber;
 use futures_util::StreamExt;
 use game_application::GameId;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
+use redis::aio::PubSub;
 use serde_json::{Value, json};
 use std::{process::Command, time::Duration};
 use tonic::transport::Channel;
@@ -18,6 +18,30 @@ fn compose(project: &str, args: &[&str]) -> Result<()> {
         return Err(format!("Compose {args:?} failed: {status}").into());
     }
     Ok(())
+}
+fn publisher_restarts(project: &str) -> Result<u64> {
+    let id = Command::new("docker")
+        .args([
+            "compose",
+            "-p",
+            project,
+            "ps",
+            "--all",
+            "--quiet",
+            "outbox-publisher",
+        ])
+        .output()?;
+    if !id.status.success() {
+        return Err("could not find publisher container".into());
+    }
+    let id = String::from_utf8(id.stdout)?;
+    let state = Command::new("docker")
+        .args(["inspect", "--format", "{{.RestartCount}}", id.trim()])
+        .output()?;
+    if !state.status.success() {
+        return Err("could not inspect publisher restarts".into());
+    }
+    Ok(String::from_utf8(state.stdout)?.trim().parse()?)
 }
 async fn connect(endpoint: &str) -> Result<Client> {
     for _ in 0..100 {
@@ -37,18 +61,18 @@ async fn connect(endpoint: &str) -> Result<Client> {
     }
     Err("gRPC server did not become ready".into())
 }
-async fn subscribe(url: &str, game: &str) -> Result<(async_nats::Client, Subscriber)> {
+async fn subscribe(url: &str, game: &str) -> Result<PubSub> {
+    let client = redis::Client::open(url)?;
     for _ in 0..100 {
-        if let Ok(client) = async_nats::connect(url).await {
-            let subscriber = client
-                .subscribe(game_messaging::game_subject(&GameId::new(game)?))
+        if let Ok(mut subscriber) = client.get_async_pubsub().await {
+            subscriber
+                .subscribe(game_messaging::game_channel(&GameId::new(game)?))
                 .await?;
-            game_messaging::server_barrier(&client).await?;
-            return Ok((client, subscriber));
+            return Ok(subscriber);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Err("NATS did not become ready".into())
+    Err("Valkey did not become ready".into())
 }
 async fn create(client: &mut Client, game: &str) -> Result<()> {
     let response = client
@@ -78,15 +102,15 @@ fn movement(game: &str, seq: u64, usi: &str) -> proto::MakeMoveRequest {
         usi: usi.into(),
     }
 }
-async fn receive(sub: &mut Subscriber, game: &str, seq: u64, kind: &str) -> Result<Value> {
-    let message = tokio::time::timeout(Duration::from_secs(20), sub.next())
+async fn receive(sub: &mut PubSub, game: &str, seq: u64, kind: &str) -> Result<Value> {
+    let message = tokio::time::timeout(Duration::from_secs(20), sub.on_message().next())
         .await?
         .ok_or("subscription ended")?;
     assert_eq!(
-        message.subject.as_str(),
-        game_messaging::game_subject(&GameId::new(game)?)
+        message.get_channel_name(),
+        game_messaging::game_channel(&GameId::new(game)?)
     );
-    let value: Value = serde_json::from_slice(&message.payload)?;
+    let value: Value = serde_json::from_slice(message.get_payload_bytes())?;
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["game_id"], game);
     assert_eq!(value["seq"], seq);
@@ -100,9 +124,9 @@ async fn receive(sub: &mut Subscriber, game: &str, seq: u64, kind: &str) -> Resu
     println!("received {}", value);
     Ok(value)
 }
-async fn quiet(sub: &mut Subscriber) -> Result<()> {
+async fn quiet(sub: &mut PubSub) -> Result<()> {
     assert!(
-        tokio::time::timeout(Duration::from_millis(1200), sub.next())
+        tokio::time::timeout(Duration::from_millis(1200), sub.on_message().next())
             .await
             .is_err(),
         "unexpected duplicate or premature event"
@@ -114,12 +138,12 @@ async fn quiet(sub: &mut Subscriber) -> Result<()> {
 async fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 3 {
-        return Err("usage: outbox_proof GRPC_ENDPOINT NATS_URL COMPOSE_PROJECT".into());
+        return Err("usage: outbox_proof GRPC_ENDPOINT VALKEY_URL COMPOSE_PROJECT".into());
     }
-    let (endpoint, nats, project) = (&args[0], &args[1], &args[2]);
+    let (endpoint, valkey, project) = (&args[0], &args[1], &args[2]);
     let mut client = connect(endpoint).await?;
     let game = "proof.*.>棋\0";
-    let (_subscriber_client, mut sub) = subscribe(nats, game).await?;
+    let mut sub = subscribe(valkey, game).await?;
     create(&mut client, game).await?;
     let first = client
         .make_move(movement(game, 0, "7g7f"))
@@ -154,10 +178,10 @@ async fn main() -> Result<()> {
     );
     assert!(end.get("movement").is_none());
     quiet(&mut sub).await?;
-    println!("normal move, exact retry, resignation, and safe subject verified");
+    println!("normal move, exact retry, resignation, and safe channel verified");
 
     let game = "backlog";
-    let (_subscriber_client, mut sub) = subscribe(nats, game).await?;
+    let mut sub = subscribe(valkey, game).await?;
     create(&mut client, game).await?;
     compose(project, &["stop", "outbox-publisher"])?;
     for (seq, usi) in [(0, "7g7f"), (1, "3c3d")] {
@@ -202,7 +226,8 @@ async fn main() -> Result<()> {
         "publisher downtime backlog survived server recreation, replayed in order, and exact retry added no event"
     );
 
-    compose(project, &["stop", "nats"])?;
+    let restarts = publisher_restarts(project)?;
+    compose(project, &["stop", "valkey"])?;
     assert_eq!(
         client
             .make_move(movement(game, 2, "2g2f"))
@@ -221,13 +246,21 @@ async fn main() -> Result<()> {
             .seq,
         3
     );
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while publisher_restarts(project)? <= restarts {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    println!("failed publication triggered automatic publisher restart during Valkey outage");
     compose(project, &["stop", "outbox-publisher"])?;
-    compose(project, &["start", "nats"])?;
-    let (_fresh_client, mut fresh_sub) = subscribe(nats, game).await?;
+    compose(project, &["start", "valkey"])?;
+    let mut fresh_sub = subscribe(valkey, game).await?;
     compose(project, &["start", "outbox-publisher"])?;
     receive(&mut fresh_sub, game, 3, "move_committed").await?;
     quiet(&mut fresh_sub).await?;
-    println!("RPC succeeded during NATS outage; pending event replayed after recovery");
+    println!("RPC succeeded during Valkey outage; pending event replayed after recovery");
     compose(project, &["restart", "outbox-publisher"])?;
     quiet(&mut fresh_sub).await?;
     assert_eq!(
@@ -250,6 +283,53 @@ async fn main() -> Result<()> {
     receive(&mut fresh_sub, game, 4, "move_committed").await?;
     println!(
         "publisher restart and request replay did not republish marked rows; new events still flow"
+    );
+    let game = "unwatched";
+    create(&mut client, game).await?;
+    let mut check = redis::Client::open(valkey.as_str())?
+        .get_multiplexed_async_connection()
+        .await?;
+    let (_, subscribers): (String, u64) = redis::cmd("PUBSUB")
+        .arg("NUMSUB")
+        .arg(game_messaging::game_channel(&GameId::new(game)?))
+        .query_async(&mut check)
+        .await?;
+    assert_eq!(subscribers, 0);
+    client.make_move(movement(game, 0, "7g7f")).await?;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let output = Command::new("docker")
+                .args([
+                    "compose", "-p", project, "exec", "-T", "postgres", "psql",
+                    "-U", "shogi", "-d", "shogi", "-Atc",
+                    "SELECT COUNT(*) FROM outbox_events WHERE game_id = 'unwatched' AND published = true",
+                ])
+                .output()?;
+            if !output.status.success() {
+                return Err("could not inspect outbox marking".into());
+            }
+            if String::from_utf8(output.stdout)?.trim() == "1" {
+                return Ok::<(), Box<dyn std::error::Error>>(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await??;
+    let mut unwatched = subscribe(valkey, game).await?;
+    compose(project, &["restart", "outbox-publisher"])?;
+    quiet(&mut unwatched).await?;
+    assert_eq!(
+        client
+            .get_snapshot(proto::GetSnapshotRequest {
+                game_id: game.into()
+            })
+            .await?
+            .into_inner()
+            .seq,
+        1
+    );
+    println!(
+        "zero subscribers still marked acceptance; later subscription did not replay; snapshot recovered state"
     );
     Ok(())
 }
