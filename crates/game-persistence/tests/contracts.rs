@@ -4,6 +4,7 @@ use game_application::{
     MakeMove, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
 };
 use game_persistence::SeaOrmStore;
+use pg_test_support::TestDatabase;
 use sea_orm::{ConnectionTrait, Database};
 use shogi_domain::Player;
 use std::sync::{
@@ -38,9 +39,6 @@ fn resign() -> Resign {
         user_id: user("black"),
     }
 }
-fn file_url(dir: &tempfile::TempDir) -> String {
-    format!("sqlite://{}?mode=rwc", dir.path().join("game.db").display())
-}
 async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
     let service = GameService::new(store.clone());
@@ -50,7 +48,8 @@ async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService) {
 
 #[tokio::test]
 async fn closing_the_pool_makes_the_game_service_unavailable() {
-    let (store, games) = setup("sqlite::memory:").await;
+    let database = TestDatabase::new().await;
+    let (store, games) = setup(database.url()).await;
     assert_eq!(games.snapshot(&id()).await.unwrap().seq, 0);
 
     store.close().await.unwrap();
@@ -60,8 +59,10 @@ async fn closing_the_pool_makes_the_game_service_unavailable() {
 
 #[tokio::test]
 async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable() {
-    for url in ["sqlite::memory:", &file_url(&tempfile::tempdir().unwrap())] {
-        let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
+    {
+        let database = TestDatabase::new().await;
+        let url = database.url().to_string();
+        let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
         let service = GameService::new(store);
         assert_eq!(
             service
@@ -104,9 +105,9 @@ async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable()
 }
 
 #[tokio::test]
-async fn file_restart_restores_position_hands_promotion_and_receipts_even_after_finish() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_finish() {
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let (store, service) = setup(&url).await;
     let first = movement("m0", 0, "black", "7g7f");
     let receipt = service.make_move(&id(), first.clone()).await.unwrap();
@@ -153,8 +154,8 @@ async fn file_restart_restores_position_hands_promotion_and_receipts_even_after_
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let (store, a) = setup(&url).await;
     let b = GameService::new(Arc::new(SeaOrmStore::connect(&url).await.unwrap()));
     assert_eq!(b.snapshot(&id()).await.unwrap().seq, 0);
@@ -191,15 +192,15 @@ async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
 #[tokio::test]
 async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt() {
     for commit_failure in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let url = file_url(&dir);
+        let database = TestDatabase::new().await;
+        let url = database.url().to_string();
         let (store, service) = setup(&url).await;
         let raw = Database::connect(&url).await.unwrap();
         if commit_failure {
             raw.execute_unprepared("CREATE TABLE deferred_failure (game_id TEXT REFERENCES games(id) DEFERRABLE INITIALLY DEFERRED)").await.unwrap();
-            raw.execute_unprepared("CREATE TRIGGER fail_commit_change AFTER INSERT ON journal BEGIN INSERT INTO deferred_failure VALUES ('absent'); END").await.unwrap();
+            raw.execute_unprepared("CREATE FUNCTION fail_commit_change() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO deferred_failure VALUES ('absent'); RETURN NEW; END $$; CREATE TRIGGER fail_commit_change AFTER INSERT ON journal FOR EACH ROW EXECUTE FUNCTION fail_commit_change()").await.unwrap();
         } else {
-            raw.execute_unprepared("CREATE TRIGGER fail_commit_change BEFORE INSERT ON journal BEGIN SELECT RAISE(ABORT, 'injected write failure'); END").await.unwrap();
+            raw.execute_unprepared("CREATE FUNCTION fail_commit_change() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected write failure'; END $$; CREATE TRIGGER fail_commit_change BEFORE INSERT ON journal FOR EACH ROW EXECUTE FUNCTION fail_commit_change()").await.unwrap();
         }
         let before = service.snapshot(&id()).await.unwrap();
         let command = movement("retry", 0, "black", "7g7f");
@@ -210,7 +211,7 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
         assert_eq!(store.version(&id()).await.unwrap(), 0);
         assert!(store.load_game(&id()).await.unwrap().journal.is_empty());
         assert_eq!(service.snapshot(&id()).await.unwrap(), before);
-        raw.execute_unprepared("DROP TRIGGER fail_commit_change")
+        raw.execute_unprepared("DROP TRIGGER fail_commit_change ON journal")
             .await
             .unwrap();
         assert_eq!(service.make_move(&id(), command).await.unwrap().seq, 1);
@@ -219,7 +220,8 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
 
 #[tokio::test]
 async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
-    let (store, service) = setup("sqlite::memory:").await;
+    let database = TestDatabase::new().await;
+    let (store, service) = setup(database.url()).await;
     let receipt = Receipt {
         request_id: RequestId::new("r").unwrap(),
         user_id: user("outsider"),
@@ -269,7 +271,7 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
 #[tokio::test]
 async fn corrupt_history_and_metadata_fail_closed() {
     for sql in [
-        "UPDATE journal SET in_check = 1 WHERE seq = 1",
+        "UPDATE journal SET in_check = TRUE WHERE seq = 1",
         "UPDATE journal SET usi = '7g7e' WHERE seq = 1",
         "UPDATE journal SET user_id = 'outsider' WHERE seq = 1",
         "UPDATE journal SET request_id = 'bad id' WHERE seq = 1",
@@ -277,8 +279,8 @@ async fn corrupt_history_and_metadata_fail_closed() {
         "UPDATE games SET winner = 1, reason = 2, finished_at = 1",
         "DELETE FROM journal WHERE seq = 1",
     ] {
-        let dir = tempfile::tempdir().unwrap();
-        let url = file_url(&dir);
+        let database = TestDatabase::new().await;
+        let url = database.url().to_string();
         let (_, service) = setup(&url).await;
         service
             .make_move(&id(), movement("m", 0, "black", "7g7f"))
@@ -352,7 +354,8 @@ impl GameRepository for FaultStore {
 #[tokio::test]
 async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery() {
     for mode in [1, 2, 3, 4] {
-        let (store, _) = setup("sqlite::memory:").await;
+        let database = TestDatabase::new().await;
+        let (store, _) = setup(database.url()).await;
         let fault = Arc::new(FaultStore {
             inner: store.clone(),
             mode: AtomicU8::new(mode),
@@ -398,11 +401,11 @@ async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery()
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn schema_bootstrap_is_serialized_and_future_versions_are_rejected() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let mut tasks = tokio::task::JoinSet::new();
     for _ in 0..6 {
-        let url = url.clone();
+        let url = url.to_owned();
         tasks.spawn(async move { SeaOrmStore::connect(&url).await });
     }
     while let Some(result) = tasks.join_next().await {
@@ -421,8 +424,8 @@ async fn schema_bootstrap_is_serialized_and_future_versions_are_rejected() {
 #[tokio::test]
 async fn an_existing_empty_schema_ledger_is_rejected_without_modification() {
     for existing_tables in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let url = file_url(&dir);
+        let database = TestDatabase::new().await;
+        let url = database.url().to_string();
         if existing_tables {
             SeaOrmStore::connect(&url)
                 .await
@@ -447,7 +450,7 @@ async fn an_existing_empty_schema_ledger_is_rejected_without_modification() {
         );
         let row = raw
             .query_one_raw(sea_orm::Statement::from_string(
-                sea_orm::DbBackend::Sqlite,
+                sea_orm::DbBackend::Postgres,
                 "SELECT COUNT(*) AS count FROM schema_version",
             ))
             .await
@@ -459,8 +462,8 @@ async fn an_existing_empty_schema_ledger_is_rejected_without_modification() {
 
 #[tokio::test]
 async fn a_missing_schema_ledger_is_not_recreated_for_existing_game_tables() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     SeaOrmStore::connect(&url)
         .await
         .unwrap()
@@ -477,8 +480,8 @@ async fn a_missing_schema_ledger_is_not_recreated_for_existing_game_tables() {
     );
     let row = raw
         .query_one_raw(sea_orm::Statement::from_string(
-            sea_orm::DbBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM sqlite_master WHERE name = 'schema_version'",
+            sea_orm::DbBackend::Postgres,
+            "SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'schema_version'",
         ))
         .await
         .unwrap()
@@ -487,9 +490,9 @@ async fn a_missing_schema_ledger_is_not_recreated_for_existing_game_tables() {
 }
 
 #[tokio::test]
-async fn sqlite_enforces_result_pairs_foreign_keys_and_distinct_participants() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+async fn postgres_enforces_result_pairs_foreign_keys_and_distinct_participants() {
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let (_, service) = setup(&url).await;
     service
         .make_move(&id(), movement("m", 0, "black", "7g7f"))
@@ -513,8 +516,8 @@ async fn sqlite_enforces_result_pairs_foreign_keys_and_distinct_participants() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn joined_history_load_remains_coherent_during_concurrent_commits() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let (_, writer) = setup(&url).await;
     let reader = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
     let writing = tokio::spawn(async move {
@@ -559,7 +562,7 @@ async fn joined_history_load_remains_coherent_during_concurrent_commits() {
 
 async fn integer_query(db: &sea_orm::DatabaseConnection, sql: &str) -> i64 {
     db.query_one_raw(sea_orm::Statement::from_string(
-        sea_orm::DbBackend::Sqlite,
+        sea_orm::DbBackend::Postgres,
         sql,
     ))
     .await
@@ -571,14 +574,14 @@ async fn integer_query(db: &sea_orm::DatabaseConnection, sql: &str) -> i64 {
 
 #[tokio::test]
 async fn fresh_game_database_has_no_account_tables() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let (_store, _service) = setup(&url).await;
     let raw = Database::connect(&url).await.unwrap();
     assert_eq!(
         integer_query(
             &raw,
-            "SELECT COUNT(*) AS value FROM sqlite_master WHERE name = 'users'"
+            "SELECT COUNT(*) AS value FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'users'"
         )
         .await,
         0
@@ -587,8 +590,8 @@ async fn fresh_game_database_has_no_account_tables() {
 
 #[tokio::test]
 async fn failed_bootstrap_rolls_back_the_entire_schema() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let raw = Database::connect(&url).await.unwrap();
     raw.execute_unprepared("CREATE VIEW records_finished AS SELECT 1")
         .await
@@ -598,7 +601,7 @@ async fn failed_bootstrap_rolls_back_the_entire_schema() {
         Err(Error::Unavailable)
     );
     assert_eq!(
-        integer_query(&raw, "SELECT count(*) AS value FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'").await,
+        integer_query(&raw, "SELECT count(*) AS value FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'").await,
         0
     );
     raw.execute_unprepared("DROP VIEW records_finished")
@@ -628,8 +631,8 @@ async fn incompatible_or_incomplete_existing_schema_is_not_modified() {
         "DROP TABLE schema_version; CREATE TABLE schema_version (id TEXT, version INTEGER); INSERT INTO schema_version VALUES ('invalid', 5)",
         "DROP TABLE outbox_events",
     ] {
-        let dir = tempfile::tempdir().unwrap();
-        let url = file_url(&dir);
+        let database = TestDatabase::new().await;
+        let url = database.url().to_string();
         let (_, service) = setup(&url).await;
         service
             .make_move(&id(), movement("m", 0, "black", "7g7f"))
@@ -655,11 +658,11 @@ async fn incompatible_or_incomplete_existing_schema_is_not_modified() {
 
 #[tokio::test]
 async fn unrelated_tables_require_a_current_application_schema() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = file_url(&dir);
+    let database = TestDatabase::new().await;
+    let url = database.url().to_string();
     let raw = Database::connect(&url).await.unwrap();
     raw.execute_unprepared(
-        "CREATE TABLE sqliteExtra (value TEXT); INSERT INTO sqliteExtra VALUES ('preserved')",
+        "CREATE TABLE application_extra (value TEXT); INSERT INTO application_extra VALUES ('preserved')",
     )
     .await
     .unwrap();
@@ -670,12 +673,12 @@ async fn unrelated_tables_require_a_current_application_schema() {
     assert_eq!(
         integer_query(
             &raw,
-            "SELECT count(*) AS value FROM sqlite_master WHERE type='table'"
+            "SELECT count(*) AS value FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"
         )
         .await,
         1
     );
-    raw.execute_unprepared("DROP TABLE sqliteExtra")
+    raw.execute_unprepared("DROP TABLE application_extra")
         .await
         .unwrap();
     SeaOrmStore::connect(&url)
@@ -685,7 +688,7 @@ async fn unrelated_tables_require_a_current_application_schema() {
         .await
         .unwrap();
     raw.execute_unprepared(
-        "CREATE TABLE sqliteExtra (value TEXT); INSERT INTO sqliteExtra VALUES ('preserved')",
+        "CREATE TABLE application_extra (value TEXT); INSERT INTO application_extra VALUES ('preserved')",
     )
     .await
     .unwrap();
@@ -698,9 +701,51 @@ async fn unrelated_tables_require_a_current_application_schema() {
     assert_eq!(
         integer_query(
             &raw,
-            "SELECT count(*) AS value FROM sqliteExtra WHERE value = 'preserved'"
+            "SELECT count(*) AS value FROM application_extra WHERE value = 'preserved'"
         )
         .await,
         1
     );
+}
+
+#[tokio::test]
+async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
+    let database = TestDatabase::new().await;
+    let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
+    let games = GameService::new(store.clone());
+    let black = user("black\0\\name");
+    let white = user("white\\0name");
+    let game = GameId::new("game\0\\name").unwrap();
+    let literal = GameId::new("game\\0\\name").unwrap();
+    for id in [&game, &literal] {
+        games
+            .create(
+                id.clone(),
+                Participants {
+                    black: black.clone(),
+                    white: white.clone(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let command = MakeMove {
+        request_id: RequestId::new("request\0\\name").unwrap(),
+        expected_seq: 0,
+        user_id: black.clone(),
+        movement: "7g7f".parse().unwrap(),
+    };
+    let accepted = games.make_move(&game, command.clone()).await.unwrap();
+    store.close().await.unwrap();
+    let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
+    let restored = GameService::new(store.clone());
+    assert_eq!(
+        restored.make_move(&game, command.clone()).await.unwrap(),
+        accepted
+    );
+    let record = store.load_game(&game).await.unwrap();
+    assert_eq!(record.id, game);
+    assert_eq!(record.participants, Participants { black, white });
+    assert_eq!(record.journal[0].request_id, command.request_id);
+    assert_eq!(restored.snapshot(&literal).await.unwrap().seq, 0);
 }

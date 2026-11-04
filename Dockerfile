@@ -11,15 +11,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:trixie-slim
 RUN groupadd --gid 10001 shogi \
-    && useradd --uid 10001 --gid shogi --no-create-home shogi \
-    && mkdir /data \
-    && chown shogi:shogi /data
+    && useradd --uid 10001 --gid shogi --no-create-home shogi
 COPY --from=build /usr/local/bin/game-server /usr/local/bin/game-server
 COPY --from=build /usr/local/bin/outbox-publisher /usr/local/bin/outbox-publisher
 COPY --from=build /usr/local/bin/user-server /usr/local/bin/user-server
 COPY --from=build /usr/local/bin/player-server /usr/local/bin/player-server
 USER shogi
-ENV DATABASE_URL=sqlite:///data/shogi.db?mode=rwc
+ENV DATABASE_URL=postgres://shogi:shogi@postgres:5432/shogi
 ENV GAME_SERVER_ADDR=0.0.0.0:50051
 EXPOSE 50051
 ENTRYPOINT ["game-server"]

@@ -21,8 +21,17 @@ fn compose(project: &str, args: &[&str]) -> Result<()> {
 }
 async fn connect(endpoint: &str) -> Result<Client> {
     for _ in 0..100 {
-        if let Ok(client) = Client::connect(endpoint.to_owned()).await {
-            return Ok(client);
+        if let Ok(mut client) = Client::connect(endpoint.to_owned()).await {
+            let response = client
+                .get_snapshot(proto::GetSnapshotRequest {
+                    game_id: "outbox-readiness-probe".into(),
+                })
+                .await;
+            if response.is_ok()
+                || response.is_err_and(|error| error.code() == tonic::Code::NotFound)
+            {
+                return Ok(client);
+            }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

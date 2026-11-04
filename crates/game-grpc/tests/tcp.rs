@@ -16,15 +16,19 @@ type Client = GameServiceClient<Channel>;
 
 struct TestServer {
     endpoint: String,
+    _database: Option<pg_test_support::TestDatabase>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<Result<(), tonic::transport::Error>>>,
 }
 
 impl TestServer {
     async fn start() -> Self {
-        let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await.unwrap());
+        let database = pg_test_support::TestDatabase::new().await;
+        let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
         let games = GameService::new(store);
-        Self::start_service(games).await
+        let mut server = Self::start_service(games).await;
+        server._database = Some(database);
+        server
     }
 
     async fn start_service(games: GameService) -> Self {
@@ -40,6 +44,7 @@ impl TestServer {
         );
         Self {
             endpoint,
+            _database: None,
             stop: Some(stop),
             task: Some(task),
         }
@@ -528,9 +533,9 @@ async fn id_bindings_and_permission_statuses_are_enforced_at_the_wire() {
 }
 
 #[tokio::test]
-async fn generated_tcp_client_restores_file_database_across_two_server_restarts() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = format!("sqlite://{}?mode=rwc", dir.path().join("tcp.db").display());
+async fn generated_tcp_client_restores_database_across_two_server_restarts() {
+    let database = pg_test_support::TestDatabase::new().await;
+    let url = database.url().to_string();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
     let server = TestServer::start_service(GameService::new(store.clone())).await;
     let mut client = server.client().await;

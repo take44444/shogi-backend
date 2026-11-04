@@ -1,53 +1,48 @@
-//! Public record queries use an independently opened, read-only SQLite pool.
+//! Public record queries use an independently permissioned PostgreSQL pool.
 use async_trait::async_trait;
 use game_record_application::{
     Detail, Error, GameId, MAX_HISTORY, Metadata, Page, PublicAction, PublicOperation,
     RecordRepository, Rule, Search, UserId,
 };
 use sea_orm::sqlx::{
-    self, Row, Sqlite, SqlitePool,
+    self, PgPool, Postgres, Row,
     pool::PoolConnection,
-    sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
+    postgres::{PgConnectOptions, PgPoolOptions, PgRow},
 };
 use shogi_domain::{FinishReason, GameResult, Player};
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{str::FromStr, time::Duration};
 
 const ELIGIBLE: &str = "visibility = 'public' AND finished_at IS NOT NULL";
 const COLUMNS: &str =
     "id, black, white, version, winner, reason, rule, finished_at, final_move_ply";
 
 /// No create, initialization, journal-mode changes, or game mutation capability.
-pub struct SqliteGameRecords {
-    pool: SqlitePool,
+pub struct PostgresGameRecords {
+    pool: PgPool,
 }
-impl SqliteGameRecords {
-    /// Opens an existing schema-v5 file with SQLite read-only flags and query-only connections.
-    /// The game writer must initialize the database first. WAL and SHM files must be readable.
+impl PostgresGameRecords {
+    /// Connects to an existing schema-v5 database without initializing or mutating it.
+    /// Use a SELECT-only database role to enforce permissions independently of this adapter.
+    /// Each connection uses read-only transactions and a two-second statement timeout.
     ///
     /// # Errors
-    /// Returns `Unavailable` for I/O or pool failures and `Corrupt` for an unsupported schema.
-    pub async fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = std::fs::canonicalize(path).map_err(|_| Error::Unavailable)?;
-        if !path.is_file() {
-            return Err(Error::Unavailable);
-        }
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .read_only(true)
-            .create_if_missing(false)
-            .foreign_keys(true)
-            .busy_timeout(Duration::from_secs(2));
-        let pool = SqlitePoolOptions::new()
+    /// Returns `Unavailable` for connection failures and `Corrupt` for an unsupported schema.
+    pub async fn connect(url: &str) -> Result<Self, Error> {
+        let options = PgConnectOptions::from_str(url)
+            .map_err(unavailable)?
+            .options([("search_path", "public")]);
+        let pool = PgPoolOptions::new()
             .max_connections(4)
             .acquire_timeout(Duration::from_secs(2))
             .after_connect(|connection, _| {
                 Box::pin(async move {
-                    sqlx::query("PRAGMA query_only = ON")
-                        .execute(connection)
-                        .await?;
+                    for command in [
+                        "SET default_transaction_read_only = on",
+                        "SET statement_timeout = '2s'",
+                        "SET lock_timeout = '2s'",
+                    ] {
+                        sqlx::query(command).execute(&mut *connection).await?;
+                    }
                     Ok(())
                 })
             })
@@ -63,15 +58,8 @@ impl SqliteGameRecords {
     pub async fn close(&self) {
         self.pool.close().await;
     }
-    async fn connection(&self) -> Result<PoolConnection<Sqlite>, Error> {
-        let mut connection = self.pool.acquire().await.map_err(unavailable)?;
-        let deadline = Instant::now() + Duration::from_secs(2);
-        connection
-            .lock_handle()
-            .await
-            .map_err(unavailable)?
-            .set_progress_handler(1000, move || Instant::now() < deadline);
-        Ok(connection)
+    async fn connection(&self) -> Result<PoolConnection<Postgres>, Error> {
+        self.pool.acquire().await.map_err(unavailable)
     }
 }
 fn unavailable(_: impl std::fmt::Debug) -> Error {
@@ -80,7 +68,7 @@ fn unavailable(_: impl std::fmt::Debug) -> Error {
 fn corrupt(_: impl std::fmt::Debug) -> Error {
     Error::Corrupt
 }
-async fn validate_schema(connection: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
+async fn validate_schema(connection: &mut PoolConnection<Postgres>) -> Result<(), Error> {
     let rows = sqlx::query("SELECT id, version FROM schema_version")
         .fetch_all(&mut **connection)
         .await
@@ -123,7 +111,7 @@ async fn validate_schema(connection: &mut PoolConnection<Sqlite>) -> Result<(), 
             ][..],
         ),
     ] {
-        let rows = sqlx::query("SELECT * FROM pragma_table_info(?)")
+        let rows = sqlx::query("SELECT column_name AS name, data_type AS type, is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1")
             .bind(table)
             .fetch_all(&mut **connection)
             .await
@@ -146,46 +134,49 @@ async fn validate_schema(connection: &mut PoolConnection<Sqlite>) -> Result<(), 
                     row.try_get::<String, _>("name")
                         .is_ok_and(|value| value == *name)
                         && row
-                            .try_get::<i64, _>("notnull")
-                            .is_ok_and(|value| value == 1)
+                            .try_get::<String, _>("is_nullable")
+                            .is_ok_and(|value| value == "NO")
                 })
             })
         {
             return Err(Error::Corrupt);
         }
-        let kind = sqlx::query("SELECT type FROM sqlite_master WHERE name = ?")
+        let kind = sqlx::query("SELECT table_type AS type FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1")
             .bind(table)
             .fetch_one(&mut **connection)
             .await
             .map_err(corrupt)?;
-        if kind.try_get::<String, _>("type").map_err(corrupt)? != "table" {
+        if kind.try_get::<String, _>("type").map_err(corrupt)? != "BASE TABLE" {
             return Err(Error::Corrupt);
         }
     }
     Ok(())
 }
-fn side(value: i64) -> Result<Player, Error> {
+fn side(value: i32) -> Result<Player, Error> {
     match value {
         1 => Ok(Player::Black),
         2 => Ok(Player::White),
         _ => Err(Error::Corrupt),
     }
 }
-fn reason(value: i64) -> Result<FinishReason, Error> {
+fn reason(value: i32) -> Result<FinishReason, Error> {
     match value {
         1 => Ok(FinishReason::Checkmate),
         2 => Ok(FinishReason::Resignation),
         _ => Err(Error::Corrupt),
     }
 }
-fn number(row: &SqliteRow, column: &str) -> Result<u64, Error> {
+fn number(row: &PgRow, column: &str) -> Result<u64, Error> {
     u64::try_from(row.try_get::<i64, _>(column).map_err(corrupt)?).map_err(corrupt)
 }
-fn metadata(row: &SqliteRow) -> Result<Metadata, Error> {
+fn metadata(row: &PgRow) -> Result<Metadata, Error> {
     let data = Metadata {
-        id: GameId::new(row.try_get::<String, _>("id").map_err(corrupt)?).map_err(corrupt)?,
-        black: UserId::new(row.try_get::<String, _>("black").map_err(corrupt)?).map_err(corrupt)?,
-        white: UserId::new(row.try_get::<String, _>("white").map_err(corrupt)?).map_err(corrupt)?,
+        id: GameId::new(decode(row.try_get::<String, _>("id").map_err(corrupt)?)?)
+            .map_err(corrupt)?,
+        black: UserId::new(decode(row.try_get::<String, _>("black").map_err(corrupt)?)?)
+            .map_err(corrupt)?,
+        white: UserId::new(decode(row.try_get::<String, _>("white").map_err(corrupt)?)?)
+            .map_err(corrupt)?,
         rule: Rule::Standard,
         result: GameResult {
             winner: side(row.try_get("winner").map_err(corrupt)?)?,
@@ -206,10 +197,10 @@ fn metadata(row: &SqliteRow) -> Result<Metadata, Error> {
     Ok(data)
 }
 #[async_trait]
-impl RecordRepository for SqliteGameRecords {
+impl RecordRepository for PostgresGameRecords {
     async fn search(&self, search: &Search) -> Result<Page, Error> {
         let f = search.filters();
-        let mut query = sqlx::QueryBuilder::<Sqlite>::new(format!(
+        let mut query = sqlx::QueryBuilder::<Postgres>::new(format!(
             "SELECT {COLUMNS} FROM games WHERE {ELIGIBLE} AND finished_at >= "
         ));
         query
@@ -219,21 +210,21 @@ impl RecordRepository for SqliteGameRecords {
         if let Some(id) = &f.participant {
             query
                 .push(" AND (black = ")
-                .push_bind(id.as_str())
+                .push_bind(crate::encode_id(id.as_str()))
                 .push(" OR white = ")
-                .push_bind(id.as_str())
+                .push_bind(crate::encode_id(id.as_str()))
                 .push(")");
         }
         if let Some(winner) = f.winner {
             query
                 .push(" AND winner = ")
-                .push_bind(if winner == Player::Black { 1i64 } else { 2 });
+                .push_bind(if winner == Player::Black { 1i32 } else { 2 });
         }
         if let Some(reason) = f.reason {
             query
                 .push(" AND reason = ")
                 .push_bind(if reason == FinishReason::Checkmate {
-                    1i64
+                    1i32
                 } else {
                     2
                 });
@@ -250,12 +241,12 @@ impl RecordRepository for SqliteGameRecords {
                 .push_bind(seek.finished_at)
                 .push(" OR (finished_at = ")
                 .push_bind(seek.finished_at)
-                .push(" AND id COLLATE BINARY < ")
-                .push_bind(seek.id.as_str())
+                .push(" AND id COLLATE \"C\" < ")
+                .push_bind(crate::encode_id(seek.id.as_str()))
                 .push("))");
         }
         query
-            .push(" ORDER BY finished_at DESC, id COLLATE BINARY DESC LIMIT ")
+            .push(" ORDER BY finished_at DESC, id COLLATE \"C\" DESC LIMIT ")
             .push_bind(i64::from(search.limit()) + 1);
         let mut connection = self.connection().await?;
         let rows = query
@@ -277,13 +268,17 @@ impl RecordRepository for SqliteGameRecords {
         let mut tx = sqlx::Connection::begin(&mut *connection)
             .await
             .map_err(unavailable)?;
-        let mut query = sqlx::QueryBuilder::<Sqlite>::new("SELECT ");
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        let mut query = sqlx::QueryBuilder::<Postgres>::new("SELECT ");
         query
             .push(COLUMNS)
             .push(" FROM games WHERE ")
             .push(ELIGIBLE)
             .push(" AND id = ")
-            .push_bind(id.as_str());
+            .push_bind(crate::encode_id(id.as_str()));
         let row = query
             .build()
             .fetch_optional(&mut *tx)
@@ -294,8 +289,8 @@ impl RecordRepository for SqliteGameRecords {
         if metadata.final_seq > MAX_HISTORY {
             return Err(Error::HistoryTooLong);
         }
-        let rows = sqlx::query("SELECT seq, user_id, action, usi, in_check, winner, reason FROM journal WHERE game_id = ? ORDER BY seq LIMIT ?")
-            .bind(id.as_str()).bind((MAX_HISTORY+1) as i64).fetch_all(&mut *tx).await.map_err(unavailable)?;
+        let rows = sqlx::query("SELECT seq, user_id, action, usi, in_check, winner, reason FROM journal WHERE game_id = $1 ORDER BY seq LIMIT $2")
+            .bind(crate::encode_id(id.as_str())).bind((MAX_HISTORY+1) as i64).fetch_all(&mut *tx).await.map_err(unavailable)?;
         if rows.len() as u64 != metadata.final_seq {
             return Err(Error::Corrupt);
         }
@@ -306,7 +301,7 @@ impl RecordRepository for SqliteGameRecords {
             if seq != index as u64 + 1 {
                 return Err(Error::Corrupt);
             }
-            let user: String = row.try_get("user_id").map_err(corrupt)?;
+            let user = decode(row.try_get("user_id").map_err(corrupt)?)?;
             let player = if user == metadata.black.as_str() {
                 Player::Black
             } else if user == metadata.white.as_str() {
@@ -315,7 +310,7 @@ impl RecordRepository for SqliteGameRecords {
                 return Err(Error::Corrupt);
             };
             let usi: Option<String> = row.try_get("usi").map_err(corrupt)?;
-            let action = match (row.try_get::<i64, _>("action").map_err(corrupt)?, usi) {
+            let action = match (row.try_get::<i32, _>("action").map_err(corrupt)?, usi) {
                 (1, Some(usi)) => {
                     if player
                         != if move_ply % 2 == 0 {
@@ -332,8 +327,8 @@ impl RecordRepository for SqliteGameRecords {
                 (2, None) => PublicAction::Resign,
                 _ => return Err(Error::Corrupt),
             };
-            let winner: Option<i64> = row.try_get("winner").map_err(corrupt)?;
-            let finish: Option<i64> = row.try_get("reason").map_err(corrupt)?;
+            let winner: Option<i32> = row.try_get("winner").map_err(corrupt)?;
+            let finish: Option<i32> = row.try_get("reason").map_err(corrupt)?;
             if seq == metadata.final_seq {
                 if winner.map(side).transpose()? != Some(metadata.result.winner)
                     || finish.map(reason).transpose()? != Some(metadata.result.reason)
@@ -366,49 +361,60 @@ impl RecordRepository for SqliteGameRecords {
     }
 }
 
+fn decode(value: String) -> Result<String, Error> {
+    crate::decode_id(&value).map_err(corrupt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[tokio::test]
-    async fn sqlite_denies_writes_even_with_query_only_disabled() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("game.db");
-        let writer = crate::SeaOrmStore::connect(&format!("sqlite://{}?mode=rwc", path.display()))
+    async fn database_role_denies_writes_even_when_read_only_mode_is_disabled() {
+        let database = pg_test_support::TestDatabase::new().await;
+        let writer = crate::SeaOrmStore::connect(database.url()).await.unwrap();
+        let reader = PostgresGameRecords::connect(&database.reader_url().await)
             .await
             .unwrap();
-        let reader = SqliteGameRecords::open(&path).await.unwrap();
         let mut connection = reader.connection().await.unwrap();
-        sqlx::query("PRAGMA query_only = OFF")
+        sqlx::query("SET default_transaction_read_only = off")
             .execute(&mut *connection)
             .await
             .unwrap();
-        assert!(
-            sqlx::query("DELETE FROM games")
-                .execute(&mut *connection)
-                .await
-                .is_err()
+        let error = sqlx::query("DELETE FROM games")
+            .execute(&mut *connection)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().unwrap().code().as_deref(),
+            Some("42501")
         );
         drop(connection);
         reader.close().await;
         writer.close().await.unwrap();
     }
+
     #[tokio::test]
-    async fn progress_handler_interrupts_real_database_work() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("game.db");
-        let writer = crate::SeaOrmStore::connect(&format!("sqlite://{}?mode=rwc", path.display()))
+    async fn statement_timeout_interrupts_real_database_work_and_connection_recovers() {
+        let database = pg_test_support::TestDatabase::new().await;
+        let writer = crate::SeaOrmStore::connect(database.url()).await.unwrap();
+        let reader = PostgresGameRecords::connect(&database.reader_url().await)
             .await
             .unwrap();
-        let reader = SqliteGameRecords::open(&path).await.unwrap();
         let mut connection = reader.connection().await.unwrap();
-        connection
-            .lock_handle()
+        let error = sqlx::query("SELECT pg_sleep(10)")
+            .execute(&mut *connection)
             .await
-            .unwrap()
-            .set_progress_handler(1, || false);
-        assert!(sqlx::query("WITH RECURSIVE counter(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM counter WHERE n < 100000000) SELECT sum(n) FROM counter").fetch_one(&mut *connection).await.is_err());
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().unwrap().code().as_deref(),
+            Some("57014")
+        );
+        sqlx::query("SELECT 1")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
         drop(connection);
-        assert!(reader.connection().await.is_ok());
         reader.close().await;
         writer.close().await.unwrap();
     }

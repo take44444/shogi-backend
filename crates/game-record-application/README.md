@@ -22,4 +22,4 @@ Pages do not promise a frozen snapshot across HTTP requests.
 Receipts, retry IDs, expected sequence, and outbox events have no public type here.
 Detail is limited to 4096 operations and must come from one consistent repository
 snapshot. `Error::HistoryTooLong` reports the limit without truncating success.
-The production adapter is `game-persistence::SqliteGameRecords`.
+The production adapter is `game-persistence::PostgresGameRecords`.

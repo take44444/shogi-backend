@@ -3,7 +3,8 @@ use game_application::{
     ApplicationError as Error, DomainEvent, GameId, GameRecord, GameRepository, GameService,
     MakeMove, OutboxRepository, Participants, RequestId, Resign, StagedGameChange, UserId,
 };
-use game_persistence::{SeaOrmStore, SqliteOutbox};
+use game_persistence::{PostgresOutbox, SeaOrmStore};
+use pg_test_support::TestDatabase;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 use std::sync::Arc;
 
@@ -20,9 +21,6 @@ fn command() -> MakeMove {
         user_id: user("black"),
         movement: "7g7f".parse().unwrap(),
     }
-}
-fn url(dir: &tempfile::TempDir) -> String {
-    format!("sqlite://{}?mode=rwc", dir.path().join("game.db").display())
 }
 async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService, DatabaseConnection) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
@@ -41,7 +39,7 @@ async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService, DatabaseConnection)
 }
 async fn count(db: &DatabaseConnection, table: &str) -> i64 {
     db.query_one_raw(Statement::from_string(
-        DbBackend::Sqlite,
+        DbBackend::Postgres,
         format!("SELECT COUNT(*) AS count FROM {table}"),
     ))
     .await
@@ -53,9 +51,9 @@ async fn count(db: &DatabaseConnection, table: &str) -> i64 {
 
 #[tokio::test]
 async fn retry_rejection_restoration_and_frozen_payload() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = url(&dir);
-    let (store, service, raw) = setup(&url).await;
+    let database = TestDatabase::new().await;
+    let url = database.url();
+    let (store, service, raw) = setup(url).await;
     assert_eq!(count(&raw, "outbox_events").await, 0);
     assert!(
         service
@@ -94,7 +92,7 @@ async fn retry_rejection_restoration_and_frozen_payload() {
     raw.execute_unprepared("UPDATE journal SET usi = '2g2f' WHERE seq = 1")
         .await
         .unwrap();
-    let mut queue = SqliteOutbox::connect(&url).await.unwrap();
+    let mut queue = PostgresOutbox::connect(url).await.unwrap();
     let item = queue.next_pending().await.unwrap().unwrap();
     assert!(
         matches!(item.event.event, DomainEvent::MoveCommitted { movement, .. } if movement.to_string() == "7g7f")
@@ -109,10 +107,10 @@ async fn retry_rejection_restoration_and_frozen_payload() {
 }
 #[tokio::test]
 async fn failed_enqueue_rolls_back_metadata_journal_and_events() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = url(&dir);
-    let (store, service, raw) = setup(&url).await;
-    raw.execute_unprepared("CREATE TRIGGER fail_outbox BEFORE INSERT ON outbox_events BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END").await.unwrap();
+    let database = TestDatabase::new().await;
+    let url = database.url();
+    let (store, service, raw) = setup(url).await;
+    raw.execute_unprepared("CREATE FUNCTION fail_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected outbox failure'; END $$; CREATE TRIGGER fail_outbox BEFORE INSERT ON outbox_events FOR EACH ROW EXECUTE FUNCTION fail_outbox()").await.unwrap();
     assert_eq!(
         service.make_move(&id(), command()).await,
         Err(Error::Unavailable)
@@ -120,7 +118,7 @@ async fn failed_enqueue_rolls_back_metadata_journal_and_events() {
     assert_eq!(store.version(&id()).await.unwrap(), 0);
     assert_eq!(count(&raw, "journal").await, 0);
     assert_eq!(count(&raw, "outbox_events").await, 0);
-    raw.execute_unprepared("DROP TRIGGER fail_outbox")
+    raw.execute_unprepared("DROP TRIGGER fail_outbox ON outbox_events")
         .await
         .unwrap();
     assert_eq!(service.make_move(&id(), command()).await.unwrap().seq, 1);
@@ -128,14 +126,14 @@ async fn failed_enqueue_rolls_back_metadata_journal_and_events() {
 }
 #[tokio::test]
 async fn unsupported_frozen_encoding_fails_closed() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = url(&dir);
-    let (_, service, raw) = setup(&url).await;
+    let database = TestDatabase::new().await;
+    let url = database.url();
+    let (_, service, raw) = setup(url).await;
     service.make_move(&id(), command()).await.unwrap();
     raw.execute_unprepared("UPDATE outbox_events SET encoding_version = 99")
         .await
         .unwrap();
-    let mut queue = SqliteOutbox::connect(&url).await.unwrap();
+    let mut queue = PostgresOutbox::connect(url).await.unwrap();
     assert!(matches!(queue.next_pending().await, Err(Error::Corrupt)));
 }
 struct Uncertain(Arc<SeaOrmStore>);
@@ -157,9 +155,9 @@ impl GameRepository for Uncertain {
 }
 #[tokio::test]
 async fn uncertain_commit_and_retry_enqueue_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = url(&dir);
-    let (store, _, raw) = setup(&url).await;
+    let database = TestDatabase::new().await;
+    let url = database.url();
+    let (store, _, raw) = setup(url).await;
     let service = GameService::new(Arc::new(Uncertain(store)));
     let accepted = service.make_move(&id(), command()).await.unwrap();
     assert_eq!(service.make_move(&id(), command()).await.unwrap(), accepted);
@@ -171,49 +169,136 @@ fn publisher_lock_probe() {
         return;
     };
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let queue = runtime.block_on(SqliteOutbox::connect(&url));
+    let queue = runtime.block_on(PostgresOutbox::connect(&url));
     let expected = std::env::var("OUTBOX_LOCK_PROBE_HELD").unwrap() == "1";
     assert_eq!(queue.is_err(), expected);
     if expected {
         assert!(matches!(
             queue,
-            Err(game_persistence::OutboxOpenError::Lock(_))
+            Err(game_persistence::OutboxOpenError::PublisherAlreadyRunning)
         ));
     }
 }
 #[tokio::test]
-async fn database_inode_lock_excludes_a_second_process_and_releases_on_exit() {
-    let dir = tempfile::tempdir().unwrap();
-    let url = url(&dir);
-    let queue = SqliteOutbox::connect(&url).await.unwrap();
-    let alias = dir.path().join("alias.db");
-    std::os::unix::fs::symlink(dir.path().join("game.db"), &alias).unwrap();
-    let alias = format!("sqlite://{}?mode=rwc", alias.display());
-    for probe_url in [&url, &alias] {
-        assert!(
-            std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "publisher_lock_probe", "--nocapture"])
-                .env("OUTBOX_LOCK_PROBE_URL", probe_url)
-                .env("OUTBOX_LOCK_PROBE_HELD", "1")
-                .status()
-                .unwrap()
-                .success()
-        );
-    }
+async fn publisher_session_lock_excludes_a_second_process_and_releases_on_drop() {
+    let database = TestDatabase::new().await;
+    let url = database.url();
+    let queue = PostgresOutbox::connect(url).await.unwrap();
+    assert!(matches!(
+        PostgresOutbox::connect(url).await,
+        Err(game_persistence::OutboxOpenError::PublisherAlreadyRunning)
+    ));
+    assert!(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "publisher_lock_probe", "--nocapture"])
+            .env("OUTBOX_LOCK_PROBE_URL", url)
+            .env("OUTBOX_LOCK_PROBE_HELD", "1")
+            .status()
+            .unwrap()
+            .success()
+    );
     drop(queue);
     assert!(
         std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "publisher_lock_probe", "--nocapture"])
-            .env("OUTBOX_LOCK_PROBE_URL", &url)
+            .env("OUTBOX_LOCK_PROBE_URL", url)
             .env("OUTBOX_LOCK_PROBE_HELD", "0")
             .status()
             .unwrap()
             .success()
     );
+}
+
+#[tokio::test]
+async fn publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue() {
+    let database = TestDatabase::new().await;
+    let (_, service, raw) = setup(database.url()).await;
+    let mut queue = PostgresOutbox::connect(database.url()).await.unwrap();
+    service.make_move(&id(), command()).await.unwrap();
+    let pending = queue.next_pending().await.unwrap().unwrap();
+    let open_transactions: i64 = raw.query_one_raw(Statement::from_string(
+        DbBackend::Postgres,
+        "SELECT count(*) AS count FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'shogi-outbox-publisher' AND xact_start IS NOT NULL",
+    )).await.unwrap().unwrap().try_get("", "count").unwrap();
+    assert_eq!(open_transactions, 0);
+    service
+        .resign(
+            &id(),
+            Resign {
+                request_id: RequestId::new("end").unwrap(),
+                expected_seq: 1,
+                user_id: user("white"),
+            },
+        )
+        .await
+        .unwrap();
+    queue.mark_published(&pending).await.unwrap();
+    assert_eq!(queue.next_pending().await.unwrap().unwrap().event.seq, 2);
+}
+
+#[tokio::test]
+async fn lost_publisher_session_fails_closed_and_pending_work_can_be_reopened() {
+    let database = TestDatabase::new().await;
+    let (_, service, raw) = setup(database.url()).await;
+    service.make_move(&id(), command()).await.unwrap();
+    let mut queue = PostgresOutbox::connect(database.url()).await.unwrap();
+    let pending = queue.next_pending().await.unwrap().unwrap();
+    raw.query_one_raw(Statement::from_string(
+        DbBackend::Postgres,
+        "SELECT pg_terminate_backend(pid) AS terminated FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'shogi-outbox-publisher'",
+    )).await.unwrap().unwrap();
     assert!(matches!(
-        SqliteOutbox::connect("sqlite::memory:").await,
-        Err(game_persistence::OutboxOpenError::FileRequired)
+        queue.next_pending().await,
+        Err(Error::Unavailable)
     ));
+    assert!(matches!(
+        queue.mark_published(&pending).await,
+        Err(Error::Unavailable)
+    ));
+    let mut replacement = PostgresOutbox::connect(database.url()).await.unwrap();
+    let restored = replacement.next_pending().await.unwrap().unwrap();
+    assert_eq!(restored.event, pending.event);
+    replacement.mark_published(&restored).await.unwrap();
+    assert!(replacement.next_pending().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn frozen_events_preserve_identifiers_with_nul_and_backslashes() {
+    let database = TestDatabase::new().await;
+    let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
+    let service = GameService::new(store);
+    let game = GameId::new("game\0\\name").unwrap();
+    let black = user("black\0\\name");
+    let request = RequestId::new("request\0\\name").unwrap();
+    service
+        .create(
+            game.clone(),
+            Participants {
+                black: black.clone(),
+                white: user("white"),
+            },
+        )
+        .await
+        .unwrap();
+    service
+        .make_move(
+            &game,
+            MakeMove {
+                request_id: request.clone(),
+                expected_seq: 0,
+                user_id: black.clone(),
+                movement: "7g7f".parse().unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut queue = PostgresOutbox::connect(database.url()).await.unwrap();
+    let pending = queue.next_pending().await.unwrap().unwrap();
+    assert_eq!(pending.event.game_id, game);
+    assert_eq!(pending.event.user_id, black);
+    assert_eq!(pending.event.request_id, request);
+    queue.mark_published(&pending).await.unwrap();
+    assert!(queue.next_pending().await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -223,12 +308,12 @@ async fn malformed_ledgers_and_orphaned_outbox_tables_fail_closed() {
         "CREATE TABLE schema_version (id INTEGER, version TEXT); INSERT INTO schema_version VALUES (0, 'invalid')",
         "CREATE TABLE outbox_events (id INTEGER)",
     ] {
-        let dir = tempfile::tempdir().unwrap();
-        let url = url(&dir);
-        let raw = Database::connect(&url).await.unwrap();
+        let database = TestDatabase::new().await;
+        let url = database.url();
+        let raw = Database::connect(url).await.unwrap();
         raw.execute_unprepared(ddl).await.unwrap();
         assert!(
-            matches!(SeaOrmStore::connect(&url).await, Err(Error::Corrupt)),
+            matches!(SeaOrmStore::connect(url).await, Err(Error::Corrupt)),
             "{ddl}"
         );
     }

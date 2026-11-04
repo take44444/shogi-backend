@@ -1,9 +1,14 @@
 # Shogi backend
 
-Run a durable shogi game over gRPC with SQLite and a generated Rust client.
+Run a durable shogi game over gRPC with PostgreSQL and a generated Rust client.
 Committed moves and game results are stored in a transactional outbox. An
 independent publisher sends them to Core NATS.
-Rust and Cargo are required for the local commands. Cargo supplies vendored protoc.
+Rust, Cargo, and Docker Compose are required for these local commands. Cargo supplies vendored protoc.
+Start PostgreSQL before the local server. The bootstrap creates separate `shogi` and `users` databases and a read-only `shogi_reader` role.
+
+```sh
+docker compose up -d --wait postgres
+```
 
 Start the server from the repository root.
 
@@ -23,13 +28,12 @@ snapshots, and exact retries. The final line reports `black wins at sequence 6`.
 Each invocation needs a new game ID. Omitting the ID generates one.
 
 The server defaults to `127.0.0.1:50051` and
-`DATABASE_URL=sqlite://data/shogi.db?mode=rwc`. Startup creates the database's
-parent directory and initializes or validates the schema before listening. Participant
+`DATABASE_URL=postgres://shogi:shogi@localhost:5432/shogi`. Startup initializes or validates the schema in the existing database before listening. Participant
 bindings, positions, results, and accepted request receipts survive restart.
 A positional address overrides `GAME_SERVER_ADDR`.
 
 ```sh
-DATABASE_URL='sqlite://data/demo.db?mode=rwc' cargo run -p game-server -- 127.0.0.1:50052
+DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' cargo run -p game-server -- 127.0.0.1:50052
 cargo run -p game-grpc --example play -- http://127.0.0.1:50052 my-game
 ```
 
@@ -46,15 +50,14 @@ curl 'http://127.0.0.1:8081/game-records/my-game'
 Replace the period with the game's UTC microsecond interval. Lists contain only
 metadata. Detail includes ordered moves and resignation. New games are public
 once finished. No user service is required.
-The reader opens an existing game database with read-only SQLite permissions.
+The reader connects to the existing game database with the `shogi_reader` role. PostgreSQL grants this role SELECT access and no table write privileges.
 See [player-server](apps/player-server/README.md) for filters, limits, and errors.
-`docker compose --profile records up --build -d` also starts the reader with a
-read-only database volume.
+`docker compose --profile records up --build -d` also starts the reader with its own database credentials.
 
 ## Prove persistence across container recreation
 
 Build and start the services. Compose runs `game-server`, `outbox-publisher`, and
-NATS. The server and publisher share SQLite in the `shogi-data` named volume.
+NATS, and PostgreSQL. The server and publisher connect to the `shogi` database. PostgreSQL stores both service databases in the `pg-data` named volume.
 Compose binds the gRPC port to the host loopback address. Set `GAME_SERVER_PORT` to
 change the host port. These commands assume the default port.
 
@@ -81,7 +84,7 @@ Stop and restart the local server between phases with the same `DATABASE_URL`.
 
 The game actor generates and freezes events in a `StagedGameChange` before
 calling the repository. The repository commits game metadata, the supplied receipt,
-and those events in one SQLite transaction. A move produces `MoveCommitted`; resignation
+and those events in one PostgreSQL transaction. A move produces `MoveCommitted`; resignation
 produces `GameFinished`. A mating move produces both at the same sequence.
 Exact command retries return their original acceptance without adding events.
 The game server accepts commands while the publisher or broker is unavailable.
@@ -99,15 +102,12 @@ subscribers, and the publisher's echo does not acknowledge other subscribers' de
 The echo confirms a matching event, rather than acknowledging a particular
 client's publish operation.
 
-The SQLite publisher supports one process per database on Linux local storage.
-It locks the actual database file, so a second publisher fails startup. Dispatch
-does not hold a database transaction across network calls. Published rows remain
-stored. The first pending failure blocks later events.
+The PostgreSQL publisher supports one active process per game database. A dedicated connection holds a session advisory lock, so a second publisher fails startup. All queue reads and acknowledgements use that connection. Losing the connection stops publication. Dispatch holds no database transaction across network calls. Published rows remain stored, and the first pending failure blocks later events.
 
 For a local publisher, start NATS and use the same database URL as the server.
 
 ```sh
-DATABASE_URL='sqlite://data/shogi.db?mode=rwc' NATS_URL='nats://127.0.0.1:4222' cargo run -p outbox-publisher
+DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' NATS_URL='nats://127.0.0.1:4222' cargo run -p outbox-publisher
 ```
 
 Events use the subject `shogi.games.<hex-game-id>.events`, where `<hex-game-id>`
@@ -133,11 +133,11 @@ Run the Compose proof from the repository root.
 ./scripts/prove-outbox.sh
 ```
 
-It creates an isolated Compose project with a disposable SQLite volume. It
+It creates an isolated Compose project with a disposable PostgreSQL database volume. It
 checks actual NATS payloads, exact retries, backlog after publisher downtime,
 server recreation, commands during a NATS outage, and recovery without
-republishing marked rows. It uses host ports 55051 and 54222 unless overridden
-by `GAME_SERVER_PORT` and `NATS_PORT`. Cleanup removes only that proof project's
+republishing marked rows. It uses host ports 55051, 54222, and 55435 unless overridden
+by `GAME_SERVER_PORT`, `NATS_PORT`, and `POSTGRES_PORT`. Cleanup removes only that proof project's
 containers and volume.
 
 ## Read the API documentation
@@ -190,12 +190,21 @@ cargo test --workspace --doc
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+./scripts/test-postgres.sh
 ```
+
+`scripts/test-postgres.sh` starts an isolated PostgreSQL Compose project, waits for readiness, exports `TEST_DATABASE_URL`, and runs the workspace tests. Cleanup removes that project's containers and database volume. Set `POSTGRES_PORT` to override its default host port 55433. To use an existing test server, set `TEST_DATABASE_URL` to an administrative database URL with `CREATEDB` and `CREATEROLE` permissions. Each database test creates a unique database and drops it after the test. Database tests fail if PostgreSQL is unavailable.
+
+```sh
+TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres' cargo test --locked --workspace
+./scripts/test-postgres.sh cargo test --locked -p game-persistence
+```
+
+Compose credentials are local development defaults. Production deployments supply their own PostgreSQL credentials, TLS configuration, backups, and restricted database roles. Apply the reader grants from [the bootstrap SQL](scripts/init-postgres.sql) for tables owned by the game writer. The application never creates its database or PostgreSQL roles.
 
 The [application contract](crates/game-application/README.md) covers participant
 binding, sequencing, replay, cancellation, and recovery. The
-[storage reference](crates/game-persistence/README.md) covers SQLite transactions and
+[storage reference](crates/game-persistence/README.md) covers PostgreSQL transactions and
 schema startup. The [RPC reference](crates/game-grpc/README.md) covers wire fields and
 status codes. The [domain crate](crates/shogi-domain/README.md) owns shogi rules.
 
@@ -203,7 +212,7 @@ User registration, Google login, profile updates, and session management belong
 to the independent HTTP user service. See the [user-server README](apps/user-server/README.md)
 for configuration, startup, and verification, and the [HTTP API reference](crates/user-http/README.md)
 for endpoints.
-It uses a separate SQLite database and shares only the `user-id` value type
+It uses a separate PostgreSQL database and shares only the `user-id` value type
 with game code. User management has no gRPC endpoints.
 
 Game gRPC still accepts caller-supplied identity claims and belongs on a trusted
@@ -213,4 +222,4 @@ Matchmaking, shards, leases, game clocks, Game Router, and Realtime Gateway rema
 outside this implementation. The [architecture document](docs/design/architecture.md)
 distinguishes this implementation from the proposed distributed system.
 The [domain event and outbox design](docs/design/domain-events.md) explains event
-ownership, publication guarantees, and SQLite deployment constraints.
+ownership, publication guarantees, and publisher locking.

@@ -2,7 +2,7 @@ use game_application::{
     GameId as WriteId, GameRepository, GameService, MakeMove, Participants, RequestId, Resign,
     UserId,
 };
-use game_persistence::{SeaOrmStore, SqliteGameRecords};
+use game_persistence::{PostgresGameRecords, SeaOrmStore};
 use game_record_application::{
     Error, Filters, FinishReason, GameId, MAX_HISTORY, PublicAction, RecordRepository, Rule, Search,
 };
@@ -11,22 +11,21 @@ use shogi_domain::Player;
 use std::sync::Arc;
 
 struct Fixture {
-    _directory: tempfile::TempDir,
-    path: std::path::PathBuf,
+    _database: pg_test_support::TestDatabase,
+    reader_url: String,
     games: GameService,
     raw: DatabaseConnection,
 }
 impl Fixture {
     async fn new() -> Self {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("game.db");
-        let url = format!("sqlite://{}?mode=rwc", path.display());
+        let database = pg_test_support::TestDatabase::new().await;
+        let url = database.url().to_string();
         let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
         let games = GameService::new(store);
         let raw = Database::connect(&url).await.unwrap();
         Self {
-            _directory: directory,
-            path,
+            reader_url: database.reader_url().await,
+            _database: database,
             games,
             raw,
         }
@@ -78,15 +77,17 @@ impl Fixture {
             .unwrap();
         self.raw
             .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "UPDATE games SET finished_at = ? WHERE id = ?",
-                [time.into(), id.as_str().into()],
+                DbBackend::Postgres,
+                "UPDATE games SET finished_at = $1 WHERE id = $2",
+                [time.into(), storage_id(id.as_str()).into()],
             ))
             .await
             .unwrap();
     }
-    async fn reader(&self) -> SqliteGameRecords {
-        SqliteGameRecords::open(&self.path).await.unwrap()
+    async fn reader(&self) -> PostgresGameRecords {
+        PostgresGameRecords::connect(&self.reader_url)
+            .await
+            .unwrap()
     }
 }
 fn filters() -> Filters {
@@ -314,7 +315,7 @@ async fn writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_ti
         )
         .await
         .unwrap();
-    f.raw.execute_unprepared("CREATE TRIGGER fail_record BEFORE INSERT ON journal BEGIN SELECT RAISE(ABORT,'failure'); END").await.unwrap();
+    f.raw.execute_unprepared("CREATE FUNCTION fail_record() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'failure'; END $$; CREATE TRIGGER fail_record BEFORE INSERT ON journal FOR EACH ROW EXECUTE FUNCTION fail_record()").await.unwrap();
     assert!(
         f.games
             .resign(
@@ -331,7 +332,7 @@ async fn writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_ti
     let row = f
         .raw
         .query_one_raw(Statement::from_string(
-            DbBackend::Sqlite,
+            DbBackend::Postgres,
             "SELECT version,final_move_ply,finished_at FROM games WHERE id='failed'",
         ))
         .await
@@ -381,21 +382,34 @@ async fn corrupt_and_oversized_details_fail_without_partial_history() {
 
 #[tokio::test]
 async fn reader_does_not_create_or_accept_wrong_schema() {
-    let directory = tempfile::tempdir().unwrap();
-    let missing = directory.path().join("absent.db");
-    assert!(SqliteGameRecords::open(&missing).await.is_err());
-    assert!(!missing.exists());
+    let empty = pg_test_support::TestDatabase::new().await;
+    assert!(matches!(
+        PostgresGameRecords::connect(empty.url()).await,
+        Err(Error::Corrupt)
+    ));
+    let raw = Database::connect(empty.url()).await.unwrap();
+    let tables = raw
+        .query_all_raw(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public'",
+        ))
+        .await
+        .unwrap();
+    assert!(tables.is_empty());
     for sql in [
         "UPDATE schema_version SET version=3",
         "UPDATE schema_version SET version=99",
         "DELETE FROM schema_version",
-        "DROP TABLE journal",
+        "DROP TABLE journal CASCADE",
         "ALTER TABLE games RENAME COLUMN finished_at TO missing",
     ] {
         let f = Fixture::new().await;
         f.raw.execute_unprepared(sql).await.unwrap();
         assert!(
-            matches!(SqliteGameRecords::open(&f.path).await, Err(Error::Corrupt)),
+            matches!(
+                PostgresGameRecords::connect(&f.reader_url).await,
+                Err(Error::Corrupt)
+            ),
             "{sql}"
         );
     }
@@ -404,12 +418,12 @@ async fn reader_does_not_create_or_accept_wrong_schema() {
 async fn current_rows(db: &DatabaseConnection) -> Vec<Vec<String>> {
     let mut state = Vec::new();
     for sql in [
-        "SELECT json_array(id,black,white,version,winner,reason,rule,visibility,finished_at,final_move_ply) AS value FROM games WHERE id LIKE 'current-%' ORDER BY id",
-        "SELECT json_array(game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason) AS value FROM journal WHERE game_id LIKE 'current-%' ORDER BY game_id,seq",
-        "SELECT json_array(id,game_id,seq,event_kind,encoding_version,request_id,user_id,usi,in_check,winner,reason,published) AS value FROM outbox_events WHERE game_id LIKE 'current-%' ORDER BY id",
+        "SELECT json_build_array(id,black,white,version,winner,reason,rule,visibility,finished_at,final_move_ply)::text AS value FROM games WHERE id LIKE 'current-%' ORDER BY id",
+        "SELECT json_build_array(game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason)::text AS value FROM journal WHERE game_id LIKE 'current-%' ORDER BY game_id,seq",
+        "SELECT json_build_array(id,game_id,seq,event_kind,encoding_version,request_id,user_id,usi,in_check,winner,reason,published)::text AS value FROM outbox_events WHERE game_id LIKE 'current-%' ORDER BY id",
     ] {
         state.push(
-            db.query_all_raw(Statement::from_string(DbBackend::Sqlite, sql))
+            db.query_all_raw(Statement::from_string(DbBackend::Postgres, sql))
                 .await
                 .unwrap()
                 .into_iter()
@@ -422,9 +436,8 @@ async fn current_rows(db: &DatabaseConnection) -> Vec<Vec<String>> {
 
 #[tokio::test]
 async fn reopening_preserves_current_records_history_and_outbox() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("records.db");
-    let url = format!("sqlite://{}?mode=rwc", path.display());
+    let database = pg_test_support::TestDatabase::new().await;
+    let url = database.url().to_string();
     SeaOrmStore::connect(&url)
         .await
         .unwrap()
@@ -437,25 +450,17 @@ async fn reopening_preserves_current_records_history_and_outbox() {
         ('current-ongoing','black','white',1,NULL,NULL,'standard','public',NULL,1),
         ('current-private','black','white',2,1,2,'standard','private',30,1);
         INSERT INTO journal (game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason)
-            SELECT id,1,'move','black',0,1,'7g7f',0,NULL,NULL FROM games;
+            SELECT id,1,'move','black',0,1,'7g7f',false,NULL,NULL FROM games;
         INSERT INTO journal (game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason)
-            SELECT id,2,'end','white',1,2,NULL,0,1,2 FROM games WHERE version=2;
+            SELECT id,2,'end','white',1,2,NULL,false,1,2 FROM games WHERE version=2;
         INSERT INTO outbox_events (id,game_id,seq,event_kind,encoding_version,request_id,user_id,usi,in_check,winner,reason,published)
-            SELECT row_number() OVER (ORDER BY game_id,seq)+100,game_id,seq,CASE action WHEN 1 THEN 0 ELSE 1 END,1,request_id,user_id,usi,CASE action WHEN 1 THEN in_check ELSE NULL END,winner,reason,CASE action WHEN 1 THEN 1 ELSE 0 END FROM journal;").await.unwrap();
+            SELECT row_number() OVER (ORDER BY game_id,seq)+100,game_id,seq,CASE action WHEN 1 THEN 0 ELSE 1 END,1,request_id,user_id,usi,CASE action WHEN 1 THEN in_check ELSE NULL END,winner,reason,CASE action WHEN 1 THEN true ELSE false END FROM journal;").await.unwrap();
     let before = current_rows(&db).await;
+    let reader_url = database.reader_url().await;
     for _ in 0..2 {
         let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
         assert_eq!(current_rows(&db).await, before);
-        assert!(
-            db.query_all_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "PRAGMA foreign_key_check"
-            ))
-            .await
-            .unwrap()
-            .is_empty()
-        );
-        let reader = SqliteGameRecords::open(&path).await.unwrap();
+        let reader = PostgresGameRecords::connect(&reader_url).await.unwrap();
         assert_eq!(
             ids(&reader.search(&search(filters(), 30, None)).await.unwrap()),
             ["current-finished"]
@@ -492,7 +497,7 @@ async fn reopening_preserves_current_records_history_and_outbox() {
         )
         .await
         .unwrap();
-    let reader = SqliteGameRecords::open(&path).await.unwrap();
+    let reader = PostgresGameRecords::connect(&reader_url).await.unwrap();
     assert_eq!(
         reader
             .detail(&GameId::new("current-ongoing").unwrap())
@@ -526,4 +531,49 @@ async fn current_schema_rejects_missing_metadata_and_inconsistent_finish_time() 
             "{mutation}"
         );
     }
+}
+
+#[tokio::test]
+async fn identifier_encoding_preserves_binary_ties_and_cursor_round_trips() {
+    let f = Fixture::new().await;
+    let mut names = vec![
+        "game\0",
+        "game\u{1}",
+        "game\u{1}\u{1}",
+        "gameA",
+        "game\\0",
+        "game棋",
+    ];
+    for name in &names {
+        f.completed(name, "black\0\u{1}", "white", 0, "white", 10)
+            .await;
+    }
+    names.sort_by(|a, b| b.as_bytes().cmp(a.as_bytes()));
+    let reader = f.reader().await;
+    let mut cursor = None;
+    let mut actual = Vec::new();
+    loop {
+        let mut query = filters();
+        query.participant = Some(UserId::new("black\0\u{1}").unwrap());
+        let page = reader
+            .search(&search(query, 1, cursor.as_deref()))
+            .await
+            .unwrap();
+        for item in page.items {
+            let detail = reader.detail(&item.id).await.unwrap();
+            assert_eq!(detail.metadata.id, item.id);
+            actual.push(item.id.as_str().to_string());
+        }
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(actual, names);
+}
+
+fn storage_id(value: &str) -> String {
+    value
+        .replace('\u{1}', "\u{1}\u{2}")
+        .replace('\0', "\u{1}\u{1}")
 }

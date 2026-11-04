@@ -1,85 +1,72 @@
 use crate::{
-    Error, SeaOrmStore, corrupt, result, result_values, schema::a, signed, storage, unsigned,
+    Error, SeaOrmStore, corrupt, decode_id, encode_id, result, result_values, schema::a, signed,
+    storage, unsigned,
 };
 use async_trait::async_trait;
 use game_application::{
     CommittedEvent, DomainEvent, GameId, OutboxItem, OutboxRepository, RequestId, UserId,
 };
-use sea_orm::sea_query::{Expr, ExprTrait, Order, Query, Value};
+use sea_orm::sea_query::{Expr, ExprTrait, Order, PostgresQueryBuilder, Query, Value};
+use sea_orm::sqlx::{self, AssertSqlSafe, Connection, PgConnection, postgres::PgConnectOptions};
 use sea_orm::{ConnectionTrait, DatabaseTransaction};
 
-/// Failure opening a publisher's exclusive SQLite queue.
+/// Failure opening a publisher's exclusive PostgreSQL queue.
 #[derive(Debug)]
 pub enum OutboxOpenError {
-    /// Database connection, schema initialization or validation, or filename lookup failed.
+    /// Database connection, schema initialization, or validation failed.
     Database(Error),
-    /// The SQLite database has no local backing file.
-    FileRequired,
-    /// Opening or exclusively locking the database failed, including a competing publisher.
-    Lock(std::io::Error),
+    /// Another publisher owns this database's advisory lock.
+    PublisherAlreadyRunning,
 }
 impl std::fmt::Display for OutboxOpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Database(e) => write!(f, "outbox database: {e}"),
-            Self::FileRequired => {
-                f.write_str("outbox requires a file-backed SQLite database on Linux local storage")
-            }
-            Self::Lock(e) => write!(f, "outbox exclusive database lock: {e}"),
+            Self::PublisherAlreadyRunning => f.write_str("another outbox publisher is running"),
         }
     }
 }
 impl std::error::Error for OutboxOpenError {}
 
 /// Storage-owned queue cursor. It is not a public event identity.
-pub struct SqliteCursor(i64);
+pub struct PostgresCursor(i64);
 
-/// Exclusive pending-event access, supported on Linux local filesystems.
-/// The non-cloneable guard owns an OS lock on the real database inode. SQLite's
-/// byte-range transaction locks remain independent of this publisher lock.
-/// Configure all processes with the same database path. Hardlink aliases are
-/// unsupported because SQLite would use different WAL paths. Do not unlink or
-/// replace a live database file.
-pub struct SqliteOutbox {
-    store: SeaOrmStore,
-    _lock: std::fs::File,
+/// Exclusive pending-event access through a dedicated PostgreSQL session.
+/// The connection owns a session advisory lock and never reconnects. Queue reads
+/// and acknowledgments use that same session, so losing it fails closed. No
+/// transaction remains open while a caller publishes an event over the network.
+pub struct PostgresOutbox {
+    connection: PgConnection,
 }
-impl SqliteOutbox {
-    /// Opens and initializes or validates the database, then refuses a competing publisher.
+impl PostgresOutbox {
+    /// Initializes or validates the database, then acquires its publisher lock.
     ///
-    /// Returns an error for an in-memory database, a competing lock, or storage failure.
+    /// # Errors
+    ///
+    /// Returns an error for a competing publisher or a storage failure.
     pub async fn connect(url: &str) -> Result<Self, OutboxOpenError> {
-        if !cfg!(target_os = "linux") {
-            return Err(OutboxOpenError::FileRequired);
-        }
         let store = SeaOrmStore::connect(url)
             .await
             .map_err(OutboxOpenError::Database)?;
-        let rows = store
-            .db
-            .query_all_raw(sea_orm::Statement::from_string(
-                sea_orm::DbBackend::Sqlite,
-                "PRAGMA database_list",
-            ))
+        store.close().await.map_err(OutboxOpenError::Database)?;
+        let options: PgConnectOptions = url
+            .parse()
+            .map_err(|_| OutboxOpenError::Database(Error::Unavailable))?;
+        let mut connection = PgConnection::connect_with(
+            &options
+                .application_name("shogi-outbox-publisher")
+                .options([("search_path", "public")]),
+        )
+        .await
+        .map_err(|_| OutboxOpenError::Database(Error::Unavailable))?;
+        let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(6001133723894506836)")
+            .fetch_one(&mut connection)
             .await
-            .map_err(|e| OutboxOpenError::Database(storage(e)))?;
-        let filename = rows
-            .iter()
-            .find_map(|row| {
-                (row.try_get::<String>("", "name").ok()?.as_str() == "main")
-                    .then(|| row.try_get::<String>("", "file").ok())
-                    .flatten()
-            })
-            .filter(|s| !s.is_empty())
-            .ok_or(OutboxOpenError::FileRequired)?;
-        let lock = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(filename)
-            .map_err(OutboxOpenError::Lock)?;
-        lock.try_lock()
-            .map_err(|e| OutboxOpenError::Lock(e.into()))?;
-        Ok(Self { store, _lock: lock })
+            .map_err(|_| OutboxOpenError::Database(Error::Unavailable))?;
+        if !locked {
+            return Err(OutboxOpenError::PublisherAlreadyRunning);
+        }
+        Ok(Self { connection })
     }
 }
 
@@ -109,12 +96,12 @@ pub(crate) async fn enqueue(tx: &DatabaseTransaction, event: &CommittedEvent) ->
                 a("reason"),
             ])
             .values_panic([
-                event.game_id.as_str().into(),
+                encode_id(event.game_id.as_str()).into(),
                 signed(event.seq)?.into(),
                 kind.into(),
                 1.into(),
-                event.request_id.as_str().into(),
-                event.user_id.as_str().into(),
+                encode_id(event.request_id.as_str()).into(),
+                encode_id(event.user_id.as_str()).into(),
                 usi.into(),
                 in_check.into(),
                 winner.into(),
@@ -127,37 +114,36 @@ pub(crate) async fn enqueue(tx: &DatabaseTransaction, event: &CommittedEvent) ->
 }
 
 #[async_trait]
-impl OutboxRepository for SqliteOutbox {
-    type Cursor = SqliteCursor;
-    async fn next_pending(&mut self) -> Result<Option<OutboxItem<SqliteCursor>>, Error> {
-        let Some(row) = self
-            .store
-            .db
-            .query_one(
-                Query::select()
-                    .columns([
-                        a("id"),
-                        a("game_id"),
-                        a("seq"),
-                        a("event_kind"),
-                        a("encoding_version"),
-                        a("request_id"),
-                        a("user_id"),
-                        a("usi"),
-                        a("in_check"),
-                        a("winner"),
-                        a("reason"),
-                    ])
-                    .from(a("outbox_events"))
-                    .and_where(Expr::col(a("published")).eq(false))
-                    .order_by(a("id"), Order::Asc)
-                    .limit(1),
-            )
+impl OutboxRepository for PostgresOutbox {
+    type Cursor = PostgresCursor;
+    async fn next_pending(&mut self) -> Result<Option<OutboxItem<PostgresCursor>>, Error> {
+        let query = Query::select()
+            .columns([
+                a("id"),
+                a("game_id"),
+                a("seq"),
+                a("event_kind"),
+                a("encoding_version"),
+                a("request_id"),
+                a("user_id"),
+                a("usi"),
+                a("in_check"),
+                a("winner"),
+                a("reason"),
+            ])
+            .from(a("outbox_events"))
+            .and_where(Expr::col(a("published")).eq(false))
+            .order_by(a("id"), Order::Asc)
+            .limit(1)
+            .to_string(PostgresQueryBuilder);
+        let Some(row) = sqlx::query(AssertSqlSafe(query))
+            .fetch_optional(&mut self.connection)
             .await
-            .map_err(storage)?
+            .map_err(|_| Error::Unavailable)?
         else {
             return Ok(None);
         };
+        let row: sea_orm::QueryResult = row.into();
         if row
             .try_get::<i32>("", "encoding_version")
             .map_err(corrupt)?
@@ -188,32 +174,35 @@ impl OutboxRepository for SqliteOutbox {
             _ => return Err(Error::Corrupt),
         };
         Ok(Some(OutboxItem {
-            cursor: SqliteCursor(row.try_get("", "id").map_err(corrupt)?),
+            cursor: PostgresCursor(row.try_get("", "id").map_err(corrupt)?),
             event: CommittedEvent {
-                game_id: GameId::new(row.try_get::<String>("", "game_id").map_err(corrupt)?)
-                    .map_err(corrupt)?,
-                request_id: RequestId::new(
-                    row.try_get::<String>("", "request_id").map_err(corrupt)?,
-                )
+                game_id: GameId::new(decode_id(
+                    &row.try_get::<String>("", "game_id").map_err(corrupt)?,
+                )?)
                 .map_err(corrupt)?,
-                user_id: UserId::new(row.try_get::<String>("", "user_id").map_err(corrupt)?)
-                    .map_err(corrupt)?,
+                request_id: RequestId::new(decode_id(
+                    &row.try_get::<String>("", "request_id").map_err(corrupt)?,
+                )?)
+                .map_err(corrupt)?,
+                user_id: UserId::new(decode_id(
+                    &row.try_get::<String>("", "user_id").map_err(corrupt)?,
+                )?)
+                .map_err(corrupt)?,
                 seq: unsigned(row.try_get("", "seq").map_err(corrupt)?)?,
                 event,
             },
         }))
     }
-    async fn mark_published(&mut self, item: &OutboxItem<SqliteCursor>) -> Result<(), Error> {
-        self.store
-            .db
-            .execute(
-                Query::update()
-                    .table(a("outbox_events"))
-                    .values([(a("published"), Value::Bool(Some(true)).into())])
-                    .and_where(Expr::col(a("id")).eq(item.cursor.0)),
-            )
+    async fn mark_published(&mut self, item: &OutboxItem<PostgresCursor>) -> Result<(), Error> {
+        let query = Query::update()
+            .table(a("outbox_events"))
+            .values([(a("published"), Value::Bool(Some(true)).into())])
+            .and_where(Expr::col(a("id")).eq(item.cursor.0))
+            .to_string(PostgresQueryBuilder);
+        sqlx::query(AssertSqlSafe(query))
+            .execute(&mut self.connection)
             .await
-            .map_err(storage)?;
+            .map_err(|_| Error::Unavailable)?;
         Ok(())
     }
 }

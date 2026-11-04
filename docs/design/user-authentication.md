@@ -8,7 +8,7 @@ Google OpenID Connect の Authorization Code Flow に PKCE S256 を組み合わ�
 
 Google による本人確認と、このアプリケーションへのログイン状態は別に管理する。Google の ID トークンやアクセストークンを、以後のアプリケーション API の認証資格情報には使わない。Google の方式は[公式 OpenID Connect ドキュメント](https://developers.google.com/identity/openid-connect/openid-connect)、PKCE の仕様は [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636)を参照する。
 
-この設計が扱うのは、初回ログイン時の登録、再ログイン、プロフィール取得・表示名変更、ログアウトである。ユーザー管理の公開インターフェースは HTTP とする。対局処理とは独立したプロセス・crate・SQLite を持つ。
+この設計が扱うのは、初回ログイン時の登録、再ログイン、プロフィール取得・表示名変更、ログアウトである。ユーザー管理の公開インターフェースは HTTP とする。対局処理とは独立したプロセス・crate・PostgreSQL を持つ。
 
 ### この方式を選んだ理由
 
@@ -41,7 +41,7 @@ Google による本人確認と、このアプリケーションへのログイ�
 | [`user-application`](../../crates/user-application/src/lib.rs) | `Profile`、`DisplayName`、`VerifiedIdentity`、`LoginAttempt`、`NewSession` と `AccountRepository` の契約。HTTP、Google ライブラリ、ORM には依存しない。 |
 | [`user-http`](../../crates/user-http/src/lib.rs) | HTTP 入出力、Cookie、Origin 検証、ログイン処理の組み立て。 |
 | [`GoogleProvider`](../../crates/user-http/src/google.rs) | Google の discovery、認可 URL、PKCE、コード交換、ID トークン検証。`openidconnect` 4.1 を利用する。 |
-| [`user-persistence`](../../crates/user-persistence/src/lib.rs) | 独立した SQLite、スキーマ検証、ログイン試行の一度限りの消費、アカウント解決とセッション保存のトランザクション。 |
+| [`user-persistence`](../../crates/user-persistence/src/lib.rs) | 独立した PostgreSQL、スキーマ検証、ログイン試行の一度限りの消費、アカウント解決とセッション保存のトランザクション。 |
 | [`user-server`](../../apps/user-server/src/main.rs) | 環境変数、DB と GoogleProvider の初期化、HTTP 待ち受け、終了処理。 |
 
 `IdentityProvider` は Google との通信を、`AccountRepository` は永続化を分離する境界である。テストではプロバイダーを差し替えられるが、実サービスは固定した Google issuer を使う。
@@ -54,7 +54,7 @@ Google による本人確認と、このアプリケーションへのログイ�
 sequenceDiagram
     actor Browser as ブラウザー
     participant User as user-server
-    participant DB as ユーザーSQLite
+    participant DB as ユーザーPostgreSQL
     participant Google as Google
     Browser->>User: GET /auth/google/start
     User->>DB: ログイン試行を保存
@@ -113,7 +113,7 @@ sequenceDiagram
 
 検証済みの `(issuer, subject)` にアカウントがなければ、内部 ID と初期表示名を生成する。Google の表示名が取得できない場合や表示名の検証に通らない場合は `Player` を使う。既存アカウントがあれば、同じ内部 ID と保存済みのプロフィールを使う。
 
-SQLite の即時トランザクション内でアカウント解決、必要な新規行の作成、新セッション保存を行う。`external_identities` の `(issuer, subject)` 主キーと書き込みの直列化により、同じ Google アカウントの並行した初回ログインは同一アカウントへ収束する。それぞれのログインは別のセッションを発行できる。
+PostgreSQL のトランザクション内でアカウント解決、必要な新規行の作成、新セッション保存を行う。`external_identities` の `(issuer, subject)` 主キーと書き込みの直列化により、同じ Google アカウントの並行した初回ログインは同一アカウントへ収束する。それぞれのログインは別のセッションを発行できる。
 
 アカウント解決・新セッション保存と、既存 Cookie の旧セッション削除は別の操作である。旧セッション削除や応答の送信が失敗すると、新アカウント・新セッションだけが保存されている場合がある。全体を一つの原子的ログイン処理とは扱わない。再度ログインすれば既存アカウントへ収束し、ブラウザーに届かなかったセッションも固定期限で失効する。
 
@@ -127,7 +127,7 @@ SQLite の即時トランザクション内でアカウント解決、必要な�
 
 `POST /auth/logout` は Origin 検証後、有効な形式のセッション Cookie があれば対応するセッション行を削除する。その後 Cookie を削除し、`204` を返す。Cookie がない場合や形式不正・重複の場合も、DB 行を削除せずに Cookie の削除と `204` を返す。他端末のセッションや Google へのログイン状態は変更しない。DB 操作に失敗した場合は成功として返さない。削除されたセッションの新しい照会は拒否されるが、処理中の要求を取り消す仕組みではない。
 
-表示名変更は、セッション照会と更新を同じ即時トランザクションで行う。表示名は前後の空白を除去した後で 1 文字から 80 文字とし、制御文字を拒否する。
+表示名変更は、セッション照会と更新を同じトランザクションで行う。表示名は前後の空白を除去した後で 1 文字から 80 文字とし、制御文字を拒否する。
 
 ### Cookie と CSRF 対策
 
@@ -154,9 +154,9 @@ SQLite の即時トランザクション内でアカウント解決、必要な�
 | `sessions` | セッショントークンのハッシュ、内部 ID、有効期限。トークンのハッシュが主キー。内部 ID は accounts を参照する。 |
 | `account_schema_version` | ユーザー DB 独自のスキーマ台帳。現行バージョンは 1。 |
 
-DB は SeaORM 経由の SQLite を使う。外部キーを有効化し、ファイル DB は WAL、同期設定は FULL、busy timeout は 5 秒とする。起動時は台帳と保存されたテーブル・インデックスの SQL 定義を期待値と比較し、不整合があれば起動を継続しない。任意にスキーマを変更して運用する前提ではない。
+DB は SeaORM 経由の PostgreSQL を使う。対局用とは独立したデータベースと接続プールを持つ。起動時はトランザクションとadvisory lockで初期化を直列化し、空のDBに現行スキーマを作成する。既存DBは台帳とPostgreSQLカタログのテーブル・インデックス・制約を期待値と比較し、不整合があれば起動を継続しない。任意にスキーマを変更して運用する前提ではない。
 
-期限切れの試行とセッションは新しいログイン試行を保存するときに削除する。定期クリーンアップの常駐処理はない。行が残っていても期限条件で利用を拒否する。DB には一時的に nonce と PKCE verifier が残るため、DB ファイルとバックアップも秘密情報を含む保存先として管理する。
+期限切れの試行とセッションは新しいログイン試行を保存するときに削除する。定期クリーンアップの常駐処理はない。行が残っていても期限条件で利用を拒否する。DB には一時的に nonce と PKCE verifier が残るため、DB とバックアップも秘密情報を含む保存先として管理する。
 
 Google の discovery と JWKS は起動時と各コード交換時に取得する。これにより起動時の鍵だけに固定せず、Google の鍵更新を反映する。一方で、各ログインは外部通信に依存する。起動時に取得できなければ待ち受け開始前に失敗し、ログイン時に取得できなければその試行は成功しない。保存済みセッションの照会は Google への通信を必要としない。
 

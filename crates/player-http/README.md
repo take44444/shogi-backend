@@ -17,7 +17,7 @@ The adapter accepts up to 16 active requests. Serialized responses are limited
 to 1 MiB. SQL acquisition and execution limits belong to the repository.
 
 See [player-server](../../apps/player-server/README.md) for complete query and
-configuration reference. Router tests exercise a real initialized SQLite database,
+configuration reference. Router tests exercise a real initialized PostgreSQL database,
 public JSON fields, invalid inputs, indistinguishable missing records, and errors.
 
 `GET /openapi.json` returns this service's OpenAPI 3.1 document. The public

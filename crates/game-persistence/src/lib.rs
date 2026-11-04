@@ -1,55 +1,21 @@
-//! SQLite persistence for [`GameRepository`] through SeaORM.
+//! PostgreSQL persistence for [`GameRepository`] through SeaORM.
 //!
-//! [`SeaOrmStore::connect`] opens a pool and initializes or validates the schema before
-//! returning. SQLite is the only compiled and tested driver. Other adapters or
-//! drivers require their own validation, even though the application port is neutral.
+//! [`SeaOrmStore::connect`] initializes or validates the versioned schema before
+//! returning. Startup uses a PostgreSQL advisory transaction lock. Each command
+//! compares its expected version and writes metadata, its receipt, and frozen
+//! outbox events in one transaction. Commit errors can be uncertain, so the
+//! application reconciles them through a fresh load.
 //!
-//! Each connection enables foreign keys, full synchronization, and a five-second
-//! busy timeout. File databases use WAL; in-memory databases use memory journaling.
-//! In-memory databases use one pooled connection; file databases use
-//! up to five. Creation and `commit_change` use immediate SQLite transactions. The latter compares
-//! the version and writes metadata, the supplied receipt, and its already generated
-//! events atomically, checking membership
-//! before commit. Failed writes explicitly roll back. Commit errors can be
-//! uncertain; the application reconciles every commit error through a fresh load.
-//!
-//! Metadata and ordered receipts load through one left join, so a read cannot combine
-//! different database snapshots. The application validates replay from a standard
-//! game rather than restoring an untrusted position string. Manual database edits
-//! are outside the mutation API.
-//!
-//! ```
-//! use game_application::{GameId, GameService, MakeMove, Participants, RequestId, UserId};
-//! use game_persistence::SeaOrmStore;
-//! use std::sync::Arc;
-//!
-//! # #[tokio::main]
-//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let store = Arc::new(SeaOrmStore::connect("sqlite::memory:").await?);
-//! let service = GameService::new(store.clone());
-//! let black = UserId::new("black")?;
-//! let white = UserId::new("white")?;
-//! let id = GameId::new("example")?;
-//! assert_eq!(service.create(id.clone(), Participants { black: black.clone(), white }).await?.seq, 0);
-//! let command = MakeMove {
-//!     request_id: RequestId::new("opening")?, expected_seq: 0,
-//!     user_id: black, movement: "7g7f".parse()?,
-//! };
-//! let accepted = service.make_move(&id, command.clone()).await?;
-//! assert_eq!(accepted.seq, 1);
-//! assert_eq!(service.make_move(&id, command).await?, accepted);
-//! assert_eq!(service.snapshot(&id).await?.seq, 1);
-//! store.close().await?;
-//! # Ok(())
-//! # }
-//! ```
+//! Metadata and ordered receipts load through one left join, keeping each read
+//! within one database snapshot. The application validates replay from a standard
+//! game rather than restoring an untrusted position string.
 #![warn(missing_docs)]
 
 mod outbox;
 mod record;
 mod schema;
-pub use outbox::{OutboxOpenError, SqliteCursor, SqliteOutbox};
-pub use record::SqliteGameRecords;
+pub use outbox::{OutboxOpenError, PostgresCursor, PostgresOutbox};
+pub use record::PostgresGameRecords;
 
 use async_trait::async_trait;
 use game_application::{
@@ -60,21 +26,20 @@ use schema::a;
 use sea_orm::sea_query::{Expr, ExprTrait, JoinType, Order, Query, Value};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbErr, QueryResult,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    TransactionTrait,
 };
 use shogi_domain::{FinishReason, GameResult, Player};
-use std::time::Duration;
 
-/// An initialized SQLite connection pool implementing [`GameRepository`].
+/// An initialized PostgreSQL connection pool implementing [`GameRepository`].
 pub struct SeaOrmStore {
     db: DatabaseConnection,
 }
 
 impl SeaOrmStore {
-    /// Opens SQLite and initializes or validates its schema before returning.
+    /// Opens PostgreSQL and initializes or validates its schema before returning.
     /// For a new database, creates the schema and version ledger atomically.
     /// Existing empty or incompatible ledgers and missing application tables fail
-    /// closed. Concurrent startup is serialized by an immediate transaction.
+    /// closed. An advisory transaction lock serializes concurrent startup.
     ///
     /// # Errors
     ///
@@ -83,15 +48,9 @@ impl SeaOrmStore {
     pub async fn connect(url: &str) -> Result<Self, Error> {
         let mut options = ConnectOptions::new(url);
         options
-            .max_connections(if url.contains(":memory:") { 1 } else { 5 })
+            .max_connections(5)
             .sqlx_logging(false)
-            .map_sqlx_sqlite_opts(|options| {
-                options
-                    .foreign_keys(true)
-                    .pragma("journal_mode", "WAL")
-                    .pragma("synchronous", "FULL")
-                    .busy_timeout(Duration::from_secs(5))
-            });
+            .map_sqlx_postgres_opts(|o| o.options([("search_path", "public")]));
         let db = Database::connect(options).await.map_err(storage)?;
         schema::initialize(&db).await.map_err(|error| match error {
             schema::SchemaError::Corrupt => Error::Corrupt,
@@ -118,6 +77,28 @@ fn storage(_: DbErr) -> Error {
 fn corrupt(_: impl std::fmt::Debug) -> Error {
     Error::Corrupt
 }
+pub(crate) fn encode_id(value: &str) -> String {
+    value
+        .replace('\u{1}', "\u{1}\u{2}")
+        .replace('\0', "\u{1}\u{1}")
+}
+
+pub(crate) fn decode_id(value: &str) -> Result<String, Error> {
+    let mut decoded = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(character) = chars.next() {
+        decoded.push(match character {
+            '\u{1}' => match chars.next() {
+                Some('\u{2}') => '\u{1}',
+                Some('\u{1}') => '\0',
+                _ => return Err(Error::Corrupt),
+            },
+            other => other,
+        });
+    }
+    Ok(decoded)
+}
+
 fn signed(seq: u64) -> Result<i64, Error> {
     i64::try_from(seq).map_err(|_| Error::SequenceExhausted)
 }
@@ -172,14 +153,7 @@ impl GameRepository for SeaOrmStore {
         if participants.black == participants.white {
             return Err(Error::InvalidParticipants);
         }
-        let tx = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .map_err(storage)?;
+        let tx = self.db.begin().await.map_err(storage)?;
         let inserted = tx
             .execute(
                 Query::insert()
@@ -194,9 +168,9 @@ impl GameRepository for SeaOrmStore {
                         a("final_move_ply"),
                     ])
                     .values_panic([
-                        id.as_str().into(),
-                        participants.black.as_str().into(),
-                        participants.white.as_str().into(),
+                        encode_id(id.as_str()).into(),
+                        encode_id(participants.black.as_str()).into(),
+                        encode_id(participants.white.as_str()).into(),
                         0_i64.into(),
                         "standard".into(),
                         "public".into(),
@@ -224,7 +198,7 @@ impl GameRepository for SeaOrmStore {
                 Query::select()
                     .column(a("version"))
                     .from(a("games"))
-                    .and_where(Expr::col(a("id")).eq(id.as_str())),
+                    .and_where(Expr::col(a("id")).eq(encode_id(id.as_str()))),
             )
             .await
             .map_err(storage)?
@@ -260,18 +234,24 @@ impl GameRepository for SeaOrmStore {
                 a("journal"),
                 Expr::col((a("games"), a("id"))).eq(Expr::col((a("journal"), a("game_id")))),
             )
-            .and_where(Expr::col((a("games"), a("id"))).eq(id.as_str()))
+            .and_where(Expr::col((a("games"), a("id"))).eq(encode_id(id.as_str())))
             .order_by((a("journal"), a("seq")), Order::Asc);
         let rows = self.db.query_all(&query).await.map_err(storage)?;
         let first = rows.first().ok_or(Error::NotFound)?;
         let mut record = GameRecord {
-            id: GameId::new(first.try_get::<String>("", "g_id").map_err(corrupt)?)
-                .map_err(corrupt)?,
+            id: GameId::new(decode_id(
+                &first.try_get::<String>("", "g_id").map_err(corrupt)?,
+            )?)
+            .map_err(corrupt)?,
             participants: Participants {
-                black: UserId::new(first.try_get::<String>("", "g_black").map_err(corrupt)?)
-                    .map_err(corrupt)?,
-                white: UserId::new(first.try_get::<String>("", "g_white").map_err(corrupt)?)
-                    .map_err(corrupt)?,
+                black: UserId::new(decode_id(
+                    &first.try_get::<String>("", "g_black").map_err(corrupt)?,
+                )?)
+                .map_err(corrupt)?,
+                white: UserId::new(decode_id(
+                    &first.try_get::<String>("", "g_white").map_err(corrupt)?,
+                )?)
+                .map_err(corrupt)?,
             },
             version: unsigned(first.try_get("", "g_version").map_err(corrupt)?)?,
             result: result(first, "g_")?,
@@ -289,12 +269,14 @@ impl GameRepository for SeaOrmStore {
                 _ => return Err(Error::Corrupt),
             };
             record.journal.push(Receipt {
-                request_id: RequestId::new(
-                    row.try_get::<String>("", "request_id").map_err(corrupt)?,
-                )
+                request_id: RequestId::new(decode_id(
+                    &row.try_get::<String>("", "request_id").map_err(corrupt)?,
+                )?)
                 .map_err(corrupt)?,
-                user_id: UserId::new(row.try_get::<String>("", "user_id").map_err(corrupt)?)
-                    .map_err(corrupt)?,
+                user_id: UserId::new(decode_id(
+                    &row.try_get::<String>("", "user_id").map_err(corrupt)?,
+                )?)
+                .map_err(corrupt)?,
                 expected_seq: unsigned(row.try_get("", "expected_seq").map_err(corrupt)?)?,
                 action,
                 acceptance: Acceptance {
@@ -312,27 +294,36 @@ impl GameRepository for SeaOrmStore {
         let receipt = change.receipt();
         let expected = signed(receipt.expected_seq)?;
         let seq = signed(receipt.acceptance.seq)?;
-        let tx = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .map_err(storage)?;
+        let tx = self.db.begin().await.map_err(storage)?;
         let operation = async {
             let (winner, reason) = result_values(receipt.acceptance.result);
-            let finished_at = receipt.acceptance.result.map(|_| {
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                    .ok().and_then(|time| i64::try_from(time.as_micros()).ok())
-                    .ok_or(Error::Unavailable)
-            }).transpose()?;
+            let finished_at = receipt
+                .acceptance
+                .result
+                .map(|_| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .and_then(|time| i64::try_from(time.as_micros()).ok())
+                        .ok_or(Error::Unavailable)
+                })
+                .transpose()?;
             let updated = tx
-                .execute_raw(sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DbBackend::Sqlite,
-                    "UPDATE games SET version = ?, winner = ?, reason = ?, final_move_ply = final_move_ply + ?, finished_at = ? WHERE id = ? AND version = ?",
-                    [seq.into(), winner.clone(), reason.clone(), i64::from(matches!(receipt.action, Action::Move(_))).into(), finished_at.into(), id.as_str().into(), expected.into()],
-                ))
+                .execute(
+                    Query::update()
+                        .table(a("games"))
+                        .value(a("version"), seq)
+                        .value(a("winner"), winner.clone())
+                        .value(a("reason"), reason.clone())
+                        .value(
+                            a("final_move_ply"),
+                            Expr::col(a("final_move_ply"))
+                                .add(i64::from(matches!(receipt.action, Action::Move(_)))),
+                        )
+                        .value(a("finished_at"), finished_at)
+                        .and_where(Expr::col(a("id")).eq(encode_id(id.as_str())))
+                        .and_where(Expr::col(a("version")).eq(expected)),
+                )
                 .await
                 .map_err(storage)?;
             if updated.rows_affected() != 1 {
@@ -341,7 +332,7 @@ impl GameRepository for SeaOrmStore {
                         Query::select()
                             .column(a("version"))
                             .from(a("games"))
-                            .and_where(Expr::col(a("id")).eq(id.as_str())),
+                            .and_where(Expr::col(a("id")).eq(encode_id(id.as_str()))),
                     )
                     .await
                     .map_err(storage)?
@@ -356,13 +347,13 @@ impl GameRepository for SeaOrmStore {
                     Query::select()
                         .columns([a("black"), a("white")])
                         .from(a("games"))
-                        .and_where(Expr::col(a("id")).eq(id.as_str())),
+                        .and_where(Expr::col(a("id")).eq(encode_id(id.as_str()))),
                 )
                 .await
                 .map_err(storage)?
                 .ok_or(Error::NotFound)?;
-            let black: String = row.try_get("", "black").map_err(corrupt)?;
-            let white: String = row.try_get("", "white").map_err(corrupt)?;
+            let black = decode_id(&row.try_get::<String>("", "black").map_err(corrupt)?)?;
+            let white = decode_id(&row.try_get::<String>("", "white").map_err(corrupt)?)?;
             if receipt.user_id.as_str() != black && receipt.user_id.as_str() != white {
                 return Err(Error::NonParticipant);
             }
@@ -386,10 +377,10 @@ impl GameRepository for SeaOrmStore {
                         a("reason"),
                     ])
                     .values_panic([
-                        id.as_str().into(),
+                        encode_id(id.as_str()).into(),
                         seq.into(),
-                        receipt.request_id.as_str().into(),
-                        receipt.user_id.as_str().into(),
+                        encode_id(receipt.request_id.as_str()).into(),
+                        encode_id(receipt.user_id.as_str()).into(),
                         expected.into(),
                         action.into(),
                         usi.into(),

@@ -23,6 +23,6 @@ user-persistence = { path = "../user-persistence" }
 tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 http-body-util = "0.1"
-tempfile = "3"
+pg-test-support = { path = "../pg-test-support" }
 [lints]
 workspace = true

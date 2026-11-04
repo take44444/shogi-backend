@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/10-shogi.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
   user-server:
     build: .
     profiles: [auth]
@@ -7,13 +23,14 @@ services:
       USER_BIND_ADDR: 0.0.0.0:8080
       USER_PUBLIC_ORIGIN: ${USER_PUBLIC_ORIGIN:-http://localhost:8080}
       USER_ALLOW_LOOPBACK_HTTP: ${USER_ALLOW_LOOPBACK_HTTP:-true}
-      USER_DATABASE_URL: sqlite:///data/users.db?mode=rwc
+      USER_DATABASE_URL: postgres://shogi:shogi@postgres:5432/users
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     ports:
       - "127.0.0.1:${USER_SERVER_PORT:-8080}:8080"
-    volumes:
-      - user-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     init: true
     stop_signal: SIGINT
     stop_grace_period: 15s
@@ -21,11 +38,12 @@ services:
     build: .
     environment:
       GAME_SERVER_ADDR: 0.0.0.0:50051
-      DATABASE_URL: sqlite:///data/shogi.db?mode=rwc
+      DATABASE_URL: postgres://shogi:shogi@postgres:5432/shogi
     ports:
       - "127.0.0.1:${GAME_SERVER_PORT:-50051}:50051"
-    volumes:
-      - shogi-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     init: true
     stop_signal: SIGINT
     stop_grace_period: 15s
@@ -35,13 +53,14 @@ services:
     entrypoint: ["player-server"]
     environment:
       PLAYER_BIND_ADDR: 0.0.0.0:8081
-      PLAYER_GAME_DATABASE_PATH: /data/shogi.db
+      PLAYER_GAME_DATABASE_URL: postgres://shogi_reader:shogi_reader@postgres:5432/shogi
     ports:
       - "127.0.0.1:${PLAYER_SERVER_PORT:-8081}:8081"
-    volumes:
-      - shogi-data:/data:ro
     depends_on:
-      - game-server
+      postgres:
+        condition: service_healthy
+      game-server:
+        condition: service_started
     init: true
     restart: on-failure
     stop_signal: SIGINT
@@ -50,13 +69,15 @@ services:
     build: .
     entrypoint: ["outbox-publisher"]
     environment:
-      DATABASE_URL: sqlite:///data/shogi.db?mode=rwc
+      DATABASE_URL: postgres://shogi:shogi@postgres:5432/shogi
       NATS_URL: nats://nats:4222
-    volumes:
-      - shogi-data:/data
     depends_on:
-      - game-server
-      - nats
+      postgres:
+        condition: service_healthy
+      game-server:
+        condition: service_started
+      nats:
+        condition: service_started
     init: true
     restart: on-failure
     stop_signal: SIGINT
@@ -66,5 +87,4 @@ services:
     ports:
       - "127.0.0.1:${NATS_PORT:-4222}:4222"
 volumes:
-  shogi-data:
-  user-data:
+  pg-data:

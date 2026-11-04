@@ -1,7 +1,7 @@
 use super::*;
 use axum::{body::Body, http::Request};
 use game_application::{GameId as WriteId, GameService, MakeMove, Participants, RequestId, Resign};
-use game_persistence::{SeaOrmStore, SqliteGameRecords};
+use game_persistence::{PostgresGameRecords, SeaOrmStore};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -21,13 +21,8 @@ async fn get(app: Router, path: &str) -> (StatusCode, Value) {
 }
 #[tokio::test]
 async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("game.db");
-    let store = Arc::new(
-        SeaOrmStore::connect(&format!("sqlite://{}?mode=rwc", path.display()))
-            .await
-            .unwrap(),
-    );
+    let database = pg_test_support::TestDatabase::new().await;
+    let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
     let games = GameService::new(store);
     let id = WriteId::new("game").unwrap();
     games
@@ -73,7 +68,11 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
         )
         .await
         .unwrap();
-    let reader = Arc::new(SqliteGameRecords::open(path).await.unwrap());
+    let reader = Arc::new(
+        PostgresGameRecords::connect(&database.reader_url().await)
+            .await
+            .unwrap(),
+    );
     let app = router(GameRecords::new(reader.clone()));
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

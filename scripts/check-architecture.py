@@ -159,7 +159,7 @@ def render_inventory(root: Path) -> str:
         "",
         *[f"- `{route}`" for route in user_routes(root)],
         "",
-        "ユーザーSQLiteのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。",
+        "ユーザーPostgreSQLのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。",
         "",
         *[f"- `{table}`" for table in user_tables(root)],
         "",

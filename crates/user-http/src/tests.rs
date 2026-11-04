@@ -5,7 +5,7 @@ use http_body_util::BodyExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tower::ServiceExt;
 use user_application::VerifiedIdentity;
-use user_persistence::SqliteAccounts;
+use user_persistence::PostgresAccounts;
 
 #[derive(Default)]
 struct Provider {
@@ -107,7 +107,7 @@ async fn login(app: &Router) -> String {
 async fn json(r: Response) -> serde_json::Value {
     serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes()).unwrap()
 }
-fn app(store: Arc<SqliteAccounts>, provider: Arc<Provider>) -> Router {
+fn app(store: Arc<PostgresAccounts>, provider: Arc<Provider>) -> Router {
     router(
         store,
         provider,
@@ -117,12 +117,9 @@ fn app(store: Arc<SqliteAccounts>, provider: Arc<Provider>) -> Router {
 
 #[tokio::test]
 async fn registration_profile_update_csrf_logout_and_restart() {
-    let temp = tempfile::tempdir().unwrap();
-    let url = format!(
-        "sqlite://{}?mode=rwc",
-        temp.path().join("users.db").display()
-    );
-    let store = Arc::new(SqliteAccounts::connect(&url).await.unwrap());
+    let database = pg_test_support::TestDatabase::new().await;
+    let url = database.url();
+    let store = Arc::new(PostgresAccounts::connect(url).await.unwrap());
     let provider = Arc::new(Provider::default());
     let first = app(store.clone(), provider.clone());
     assert_eq!(
@@ -187,7 +184,7 @@ async fn registration_profile_update_csrf_logout_and_restart() {
     assert_eq!(renamed["display_name"], "New Name");
     drop(first);
     store.close().await.unwrap();
-    let restarted_store = Arc::new(SqliteAccounts::connect(&url).await.unwrap());
+    let restarted_store = Arc::new(PostgresAccounts::connect(url).await.unwrap());
     let restarted = app(restarted_store.clone(), provider);
     assert_eq!(
         json(call(&restarted, "GET", "/me", Some(&session), None, "").await).await,
@@ -230,7 +227,7 @@ async fn registration_profile_update_csrf_logout_and_restart() {
         StatusCode::OK
     );
     restarted_store.close().await.unwrap();
-    let final_store = Arc::new(SqliteAccounts::connect(&url).await.unwrap());
+    let final_store = Arc::new(PostgresAccounts::connect(url).await.unwrap());
     assert_eq!(
         call(
             &app(final_store, Arc::new(Provider::default())),
@@ -248,7 +245,8 @@ async fn registration_profile_update_csrf_logout_and_restart() {
 
 #[tokio::test]
 async fn login_is_browser_bound_and_consumed_before_any_exchange() {
-    let store = Arc::new(SqliteAccounts::connect("sqlite::memory:").await.unwrap());
+    let database = pg_test_support::TestDatabase::new().await;
+    let store = Arc::new(PostgresAccounts::connect(database.url()).await.unwrap());
     let provider = Arc::new(Provider::default());
     let app = app(store, provider.clone());
     let (state, browser) = begin(&app).await;
@@ -304,7 +302,8 @@ async fn login_is_browser_bound_and_consumed_before_any_exchange() {
 
 #[tokio::test]
 async fn tampered_and_duplicate_session_cookies_never_authenticate() {
-    let store = Arc::new(SqliteAccounts::connect("sqlite::memory:").await.unwrap());
+    let database = pg_test_support::TestDatabase::new().await;
+    let store = Arc::new(PostgresAccounts::connect(database.url()).await.unwrap());
     let app = app(store, Arc::new(Provider::default()));
     let session = login(&app).await;
     let mut changed = session.clone();
@@ -333,7 +332,8 @@ async fn tampered_and_duplicate_session_cookies_never_authenticate() {
 
 #[tokio::test]
 async fn production_cookies_have_host_prefix_and_secure_attributes() {
-    let store = Arc::new(SqliteAccounts::connect("sqlite::memory:").await.unwrap());
+    let database = pg_test_support::TestDatabase::new().await;
+    let store = Arc::new(PostgresAccounts::connect(database.url()).await.unwrap());
     let app = router(
         store,
         Arc::new(Provider::default()),
@@ -386,7 +386,8 @@ fn configuration_fails_closed() {
 
 #[tokio::test]
 async fn browser_flow_over_real_tcp_http_routes() {
-    let store = Arc::new(SqliteAccounts::connect("sqlite::memory:").await.unwrap());
+    let database = pg_test_support::TestDatabase::new().await;
+    let store = Arc::new(PostgresAccounts::connect(database.url()).await.unwrap());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://localhost:{}", listener.local_addr().unwrap().port());
     let app = router(
