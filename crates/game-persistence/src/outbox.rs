@@ -9,6 +9,7 @@ use game_application::{
 use sea_orm::sea_query::{Expr, ExprTrait, Order, PostgresQueryBuilder, Query, Value};
 use sea_orm::sqlx::{self, AssertSqlSafe, Connection, PgConnection, postgres::PgConnectOptions};
 use sea_orm::{ConnectionTrait, DatabaseTransaction};
+use sea_query_sqlx::SqlxBinder;
 
 /// Failure opening a publisher's exclusive PostgreSQL queue.
 #[derive(Debug)]
@@ -117,7 +118,7 @@ pub(crate) async fn enqueue(tx: &DatabaseTransaction, event: &CommittedEvent) ->
 impl OutboxRepository for PostgresOutbox {
     type Cursor = PostgresCursor;
     async fn next_pending(&mut self) -> Result<Option<OutboxItem<PostgresCursor>>, Error> {
-        let query = Query::select()
+        let (sql, values) = Query::select()
             .columns([
                 a("id"),
                 a("game_id"),
@@ -135,8 +136,8 @@ impl OutboxRepository for PostgresOutbox {
             .and_where(Expr::col(a("published")).eq(false))
             .order_by(a("id"), Order::Asc)
             .limit(1)
-            .to_string(PostgresQueryBuilder);
-        let Some(row) = sqlx::query(AssertSqlSafe(query))
+            .build_sqlx(PostgresQueryBuilder);
+        let Some(row) = sqlx::query_with(AssertSqlSafe(sql), values)
             .fetch_optional(&mut self.connection)
             .await
             .map_err(|_| Error::Unavailable)?
@@ -194,12 +195,12 @@ impl OutboxRepository for PostgresOutbox {
         }))
     }
     async fn mark_published(&mut self, item: &OutboxItem<PostgresCursor>) -> Result<(), Error> {
-        let query = Query::update()
+        let (sql, values) = Query::update()
             .table(a("outbox_events"))
             .values([(a("published"), Value::Bool(Some(true)).into())])
             .and_where(Expr::col(a("id")).eq(item.cursor.0))
-            .to_string(PostgresQueryBuilder);
-        sqlx::query(AssertSqlSafe(query))
+            .build_sqlx(PostgresQueryBuilder);
+        sqlx::query_with(AssertSqlSafe(sql), values)
             .execute(&mut self.connection)
             .await
             .map_err(|_| Error::Unavailable)?;

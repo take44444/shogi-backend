@@ -1,18 +1,58 @@
 //! Independent PostgreSQL account database. Issuer/subject is the only external identity key.
 use async_trait::async_trait;
+use sea_orm::sea_query::{
+    ColumnDef, Expr, ExprTrait, ForeignKey, ForeignKeyAction, Index, JoinType, Query,
+    SelectStatement, Table,
+};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DatabaseTransaction, DbBackend,
-    QueryResult, Statement, TransactionTrait, Value,
+    DeriveIden, QueryResult, Statement, TransactionTrait, Value,
 };
 use user_application::{
     AccountRepository, DisplayName, Error, LoginAttempt, NewSession, Profile, UserId,
     VerifiedIdentity,
 };
 
+#[derive(DeriveIden)]
+enum AccountSchemaVersion {
+    Table,
+    Version,
+}
+#[derive(DeriveIden)]
+enum Accounts {
+    Table,
+    Id,
+    DisplayName,
+    CreatedAt,
+}
+#[derive(DeriveIden)]
+enum ExternalIdentities {
+    Table,
+    Issuer,
+    Subject,
+    UserId,
+}
+#[derive(DeriveIden)]
+enum LoginAttempts {
+    Table,
+    StateHash,
+    BrowserHash,
+    Nonce,
+    PkceVerifier,
+    ExpiresAt,
+}
+#[derive(DeriveIden)]
+enum Sessions {
+    Table,
+    TokenHash,
+    UserId,
+    ExpiresAt,
+}
+
 pub struct PostgresAccounts {
     db: DatabaseConnection,
 }
-fn stmt(sql: &str, values: Vec<Value>) -> Statement {
+fn postgres_statement(sql: &str, values: Vec<Value>) -> Statement {
     Statement::from_sql_and_values(DbBackend::Postgres, sql, values)
 }
 fn storage(_: impl std::fmt::Debug) -> Error {
@@ -29,7 +69,7 @@ fn decode(row: QueryResult) -> Result<Profile, Error> {
 }
 async fn schema_fingerprint(tx: &DatabaseTransaction, schema: &str) -> Result<Vec<String>, Error> {
     let rows = tx
-        .query_all_raw(stmt(
+        .query_all_raw(postgres_statement(
             r#"
         SELECT definition FROM (
             SELECT format('relation|%s|%s|%s|%s|%s', c.relname, c.relkind,
@@ -70,16 +110,102 @@ async fn schema_fingerprint(tx: &DatabaseTransaction, schema: &str) -> Result<Ve
         .map(|row| row.try_get("", "definition").map_err(|_| Error::Corrupt))
         .collect()
 }
-const SCHEMA: &[&str] = &[
-    "CREATE TABLE account_schema_version (version INTEGER NOT NULL PRIMARY KEY CHECK (version = 1))",
-    "CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL, display_name TEXT NOT NULL, created_at BIGINT NOT NULL)",
-    "CREATE TABLE external_identities (issuer TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, PRIMARY KEY (issuer, subject))",
-    "CREATE TABLE login_attempts (state_hash TEXT PRIMARY KEY NOT NULL, browser_hash TEXT NOT NULL, nonce TEXT NOT NULL, pkce_verifier TEXT NOT NULL, expires_at BIGINT NOT NULL)",
-    "CREATE TABLE sessions (token_hash TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, expires_at BIGINT NOT NULL)",
-    "CREATE INDEX sessions_expiry ON sessions(expires_at)",
-    "CREATE INDEX attempts_expiry ON login_attempts(expires_at)",
-    "INSERT INTO account_schema_version VALUES (1)",
-];
+async fn create_schema(tx: &DatabaseTransaction) -> Result<(), Error> {
+    for table in [
+        Table::create()
+            .table(AccountSchemaVersion::Table)
+            .col(
+                ColumnDef::new(AccountSchemaVersion::Version)
+                    .integer()
+                    .not_null()
+                    .primary_key()
+                    .check(Expr::col(AccountSchemaVersion::Version).eq(1)),
+            )
+            .to_owned(),
+        Table::create()
+            .table(Accounts::Table)
+            .col(ColumnDef::new(Accounts::Id).text().primary_key().not_null())
+            .col(ColumnDef::new(Accounts::DisplayName).text().not_null())
+            .col(ColumnDef::new(Accounts::CreatedAt).big_integer().not_null())
+            .to_owned(),
+        Table::create()
+            .table(ExternalIdentities::Table)
+            .col(ColumnDef::new(ExternalIdentities::Issuer).text().not_null())
+            .col(
+                ColumnDef::new(ExternalIdentities::Subject)
+                    .text()
+                    .not_null(),
+            )
+            .col(ColumnDef::new(ExternalIdentities::UserId).text().not_null())
+            .foreign_key(
+                ForeignKey::create()
+                    .from(ExternalIdentities::Table, ExternalIdentities::UserId)
+                    .to(Accounts::Table, Accounts::Id)
+                    .on_delete(ForeignKeyAction::Cascade),
+            )
+            .primary_key(
+                Index::create()
+                    .col(ExternalIdentities::Issuer)
+                    .col(ExternalIdentities::Subject),
+            )
+            .to_owned(),
+        Table::create()
+            .table(LoginAttempts::Table)
+            .col(
+                ColumnDef::new(LoginAttempts::StateHash)
+                    .text()
+                    .primary_key()
+                    .not_null(),
+            )
+            .col(ColumnDef::new(LoginAttempts::BrowserHash).text().not_null())
+            .col(ColumnDef::new(LoginAttempts::Nonce).text().not_null())
+            .col(
+                ColumnDef::new(LoginAttempts::PkceVerifier)
+                    .text()
+                    .not_null(),
+            )
+            .col(
+                ColumnDef::new(LoginAttempts::ExpiresAt)
+                    .big_integer()
+                    .not_null(),
+            )
+            .to_owned(),
+        Table::create()
+            .table(Sessions::Table)
+            .col(
+                ColumnDef::new(Sessions::TokenHash)
+                    .text()
+                    .primary_key()
+                    .not_null(),
+            )
+            .col(ColumnDef::new(Sessions::UserId).text().not_null())
+            .col(ColumnDef::new(Sessions::ExpiresAt).big_integer().not_null())
+            .foreign_key(
+                ForeignKey::create()
+                    .from(Sessions::Table, Sessions::UserId)
+                    .to(Accounts::Table, Accounts::Id)
+                    .on_delete(ForeignKeyAction::Cascade),
+            )
+            .to_owned(),
+    ] {
+        tx.execute(&table).await.map_err(storage)?;
+    }
+    for index in [
+        Index::create()
+            .name("sessions_expiry")
+            .table(Sessions::Table)
+            .col(Sessions::ExpiresAt)
+            .to_owned(),
+        Index::create()
+            .name("attempts_expiry")
+            .table(LoginAttempts::Table)
+            .col(LoginAttempts::ExpiresAt)
+            .to_owned(),
+    ] {
+        tx.execute(&index).await.map_err(storage)?;
+    }
+    Ok(())
+}
 impl PostgresAccounts {
     pub async fn connect(url: &str) -> Result<Self, Error> {
         if !(url.starts_with("postgres://") || url.starts_with("postgresql://")) {
@@ -91,7 +217,7 @@ impl PostgresAccounts {
             .map_sqlx_postgres_opts(|o| o.options([("search_path", "public")]));
         let db = Database::connect(opts).await.map_err(storage)?;
         let tx = db.begin().await.map_err(storage)?;
-        tx.query_one_raw(stmt(
+        tx.query_one_raw(postgres_statement(
             "SELECT pg_advisory_xact_lock(732601005046175415)",
             vec![],
         ))
@@ -99,12 +225,22 @@ impl PostgresAccounts {
         .map_err(storage)?;
         let actual = schema_fingerprint(&tx, "public").await?;
         if actual.is_empty() {
-            for sql in SCHEMA {
-                tx.execute_raw(stmt(sql, vec![])).await.map_err(storage)?;
-            }
+            create_schema(&tx).await?;
+            tx.execute(
+                Query::insert()
+                    .into_table(AccountSchemaVersion::Table)
+                    .columns([AccountSchemaVersion::Version])
+                    .values_panic([1.into()]),
+            )
+            .await
+            .map_err(storage)?;
         } else {
             let version = tx
-                .query_all_raw(stmt("SELECT version FROM account_schema_version", vec![]))
+                .query_all(
+                    Query::select()
+                        .column(AccountSchemaVersion::Version)
+                        .from(AccountSchemaVersion::Table),
+                )
                 .await
                 .map_err(|_| Error::Corrupt)?;
             if version.len() != 1
@@ -116,26 +252,30 @@ impl PostgresAccounts {
                 return Err(Error::Corrupt);
             }
             let expected_schema = format!("account_expected_{}", uuid::Uuid::new_v4().simple());
-            tx.execute_raw(stmt(&format!("CREATE SCHEMA {expected_schema}"), vec![]))
-                .await
-                .map_err(storage)?;
-            tx.execute_raw(stmt(
+            tx.execute_raw(postgres_statement(
+                &format!("CREATE SCHEMA {expected_schema}"),
+                vec![],
+            ))
+            .await
+            .map_err(storage)?;
+            tx.execute_raw(postgres_statement(
                 &format!("SET LOCAL search_path TO {expected_schema}"),
                 vec![],
             ))
             .await
             .map_err(storage)?;
-            for sql in &SCHEMA[..SCHEMA.len() - 1] {
-                tx.execute_raw(stmt(sql, vec![])).await.map_err(storage)?;
-            }
+            create_schema(&tx).await?;
             let expected = schema_fingerprint(&tx, &expected_schema).await?;
             if actual != expected {
                 return Err(Error::Corrupt);
             }
-            tx.execute_raw(stmt("SET LOCAL search_path TO public", vec![]))
-                .await
-                .map_err(storage)?;
-            tx.execute_raw(stmt(
+            tx.execute_raw(postgres_statement(
+                "SET LOCAL search_path TO public",
+                vec![],
+            ))
+            .await
+            .map_err(storage)?;
+            tx.execute_raw(postgres_statement(
                 &format!("DROP SCHEMA {expected_schema} CASCADE"),
                 vec![],
             ))
@@ -149,33 +289,59 @@ impl PostgresAccounts {
         self.db.close_by_ref().await.map_err(storage)
     }
 }
-const AUTH: &str = "SELECT a.id,a.display_name,a.created_at FROM accounts a JOIN sessions s ON s.user_id=a.id WHERE s.token_hash=$1 AND s.expires_at>$2";
+fn auth_query(hash: &str, now: i64) -> SelectStatement {
+    Query::select()
+        .columns([
+            (Accounts::Table, Accounts::Id),
+            (Accounts::Table, Accounts::DisplayName),
+            (Accounts::Table, Accounts::CreatedAt),
+        ])
+        .from(Accounts::Table)
+        .join(
+            JoinType::InnerJoin,
+            Sessions::Table,
+            Expr::col((Sessions::Table, Sessions::UserId)).equals((Accounts::Table, Accounts::Id)),
+        )
+        .and_where(Expr::col((Sessions::Table, Sessions::TokenHash)).eq(hash))
+        .and_where(Expr::col((Sessions::Table, Sessions::ExpiresAt)).gt(now))
+        .to_owned()
+}
 #[async_trait]
 impl AccountRepository for PostgresAccounts {
     async fn save_attempt(&self, a: LoginAttempt, now: i64) -> Result<(), Error> {
         let tx = self.db.begin().await.map_err(storage)?;
-        tx.execute_raw(stmt(
-            "DELETE FROM login_attempts WHERE expires_at<=$1",
-            vec![now.into()],
-        ))
+        tx.execute(
+            Query::delete()
+                .from_table(LoginAttempts::Table)
+                .and_where(Expr::col(LoginAttempts::ExpiresAt).lte(now)),
+        )
         .await
         .map_err(storage)?;
-        tx.execute_raw(stmt(
-            "DELETE FROM sessions WHERE expires_at<=$1",
-            vec![now.into()],
-        ))
+        tx.execute(
+            Query::delete()
+                .from_table(Sessions::Table)
+                .and_where(Expr::col(Sessions::ExpiresAt).lte(now)),
+        )
         .await
         .map_err(storage)?;
-        tx.execute_raw(stmt(
-            "INSERT INTO login_attempts VALUES ($1,$2,$3,$4,$5)",
-            vec![
-                a.state_hash.into(),
-                a.browser_hash.into(),
-                a.nonce.into(),
-                a.pkce_verifier.into(),
-                a.expires_at.into(),
-            ],
-        ))
+        tx.execute(
+            Query::insert()
+                .into_table(LoginAttempts::Table)
+                .columns([
+                    LoginAttempts::StateHash,
+                    LoginAttempts::BrowserHash,
+                    LoginAttempts::Nonce,
+                    LoginAttempts::PkceVerifier,
+                    LoginAttempts::ExpiresAt,
+                ])
+                .values_panic([
+                    a.state_hash.into(),
+                    a.browser_hash.into(),
+                    a.nonce.into(),
+                    a.pkce_verifier.into(),
+                    a.expires_at.into(),
+                ]),
+        )
         .await
         .map_err(storage)?;
         tx.commit().await.map_err(storage)
@@ -186,7 +352,25 @@ impl AccountRepository for PostgresAccounts {
         browser: &str,
         now: i64,
     ) -> Result<LoginAttempt, Error> {
-        let row = self.db.query_one_raw(stmt("DELETE FROM login_attempts WHERE state_hash=$1 AND browser_hash=$2 AND expires_at>$3 RETURNING state_hash,browser_hash,nonce,pkce_verifier,expires_at", vec![state.into(), browser.into(), now.into()])).await.map_err(storage)?.ok_or(Error::Unauthorized)?;
+        let row = self
+            .db
+            .query_one(
+                Query::delete()
+                    .from_table(LoginAttempts::Table)
+                    .and_where(Expr::col(LoginAttempts::StateHash).eq(state))
+                    .and_where(Expr::col(LoginAttempts::BrowserHash).eq(browser))
+                    .and_where(Expr::col(LoginAttempts::ExpiresAt).gt(now))
+                    .returning(Query::returning().columns([
+                        LoginAttempts::StateHash,
+                        LoginAttempts::BrowserHash,
+                        LoginAttempts::Nonce,
+                        LoginAttempts::PkceVerifier,
+                        LoginAttempts::ExpiresAt,
+                    ])),
+            )
+            .await
+            .map_err(storage)?
+            .ok_or(Error::Unauthorized)?;
         Ok(LoginAttempt {
             state_hash: row.try_get("", "state_hash").map_err(storage)?,
             browser_hash: row.try_get("", "browser_hash").map_err(storage)?,
@@ -208,35 +392,68 @@ impl AccountRepository for PostgresAccounts {
             identity.issuer,
             identity.subject
         );
-        tx.query_one_raw(stmt(
+        tx.query_one_raw(postgres_statement(
             "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
             vec![identity_key.into()],
         ))
         .await
         .map_err(storage)?;
-        let existing = tx.query_one_raw(stmt("SELECT a.id,a.display_name,a.created_at FROM accounts a JOIN external_identities e ON e.user_id=a.id WHERE e.issuer=$1 AND e.subject=$2", vec![identity.issuer.clone().into(), identity.subject.clone().into()])).await.map_err(storage)?;
+        let existing = tx
+            .query_one(
+                Query::select()
+                    .columns([
+                        (Accounts::Table, Accounts::Id),
+                        (Accounts::Table, Accounts::DisplayName),
+                        (Accounts::Table, Accounts::CreatedAt),
+                    ])
+                    .from(Accounts::Table)
+                    .join(
+                        JoinType::InnerJoin,
+                        ExternalIdentities::Table,
+                        Expr::col((ExternalIdentities::Table, ExternalIdentities::UserId))
+                            .equals((Accounts::Table, Accounts::Id)),
+                    )
+                    .and_where(
+                        Expr::col((ExternalIdentities::Table, ExternalIdentities::Issuer))
+                            .eq(identity.issuer.clone()),
+                    )
+                    .and_where(
+                        Expr::col((ExternalIdentities::Table, ExternalIdentities::Subject))
+                            .eq(identity.subject.clone()),
+                    ),
+            )
+            .await
+            .map_err(storage)?;
         let profile = if let Some(row) = existing {
             decode(row)?
         } else {
             let id = uuid::Uuid::new_v4().to_string();
-            tx.execute_raw(stmt(
-                "INSERT INTO accounts VALUES ($1,$2,$3)",
-                vec![
-                    id.clone().into(),
-                    identity.initial_name.as_str().into(),
-                    now.into(),
-                ],
-            ))
+            tx.execute(
+                Query::insert()
+                    .into_table(Accounts::Table)
+                    .columns([Accounts::Id, Accounts::DisplayName, Accounts::CreatedAt])
+                    .values_panic([
+                        id.clone().into(),
+                        identity.initial_name.as_str().into(),
+                        now.into(),
+                    ]),
+            )
             .await
             .map_err(storage)?;
-            tx.execute_raw(stmt(
-                "INSERT INTO external_identities VALUES ($1,$2,$3)",
-                vec![
-                    identity.issuer.into(),
-                    identity.subject.into(),
-                    id.clone().into(),
-                ],
-            ))
+            tx.execute(
+                Query::insert()
+                    .into_table(ExternalIdentities::Table)
+                    .columns([
+                        ExternalIdentities::Issuer,
+                        ExternalIdentities::Subject,
+                        ExternalIdentities::UserId,
+                    ])
+                    .values_panic([
+                        identity.issuer.into(),
+                        identity.subject.into(),
+                        id.clone().into(),
+                    ]),
+            )
             .await
             .map_err(storage)?;
             Profile {
@@ -245,14 +462,16 @@ impl AccountRepository for PostgresAccounts {
                 created_at: now,
             }
         };
-        tx.execute_raw(stmt(
-            "INSERT INTO sessions VALUES ($1,$2,$3)",
-            vec![
-                session.token_hash.into(),
-                profile.id.as_str().into(),
-                session.expires_at.into(),
-            ],
-        ))
+        tx.execute(
+            Query::insert()
+                .into_table(Sessions::Table)
+                .columns([Sessions::TokenHash, Sessions::UserId, Sessions::ExpiresAt])
+                .values_panic([
+                    session.token_hash.into(),
+                    profile.id.as_str().into(),
+                    session.expires_at.into(),
+                ]),
+        )
         .await
         .map_err(storage)?;
         tx.commit().await.map_err(storage)?;
@@ -261,7 +480,7 @@ impl AccountRepository for PostgresAccounts {
     async fn authenticate(&self, hash: &str, now: i64) -> Result<Profile, Error> {
         decode(
             self.db
-                .query_one_raw(stmt(AUTH, vec![hash.into(), now.into()]))
+                .query_one(&auth_query(hash, now))
                 .await
                 .map_err(storage)?
                 .ok_or(Error::Unauthorized)?,
@@ -270,15 +489,17 @@ impl AccountRepository for PostgresAccounts {
     async fn rename(&self, hash: &str, name: DisplayName, now: i64) -> Result<Profile, Error> {
         let tx = self.db.begin().await.map_err(storage)?;
         let mut p = decode(
-            tx.query_one_raw(stmt(AUTH, vec![hash.into(), now.into()]))
+            tx.query_one(&auth_query(hash, now))
                 .await
                 .map_err(storage)?
                 .ok_or(Error::Unauthorized)?,
         )?;
-        tx.execute_raw(stmt(
-            "UPDATE accounts SET display_name=$1 WHERE id=$2",
-            vec![name.as_str().into(), p.id.as_str().into()],
-        ))
+        tx.execute(
+            Query::update()
+                .table(Accounts::Table)
+                .value(Accounts::DisplayName, name.as_str())
+                .and_where(Expr::col(Accounts::Id).eq(p.id.as_str())),
+        )
         .await
         .map_err(storage)?;
         tx.commit().await.map_err(storage)?;
@@ -287,10 +508,11 @@ impl AccountRepository for PostgresAccounts {
     }
     async fn logout(&self, hash: &str) -> Result<(), Error> {
         self.db
-            .execute_raw(stmt(
-                "DELETE FROM sessions WHERE token_hash=$1",
-                vec![hash.into()],
-            ))
+            .execute(
+                Query::delete()
+                    .from_table(Sessions::Table)
+                    .and_where(Expr::col(Sessions::TokenHash).eq(hash)),
+            )
             .await
             .map_err(storage)?;
         Ok(())
@@ -321,6 +543,32 @@ mod tests {
             pkce_verifier: "verifier".into(),
             expires_at: expiry,
         }
+    }
+    #[tokio::test]
+    async fn existing_schema_and_data_survive_builder_refactor() {
+        let database = pg_test_support::TestDatabase::new().await;
+        let db = Database::connect(database.url()).await.unwrap();
+        db.execute_unprepared(include_str!("../tests/fixtures/schema-v1.sql"))
+            .await
+            .unwrap();
+        db.execute_unprepared("INSERT INTO accounts VALUES ('existing-user', 'Existing', 100); INSERT INTO external_identities VALUES ('https://accounts.google.com', 'subject', 'existing-user'); INSERT INTO sessions VALUES ('existing-session', 'existing-user', 200)").await.unwrap();
+        let store = PostgresAccounts::connect(database.url()).await.unwrap();
+        let profile = store.authenticate("existing-session", 101).await.unwrap();
+        assert_eq!(profile.id.as_str(), "existing-user");
+        assert_eq!(profile.display_name.as_str(), "Existing");
+        assert_eq!(
+            store
+                .login(identity(), session("new-session", 200), 102)
+                .await
+                .unwrap(),
+            profile
+        );
+        store.close().await.unwrap();
+        let reopened = PostgresAccounts::connect(database.url()).await.unwrap();
+        assert_eq!(
+            reopened.authenticate("new-session", 103).await.unwrap(),
+            profile
+        );
     }
     #[tokio::test]
     async fn expired_attempts_and_sessions_cannot_be_used() {
@@ -394,10 +642,14 @@ mod tests {
             b.authenticate("hash-b", 100).await.unwrap()
         );
         let rows =
-            a.db.query_one_raw(stmt("SELECT COUNT(*) AS n FROM accounts", vec![]))
-                .await
-                .unwrap()
-                .unwrap();
+            a.db.query_one(
+                Query::select()
+                    .expr_as(Expr::col(Accounts::Id).count(), "n")
+                    .from(Accounts::Table),
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(rows.try_get::<i64>("", "n").unwrap(), 1);
         a.save_attempt(attempt("state", 200), 100).await.unwrap();
         let (left, right) = tokio::join!(
@@ -422,7 +674,11 @@ mod tests {
         );
         let rows = store
             .db
-            .query_one_raw(stmt("SELECT COUNT(*) AS n FROM accounts", vec![]))
+            .query_one(
+                Query::select()
+                    .expr_as(Expr::col(Accounts::Id).count(), "n")
+                    .from(Accounts::Table),
+            )
             .await
             .unwrap()
             .unwrap();

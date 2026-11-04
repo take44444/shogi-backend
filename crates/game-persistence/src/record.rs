@@ -1,22 +1,45 @@
 //! Public record queries use an independently permissioned PostgreSQL pool.
+use crate::schema::a;
 use async_trait::async_trait;
 use game_record_application::{
     Detail, Error, GameId, MAX_HISTORY, Metadata, Page, PublicAction, PublicOperation,
     RecordRepository, Rule, Search, UserId,
 };
+use sea_orm::sea_query::{
+    Cond, Expr, ExprTrait, Order, PostgresQueryBuilder, Query, SelectStatement,
+};
 use sea_orm::sqlx::{
-    self, PgPool, Postgres, Row,
+    self, AssertSqlSafe, PgPool, Postgres, Row,
     pool::PoolConnection,
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
 };
+use sea_query_sqlx::SqlxBinder;
 use shogi_domain::{FinishReason, GameResult, Player};
 use std::{str::FromStr, time::Duration};
 
-const ELIGIBLE: &str = "visibility = 'public' AND finished_at IS NOT NULL";
-const COLUMNS: &str =
-    "id, black, white, version, winner, reason, rule, finished_at, final_move_ply";
+fn metadata_query() -> SelectStatement {
+    Query::select()
+        .columns(
+            [
+                "id",
+                "black",
+                "white",
+                "version",
+                "winner",
+                "reason",
+                "rule",
+                "finished_at",
+                "final_move_ply",
+            ]
+            .map(a),
+        )
+        .from(a("games"))
+        .and_where(Expr::col(a("visibility")).eq("public"))
+        .and_where(Expr::col(a("finished_at")).is_not_null())
+        .to_owned()
+}
 
-/// No create, initialization, journal-mode changes, or game mutation capability.
+/// Read-only record access without schema initialization or game mutation.
 pub struct PostgresGameRecords {
     pool: PgPool,
 }
@@ -69,7 +92,11 @@ fn corrupt(_: impl std::fmt::Debug) -> Error {
     Error::Corrupt
 }
 async fn validate_schema(connection: &mut PoolConnection<Postgres>) -> Result<(), Error> {
-    let rows = sqlx::query("SELECT id, version FROM schema_version")
+    let (sql, values) = Query::select()
+        .columns([a("id"), a("version")])
+        .from(a("schema_version"))
+        .build_sqlx(PostgresQueryBuilder);
+    let rows = sqlx::query_with(AssertSqlSafe(sql), values)
         .fetch_all(&mut **connection)
         .await
         .map_err(|_| Error::Corrupt)?;
@@ -200,57 +227,60 @@ fn metadata(row: &PgRow) -> Result<Metadata, Error> {
 impl RecordRepository for PostgresGameRecords {
     async fn search(&self, search: &Search) -> Result<Page, Error> {
         let f = search.filters();
-        let mut query = sqlx::QueryBuilder::<Postgres>::new(format!(
-            "SELECT {COLUMNS} FROM games WHERE {ELIGIBLE} AND finished_at >= "
-        ));
+        let mut query = metadata_query();
         query
-            .push_bind(f.from)
-            .push(" AND finished_at < ")
-            .push_bind(f.to);
+            .and_where(Expr::col(a("finished_at")).gte(f.from))
+            .and_where(Expr::col(a("finished_at")).lt(f.to));
         if let Some(id) = &f.participant {
-            query
-                .push(" AND (black = ")
-                .push_bind(crate::encode_id(id.as_str()))
-                .push(" OR white = ")
-                .push_bind(crate::encode_id(id.as_str()))
-                .push(")");
+            query.cond_where(
+                Cond::any()
+                    .add(Expr::col(a("black")).eq(crate::encode_id(id.as_str())))
+                    .add(Expr::col(a("white")).eq(crate::encode_id(id.as_str()))),
+            );
         }
         if let Some(winner) = f.winner {
-            query
-                .push(" AND winner = ")
-                .push_bind(if winner == Player::Black { 1i32 } else { 2 });
+            query.and_where(Expr::col(a("winner")).eq(if winner == Player::Black {
+                1i32
+            } else {
+                2
+            }));
         }
         if let Some(reason) = f.reason {
-            query
-                .push(" AND reason = ")
-                .push_bind(if reason == FinishReason::Checkmate {
+            query.and_where(
+                Expr::col(a("reason")).eq(if reason == FinishReason::Checkmate {
                     1i32
                 } else {
                     2
-                });
+                }),
+            );
         }
         if let Some(min) = f.min_ply {
-            query.push(" AND final_move_ply >= ").push_bind(min as i64);
+            query.and_where(Expr::col(a("final_move_ply")).gte(min as i64));
         }
         if let Some(max) = f.max_ply {
-            query.push(" AND final_move_ply <= ").push_bind(max as i64);
+            query.and_where(Expr::col(a("final_move_ply")).lte(max as i64));
         }
         if let Some(seek) = search.seek() {
-            query
-                .push(" AND (finished_at < ")
-                .push_bind(seek.finished_at)
-                .push(" OR (finished_at = ")
-                .push_bind(seek.finished_at)
-                .push(" AND id COLLATE \"C\" < ")
-                .push_bind(crate::encode_id(seek.id.as_str()))
-                .push("))");
+            query.cond_where(
+                Cond::any()
+                    .add(Expr::col(a("finished_at")).lt(seek.finished_at))
+                    .add(
+                        Cond::all()
+                            .add(Expr::col(a("finished_at")).eq(seek.finished_at))
+                            .add(
+                                Expr::cust("id COLLATE \"C\"")
+                                    .lt(crate::encode_id(seek.id.as_str())),
+                            ),
+                    ),
+            );
         }
         query
-            .push(" ORDER BY finished_at DESC, id COLLATE \"C\" DESC LIMIT ")
-            .push_bind(i64::from(search.limit()) + 1);
+            .order_by(a("finished_at"), Order::Desc)
+            .order_by_expr(Expr::cust("id COLLATE \"C\""), Order::Desc)
+            .limit(u64::from(search.limit()) + 1);
+        let (sql, values) = query.build_sqlx(PostgresQueryBuilder);
         let mut connection = self.connection().await?;
-        let rows = query
-            .build()
+        let rows = sqlx::query_with(AssertSqlSafe(sql), values)
             .fetch_all(&mut *connection)
             .await
             .map_err(unavailable)?;
@@ -272,15 +302,10 @@ impl RecordRepository for PostgresGameRecords {
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;
-        let mut query = sqlx::QueryBuilder::<Postgres>::new("SELECT ");
-        query
-            .push(COLUMNS)
-            .push(" FROM games WHERE ")
-            .push(ELIGIBLE)
-            .push(" AND id = ")
-            .push_bind(crate::encode_id(id.as_str()));
-        let row = query
-            .build()
+        let (sql, values) = metadata_query()
+            .and_where(Expr::col(a("id")).eq(crate::encode_id(id.as_str())))
+            .build_sqlx(PostgresQueryBuilder);
+        let row = sqlx::query_with(AssertSqlSafe(sql), values)
             .fetch_optional(&mut *tx)
             .await
             .map_err(unavailable)?
@@ -289,8 +314,22 @@ impl RecordRepository for PostgresGameRecords {
         if metadata.final_seq > MAX_HISTORY {
             return Err(Error::HistoryTooLong);
         }
-        let rows = sqlx::query("SELECT seq, user_id, action, usi, in_check, winner, reason FROM journal WHERE game_id = $1 ORDER BY seq LIMIT $2")
-            .bind(crate::encode_id(id.as_str())).bind((MAX_HISTORY+1) as i64).fetch_all(&mut *tx).await.map_err(unavailable)?;
+        let (sql, values) = Query::select()
+            .columns(
+                [
+                    "seq", "user_id", "action", "usi", "in_check", "winner", "reason",
+                ]
+                .map(a),
+            )
+            .from(a("journal"))
+            .and_where(Expr::col(a("game_id")).eq(crate::encode_id(id.as_str())))
+            .order_by(a("seq"), Order::Asc)
+            .limit(MAX_HISTORY + 1)
+            .build_sqlx(PostgresQueryBuilder);
+        let rows = sqlx::query_with(AssertSqlSafe(sql), values)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(unavailable)?;
         if rows.len() as u64 != metadata.final_seq {
             return Err(Error::Corrupt);
         }
@@ -381,7 +420,10 @@ mod tests {
             .execute(&mut *connection)
             .await
             .unwrap();
-        let error = sqlx::query("DELETE FROM games")
+        let (sql, values) = Query::delete()
+            .from_table(a("games"))
+            .build_sqlx(PostgresQueryBuilder);
+        let error = sqlx::query_with(AssertSqlSafe(sql), values)
             .execute(&mut *connection)
             .await
             .unwrap_err();

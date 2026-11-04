@@ -577,3 +577,82 @@ fn storage_id(value: &str) -> String {
         .replace('\u{1}', "\u{1}\u{2}")
         .replace('\0', "\u{1}\u{1}")
 }
+
+#[tokio::test]
+async fn legacy_schema_remains_readable_and_writable_with_query_builders() {
+    let database = pg_test_support::TestDatabase::new().await;
+    let raw = Database::connect(database.url()).await.unwrap();
+    raw.execute_unprepared(include_str!("fixtures/schema-v5.sql"))
+        .await
+        .unwrap();
+    let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
+    let games = GameService::new(store.clone());
+    let id = WriteId::new("existing-schema").unwrap();
+    games
+        .create(
+            id.clone(),
+            Participants {
+                black: UserId::new("black").unwrap(),
+                white: UserId::new("white").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    games
+        .resign(
+            &id,
+            Resign {
+                request_id: RequestId::new("end").unwrap(),
+                expected_seq: 0,
+                user_id: UserId::new("white").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let reader = PostgresGameRecords::connect(&database.reader_url().await)
+        .await
+        .unwrap();
+    let detail = reader
+        .detail(&GameId::new(id.as_str()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(detail.metadata.final_seq, 1);
+    assert_eq!(detail.history[0].action, PublicAction::Resign);
+    reader.close().await;
+    store.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn fresh_builder_schema_matches_the_previous_schema_definition() {
+    let previous = pg_test_support::TestDatabase::new().await;
+    let previous_db = Database::connect(previous.url()).await.unwrap();
+    previous_db
+        .execute_unprepared(include_str!("fixtures/schema-v5.sql"))
+        .await
+        .unwrap();
+    let current = pg_test_support::TestDatabase::new().await;
+    let store = SeaOrmStore::connect(current.url()).await.unwrap();
+    let current_db = Database::connect(current.url()).await.unwrap();
+    let catalog = "SELECT definition FROM (
+        SELECT 'column|' || json_build_array(table_name, ordinal_position, column_name, data_type, is_nullable, column_default, collation_name, is_identity, identity_generation)::text AS definition
+        FROM information_schema.columns WHERE table_schema = 'public'
+        UNION ALL
+        SELECT 'constraint|' || json_build_array(c.relname, k.conname, pg_get_constraintdef(k.oid), k.condeferrable, k.condeferred, k.convalidated)::text
+        FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
+        UNION ALL
+        SELECT 'index|' || indexdef FROM pg_indexes WHERE schemaname = 'public'
+    ) definitions ORDER BY definition";
+    let mut definitions = Vec::new();
+    for db in [&previous_db, &current_db] {
+        definitions.push(
+            db.query_all_raw(Statement::from_string(DbBackend::Postgres, catalog))
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| row.try_get::<String>("", "definition").unwrap())
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(definitions[0], definitions[1]);
+    store.close().await.unwrap();
+}

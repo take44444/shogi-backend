@@ -1007,6 +1007,7 @@ dependencies = [
  "game-record-application",
  "pg-test-support",
  "sea-orm",
+ "sea-query-sqlx",
  "shogi-domain",
  "tokio",
 ]

@@ -75,6 +75,8 @@ flowchart LR
 
 Domain層とApplication層はSQL・ORMに依存しない。対局は`GameRepository`と`SeaOrmStore`、ユーザー管理は独立したRepositoryとPostgreSQL接続を使う。共有するのは`user-id`の値型のみであり、DB接続やユーザー外部キーを共有しない。プロフィール変更は対局履歴を変更しない。アカウント削除APIは未実装である。現行DBドライバーはPostgreSQLのみである。認証方式は[ユーザー認証の設計](user-authentication.md)、設定と起動は [user-server の README](../../apps/user-server/README.md) を参照する。
 
+永続化アダプターの通常の検索・登録・更新・削除はSeaQueryで構築し、テーブルとインデックスの定義にもSeaQueryのビルダーを使う。入力値はSQL本文と分けて渡す。SeaORMの接続・トランザクションでは生成したStatementを直接実行し、棋譜読取とOutboxの専用SQLx接続では`sea-query-sqlx`でSQLとバインド値へ変換する。手書きSQLはPostgreSQLのadvisory lock、接続設定、システムカタログ検査、schema管理、`COLLATE "C"`などのDB固有処理に限定する。テストの故障注入と変更前スキーマの互換性確認用SQLは別に保持する。
+
 ローカル実行とテストはPostgreSQLを基本とし、現在のコンテナ確認はDocker Composeで行う。Composeは既定で`game-server`、`outbox-publisher`、Core NATS、PostgreSQLを起動する。`auth` profileで`user-server`、`records` profileで`player-server`を追加する。対局とOutboxは`shogi` DB、ユーザー情報は独立した`users` DBに保存する。PostgreSQLの永続領域は`pg-data` Volumeである。テストは`TEST_DATABASE_URL`の管理接続からテストごとに独立したDBを作成する。本番のKubernetes運用は将来の対象である。実行・再起動確認・rustdocの手順は[README](../../README.md)を参照する。
 
 ### 0.4 ユーザー認証・プロフィールの現行仕様

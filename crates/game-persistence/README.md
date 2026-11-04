@@ -2,6 +2,8 @@
 
 `SeaOrmStore::connect(&str).await` connects to PostgreSQL and initializes or validates the game schema before returning the shared adapter. The database and role must already exist. `SeaOrmStore` implements the backend-neutral `GameRepository` port. Its database contains game state and the durable event outbox. It does not query or connect to the user service. SeaORM 2.0.4 is pinned with default features disabled and the PostgreSQL driver enabled.
 
+Ordinary data operations and table/index definitions use SeaQuery builders. SeaORM executes its generated statements directly. The record reader and Outbox retain their dedicated SQLx connections and use `sea-query-sqlx` to pass generated SQL and bound values separately. Handwritten SQL is limited to PostgreSQL locks, connection settings, catalog inspection, and the `C` collation expression. Test fixtures retain SQL for deliberate corruption and compatibility with the previous schema.
+
 ## Game storage
 
 `games` stores immutable participant IDs, the current version, and the final result. `journal` stores each accepted request's user, expected sequence, typed action encoded as canonical USI or resignation, and receipt. Foreign keys bind each journal entry to its game and each outbox row to its journal entry. A distinct-participant check rejects equal bindings. Composite uniqueness protects game sequence and game request ID. Result-pair checks reject either missing half of a terminal result. Identifiers use an order-preserving escape for NUL and the escape byte because PostgreSQL TEXT excludes NUL. The adapter decodes them before returning application values. All durable sequence conversions check the signed 64-bit range.
