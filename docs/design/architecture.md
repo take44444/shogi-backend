@@ -153,6 +153,7 @@ flowchart TB
   LB --> GW[Realtime Gateway<br/>Axum / WebSocket]
   GW -->|内部セッション照会| USER
   GW -->|Game ID → Shard → Owner| R[Game Router<br/>各Gateway・Matchmaking内の共通モジュール]
+  R -->|Shard配置表を参照・キャッシュして担当Podを解決| PG
   R -->|所有者へgRPC: CreateGame / GetSnapshot / MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
   API -->|マッチング申請・取消| MATCH[Matchmaking<br/>Rust / Valkey]
   API -->|終局済み棋譜・読取専用| PG
@@ -692,8 +693,10 @@ flowchart TB
     RDB[(Rating専用schema / PostgreSQL)]
   end
   GW --> VALKEY
+  GW -->|Game RouterがShard配置表を参照・キャッシュ| PG
   API --> VALKEY
   MATCH --> VALKEY
+  MATCH -->|Game RouterがShard配置表を参照・キャッシュ| PG
   MATCH <-->|成立予約・再試行状態| PG
   MATCH -->|内部レート一括照会| API
   RATE -->|レート・適用履歴| RDB
