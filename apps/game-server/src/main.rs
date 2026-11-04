@@ -1,9 +1,9 @@
-//! Composes SQLite persistence, the application services, and a plaintext gRPC listener.
+//! Composes PostgreSQL persistence, the application services, and a plaintext gRPC listener.
 
 use game_application::GameService;
 use game_grpc::{GameRpc, proto::game_service_server::GameServiceServer};
 use game_persistence::SeaOrmStore;
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,17 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "127.0.0.1:50051".to_owned())
         .parse()?;
     let url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite://data/shogi.db?mode=rwc".to_owned());
-    if let Some(path) = url.strip_prefix("sqlite://") {
-        let path = path.split('?').next().unwrap_or(path);
-        if path != ":memory:"
-            && let Some(parent) = Path::new(path)
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
+        .unwrap_or_else(|_| "postgres://shogi:shogi@localhost:5432/shogi".to_owned());
     let store = Arc::new(SeaOrmStore::connect(&url).await?);
     let service = GameRpc::new(GameService::new(store));
     eprintln!("game-server listening on {address}");

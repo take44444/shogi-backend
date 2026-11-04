@@ -1,7 +1,7 @@
 # player-server
 
 The server exposes completed public game records through `player-http` and the
-read-only `SqliteGameRecords` repository. Rates, matching, AI, user authentication,
+read-only `PostgresGameRecords` repository. Rates, matching, AI, user authentication,
 and ongoing-game synchronization are outside this implementation.
 
 Start `game-server` first so it initializes the game database.
@@ -10,12 +10,9 @@ Then run `cargo run -p player-server` from the workspace root.
 | Environment variable | Default | Meaning |
 |---|---|---|
 | `PLAYER_BIND_ADDR` | `127.0.0.1:8081` | HTTP socket address |
-| `PLAYER_GAME_DATABASE_PATH` | `data/shogi.db` | Existing SQLite file path, not a database URL |
+| `PLAYER_GAME_DATABASE_URL` | `postgres://shogi_reader:shogi_reader@localhost:5432/shogi` | PostgreSQL URL with SELECT-only credentials |
 
-`docker compose --profile records up --build -d` starts this service with the game
-volume mounted read-only. Its restart policy retries startup while the writer
-creates the database. It requires schema version 5 and readable live
-WAL and SHM files. It never initializes or creates the database.
+`docker compose --profile records up --build -d` starts the service with the `shogi_reader` role. Its restart policy retries startup while the writer initializes the schema. It requires schema version 5 and never initializes the database. [The bootstrap SQL](../../scripts/init-postgres.sql) grants SELECT on tables that the game writer creates. Deployments must grant the reader no table write privileges and no ownership of game objects.
 
 ## Query reference
 
@@ -74,12 +71,11 @@ record returns the same response.
 | 404 | `not_found` | No completed public record available |
 | 422 | `history_too_long` | More than 4096 operations or a response over 1 MiB |
 | 500 | `invalid_record` | Corrupt stored record, without partial history |
-| 503 | `unavailable` | Storage failure, SQLite deadline, pool timeout, or full request capacity |
+| 503 | `unavailable` | Storage failure, statement deadline, pool timeout, or full request capacity |
 
 Error responses use `{ "error": "code" }`. Handled responses have
 `Cache-Control: no-store`. The HTTP adapter permits 16 active queries, and the
-SQLite reader has four connections. Acquisition, busy waits, and SQLite execution
-each have a two-second bound. SQLite progress handlers interrupt long queries.
+PostgreSQL reader has four connections. Pool acquisition and PostgreSQL statement execution each have a two-second bound. Connections default to read-only transactions, and database role grants prevent table writes even if a session changes that default.
 No response includes retry IDs, receipts, expected sequences, or outbox data.
 
 `GET /openapi.json` serves the OpenAPI 3.1 contract. To export it without server

@@ -1,8 +1,8 @@
-use sea_orm::sea_query::Alias;
-use sea_orm::{
-    ConnectionTrait, DatabaseConnection, DbBackend, DbErr, SqliteTransactionMode, Statement,
-    TransactionOptions, TransactionTrait,
+use sea_orm::sea_query::{
+    Alias, ColumnDef, ConditionalStatement, Expr, ExprTrait, ForeignKey, Index, IndexOrder, Query,
+    Table, TableCreateStatement,
 };
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement, TransactionTrait};
 
 pub(crate) enum SchemaError {
     Database(DbErr),
@@ -20,31 +20,64 @@ pub(crate) fn a(name: &str) -> Alias {
 }
 
 pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaError> {
-    let tx = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
+    let tx = db.begin().await?;
+    tx.execute_unprepared("SELECT pg_advisory_xact_lock(6001133723959083848)")
         .await?;
     let tables = tx
         .query_all_raw(Statement::from_string(
-            DbBackend::Sqlite,
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'",
+            DbBackend::Postgres,
+            "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'",
         ))
         .await?;
     if tables.is_empty() {
-        for statement in [
-            "CREATE TABLE schema_version (id INTEGER PRIMARY KEY NOT NULL, version INTEGER NOT NULL)",
-            "INSERT INTO schema_version VALUES (0, 5)",
-            GAMES,
-            JOURNAL,
-            OUTBOX,
-            "CREATE INDEX outbox_pending ON outbox_events(published, id)",
-            "CREATE INDEX records_finished ON games(finished_at DESC, id COLLATE BINARY DESC) WHERE visibility = 'public' AND finished_at IS NOT NULL",
-            "CREATE INDEX records_black ON games(black, finished_at DESC, id COLLATE BINARY DESC) WHERE visibility = 'public' AND finished_at IS NOT NULL",
-            "CREATE INDEX records_white ON games(white, finished_at DESC, id COLLATE BINARY DESC) WHERE visibility = 'public' AND finished_at IS NOT NULL",
+        for table in [
+            Table::create()
+                .table(a("schema_version"))
+                .col(
+                    ColumnDef::new(a("id"))
+                        .big_integer()
+                        .primary_key()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(a("version")).big_integer().not_null())
+                .to_owned(),
+            games(),
+            journal(),
+            outbox(),
         ] {
-            tx.execute_unprepared(statement).await?;
+            tx.execute(&table).await?;
+        }
+        tx.execute(
+            Query::insert()
+                .into_table(a("schema_version"))
+                .columns([a("id"), a("version")])
+                .values_panic([0_i64.into(), 5_i64.into()]),
+        )
+        .await?;
+        tx.execute(
+            Index::create()
+                .name("outbox_pending")
+                .table(a("outbox_events"))
+                .col(a("published"))
+                .col(a("id")),
+        )
+        .await?;
+        for (name, participant) in [
+            ("records_finished", None),
+            ("records_black", Some("black")),
+            ("records_white", Some("white")),
+        ] {
+            let mut index = Index::create();
+            index.name(name).table(a("games"));
+            if let Some(participant) = participant {
+                index.col(a(participant));
+            }
+            index
+                .col((a("finished_at"), IndexOrder::Desc))
+                .col((Expr::cust("id COLLATE \"C\""), IndexOrder::Desc))
+                .and_where(Expr::col(a("visibility")).eq("public"))
+                .and_where(Expr::col(a("finished_at")).is_not_null());
+            tx.execute(&index).await?;
         }
     } else {
         let names = tables
@@ -59,8 +92,8 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
         }
         let columns = tx
             .query_all_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "PRAGMA table_info(schema_version)",
+                DbBackend::Postgres,
+                "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'schema_version'",
             ))
             .await?;
         if !["id", "version"].iter().all(|name| {
@@ -72,10 +105,11 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
             return Err(SchemaError::Corrupt);
         }
         let rows = tx
-            .query_all_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT id, version FROM schema_version",
-            ))
+            .query_all(
+                Query::select()
+                    .columns([a("id"), a("version")])
+                    .from(a("schema_version")),
+            )
             .await?;
         if rows.len() != 1
             || rows[0]
@@ -94,42 +128,184 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
     Ok(())
 }
 
-const GAMES: &str = "CREATE TABLE games (
-    id TEXT PRIMARY KEY NOT NULL, black TEXT NOT NULL, white TEXT NOT NULL,
-    version BIGINT NOT NULL CHECK(version >= 0), winner INTEGER, reason INTEGER,
-    rule TEXT NOT NULL CHECK(rule = 'standard'),
-    visibility TEXT NOT NULL CHECK(visibility IN ('public', 'private')),
-    finished_at BIGINT CHECK(finished_at IS NULL OR finished_at >= 0),
-    final_move_ply BIGINT NOT NULL CHECK(final_move_ply >= 0),
-    CHECK(black != white),
-    CHECK((winner IS NULL AND reason IS NULL AND finished_at IS NULL) OR
-        (winner IS NOT NULL AND reason IS NOT NULL AND finished_at IS NOT NULL
-         AND winner IN (1,2) AND reason IN (1,2)))
-)";
+fn games() -> TableCreateStatement {
+    Table::create()
+        .table(a("games"))
+        .col(
+            ColumnDef::new(a("id"))
+                .text()
+                .extra("COLLATE \"C\"")
+                .primary_key()
+                .not_null(),
+        )
+        .col(ColumnDef::new(a("black")).text().not_null())
+        .col(ColumnDef::new(a("white")).text().not_null())
+        .col(
+            ColumnDef::new(a("version"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("version")).gte(0)),
+        )
+        .col(ColumnDef::new(a("winner")).integer())
+        .col(ColumnDef::new(a("reason")).integer())
+        .col(
+            ColumnDef::new(a("rule"))
+                .text()
+                .not_null()
+                .check(Expr::col(a("rule")).eq("standard")),
+        )
+        .col(
+            ColumnDef::new(a("visibility"))
+                .text()
+                .not_null()
+                .check(Expr::col(a("visibility")).is_in(["public", "private"])),
+        )
+        .col(
+            ColumnDef::new(a("finished_at")).big_integer().check(
+                Expr::col(a("finished_at"))
+                    .is_null()
+                    .or(Expr::col(a("finished_at")).gte(0)),
+            ),
+        )
+        .col(
+            ColumnDef::new(a("final_move_ply"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("final_move_ply")).gte(0)),
+        )
+        .check(Expr::col(a("black")).ne(Expr::col(a("white"))))
+        .check(
+            Expr::col(a("winner"))
+                .is_null()
+                .and(Expr::col(a("reason")).is_null())
+                .and(Expr::col(a("finished_at")).is_null())
+                .or(Expr::col(a("winner"))
+                    .is_not_null()
+                    .and(Expr::col(a("reason")).is_not_null())
+                    .and(Expr::col(a("finished_at")).is_not_null())
+                    .and(Expr::col(a("winner")).is_in([1, 2]))
+                    .and(Expr::col(a("reason")).is_in([1, 2]))),
+        )
+        .to_owned()
+}
 
-const JOURNAL: &str = "CREATE TABLE journal (
-    game_id TEXT NOT NULL REFERENCES games(id), seq BIGINT NOT NULL CHECK(seq > 0),
-    request_id TEXT NOT NULL, user_id TEXT NOT NULL,
-    expected_seq BIGINT NOT NULL CHECK(expected_seq >= 0), action INTEGER NOT NULL,
-    usi TEXT, in_check BOOLEAN NOT NULL, winner INTEGER, reason INTEGER,
-    PRIMARY KEY(game_id, seq), UNIQUE(game_id, request_id),
-    CHECK(expected_seq = seq - 1),
-    CHECK((action = 1 AND usi IS NOT NULL) OR (action = 2 AND usi IS NULL)),
-    CHECK((winner IS NULL AND reason IS NULL) OR
-        (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2)))
-)";
+fn journal() -> TableCreateStatement {
+    Table::create()
+        .table(a("journal"))
+        .col(ColumnDef::new(a("game_id")).text().not_null())
+        .col(
+            ColumnDef::new(a("seq"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("seq")).gt(0)),
+        )
+        .col(ColumnDef::new(a("request_id")).text().not_null())
+        .col(ColumnDef::new(a("user_id")).text().not_null())
+        .col(
+            ColumnDef::new(a("expected_seq"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("expected_seq")).gte(0)),
+        )
+        .col(ColumnDef::new(a("action")).integer().not_null())
+        .col(ColumnDef::new(a("usi")).text())
+        .col(ColumnDef::new(a("in_check")).boolean().not_null())
+        .col(ColumnDef::new(a("winner")).integer())
+        .col(ColumnDef::new(a("reason")).integer())
+        .primary_key(Index::create().col(a("game_id")).col(a("seq")))
+        .index(
+            Index::create()
+                .unique()
+                .col(a("game_id"))
+                .col(a("request_id")),
+        )
+        .foreign_key(
+            ForeignKey::create()
+                .from(a("journal"), a("game_id"))
+                .to(a("games"), a("id")),
+        )
+        .check(Expr::col(a("expected_seq")).eq(Expr::col(a("seq")).sub(1)))
+        .check(
+            Expr::col(a("action"))
+                .eq(1)
+                .and(Expr::col(a("usi")).is_not_null())
+                .or(Expr::col(a("action"))
+                    .eq(2)
+                    .and(Expr::col(a("usi")).is_null())),
+        )
+        .check(result_pair())
+        .to_owned()
+}
 
-const OUTBOX: &str = "CREATE TABLE outbox_events (
-    id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, seq BIGINT NOT NULL,
-    event_kind INTEGER NOT NULL CHECK(event_kind IN (0,1)), encoding_version INTEGER NOT NULL,
-    request_id TEXT NOT NULL, user_id TEXT NOT NULL, usi TEXT, in_check BOOLEAN,
-    winner INTEGER, reason INTEGER,
-    published BOOLEAN NOT NULL DEFAULT 0 CHECK(published IN (0,1)),
-    UNIQUE(game_id, seq, event_kind),
-    FOREIGN KEY(game_id, seq) REFERENCES journal(game_id, seq),
-    CHECK((winner IS NULL AND reason IS NULL) OR
-        (winner IS NOT NULL AND reason IS NOT NULL AND winner IN (1,2) AND reason IN (1,2))),
-    CHECK((event_kind = 0 AND usi IS NOT NULL AND in_check IS NOT NULL
-            AND in_check IN (0,1) AND (reason IS NULL OR reason = 1))
-        OR (event_kind = 1 AND usi IS NULL AND in_check IS NULL AND winner IS NOT NULL))
-)";
+fn outbox() -> TableCreateStatement {
+    Table::create()
+        .table(a("outbox_events"))
+        .col(
+            ColumnDef::new(a("id"))
+                .big_integer()
+                .auto_increment()
+                .primary_key(),
+        )
+        .col(ColumnDef::new(a("game_id")).text().not_null())
+        .col(ColumnDef::new(a("seq")).big_integer().not_null())
+        .col(
+            ColumnDef::new(a("event_kind"))
+                .integer()
+                .not_null()
+                .check(Expr::col(a("event_kind")).is_in([0, 1])),
+        )
+        .col(ColumnDef::new(a("encoding_version")).integer().not_null())
+        .col(ColumnDef::new(a("request_id")).text().not_null())
+        .col(ColumnDef::new(a("user_id")).text().not_null())
+        .col(ColumnDef::new(a("usi")).text())
+        .col(ColumnDef::new(a("in_check")).boolean())
+        .col(ColumnDef::new(a("winner")).integer())
+        .col(ColumnDef::new(a("reason")).integer())
+        .col(
+            ColumnDef::new(a("published"))
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .index(
+            Index::create()
+                .unique()
+                .col(a("game_id"))
+                .col(a("seq"))
+                .col(a("event_kind")),
+        )
+        .foreign_key(
+            ForeignKey::create()
+                .from(a("outbox_events"), (a("game_id"), a("seq")))
+                .to(a("journal"), (a("game_id"), a("seq"))),
+        )
+        .check(result_pair())
+        .check(
+            Expr::col(a("event_kind"))
+                .eq(0)
+                .and(Expr::col(a("usi")).is_not_null())
+                .and(Expr::col(a("in_check")).is_not_null())
+                .and(
+                    Expr::col(a("reason"))
+                        .is_null()
+                        .or(Expr::col(a("reason")).eq(1)),
+                )
+                .or(Expr::col(a("event_kind"))
+                    .eq(1)
+                    .and(Expr::col(a("usi")).is_null())
+                    .and(Expr::col(a("in_check")).is_null())
+                    .and(Expr::col(a("winner")).is_not_null())),
+        )
+        .to_owned()
+}
+
+fn result_pair() -> Expr {
+    Expr::col(a("winner"))
+        .is_null()
+        .and(Expr::col(a("reason")).is_null())
+        .or(Expr::col(a("winner"))
+            .is_not_null()
+            .and(Expr::col(a("reason")).is_not_null())
+            .and(Expr::col(a("winner")).is_in([1, 2]))
+            .and(Expr::col(a("reason")).is_in([1, 2])))
+}

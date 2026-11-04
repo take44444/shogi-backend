@@ -168,6 +168,36 @@ async fn me() {}
         path.write_text('const MORE: &str = "CREATE TABLE IF NOT EXISTS sessions (id TEXT)";\n' + path.read_text())
         self.assert_stale("`sessions`")
 
+    def test_seaquery_tables_are_derived_from_identifiers(self) -> None:
+        self.put("crates/user-persistence/src/lib.rs", """
+#[derive(DeriveIden)]
+enum Accounts { Table, Id }
+#[derive(DeriveIden)]
+enum AccountSchemaVersion { Table, Version }
+#[derive(Iden)]
+enum Tokens { #[iden = "sessions"] Table, Id }
+fn schema() {
+    Table::create().table(Accounts::Table);
+    Table::create().table(AccountSchemaVersion::Table);
+    Table::create().table(Tokens::Table);
+}
+#[cfg(test)]
+mod tests { fn scratch() { Table::create().table(Unknown::Table); } }
+""")
+        self.refresh()
+        text = self.document.read_text()
+        for table in ("accounts", "account_schema_version", "sessions"):
+            self.assertIn(f"- `{table}`", text)
+        self.assertNotIn("`unknown`", text)
+        self.run_checker()
+
+    def test_unknown_seaquery_table_identifiers_fail_closed(self) -> None:
+        self.refresh()
+        path = self.root / "crates/user-persistence/src/lib.rs"
+        path.write_text("fn schema() { Table::create().table(Unknown::Table); }\n" + path.read_text())
+        result = self.run_checker("--write", success=False)
+        self.assertIn("Cannot parse every table declaration", result.stderr)
+
     def test_missing_required_inputs_fail_without_writing(self) -> None:
         self.refresh()
         for relative in ("Cargo.toml", "apps/server/Cargo.toml", "crates/user-http/src/lib.rs", "crates/user-persistence/src/lib.rs"):

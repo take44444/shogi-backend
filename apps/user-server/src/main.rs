@@ -1,21 +1,11 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 use user_http::{GoogleProvider, ServerConfig};
-use user_persistence::SqliteAccounts;
+use user_persistence::PostgresAccounts;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ServerConfig::from_env()?;
-    if let Some(path) = config.database_url.strip_prefix("sqlite://") {
-        let path = path.split('?').next().unwrap_or(path);
-        if path != ":memory:"
-            && let Some(parent) = Path::new(path)
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-    let store = Arc::new(SqliteAccounts::connect(&config.database_url).await?);
+    let store = Arc::new(PostgresAccounts::connect(&config.database_url).await?);
     let provider = Arc::new(
         GoogleProvider::discover(
             config.google_client_id,

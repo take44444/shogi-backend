@@ -3,6 +3,7 @@ set -eu
 cd "$(dirname "$0")/.."
 project="shogi-outbox-proof-$$"
 export GAME_SERVER_PORT="${GAME_SERVER_PORT:-55051}"
+export POSTGRES_PORT="${POSTGRES_PORT:-55435}"
 export NATS_PORT="${NATS_PORT:-54222}"
 cleanup() {
     result=$?

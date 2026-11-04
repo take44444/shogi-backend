@@ -11,7 +11,7 @@
 | POST | `/auth/logout` | Revokes the current session and clears the cookie. Requires matching `Origin`. |
 | GET | `/openapi.json` | Returns the OpenAPI document. |
 
-The public API accepts no caller-selected internal user ID and never links identities by email. Google access and refresh tokens are discarded after token verification. Sessions use random opaque browser cookies and SHA-256 hashes in SQLite, with a fixed server-side expiry. Successful login rotates the current browser session. All responses use `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
+The public API accepts no caller-selected internal user ID and never links identities by email. Google access and refresh tokens are discarded after token verification. Sessions use random opaque browser cookies and SHA-256 hashes in PostgreSQL, with a fixed server-side expiry. Successful login rotates the current browser session. All responses use `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
 
 Production cookies are host-only `__Host-user_session` and `__Host-user_login` cookies with `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`. Explicit loopback HTTP development mode uses `user_session` and `user_login` without `Secure`.
 

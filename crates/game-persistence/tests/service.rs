@@ -2,6 +2,7 @@ use game_application::{
     ApplicationError as Error, GameId, GameService, MakeMove, Participants, RequestId, Resign,
     UserId,
 };
+use pg_test_support::TestDatabase;
 use shogi_domain::{CommandError, FinishReason, Player};
 use std::sync::Arc;
 use tokio::{sync::Barrier, task::JoinSet};
@@ -47,7 +48,7 @@ fn ids_validate_bytes_and_unicode_whitespace() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
-    let service = setup().await;
+    let (_database, service) = setup().await;
     let barrier = Arc::new(Barrier::new(24));
     let mut tasks = JoinSet::new();
     for _ in 0..24 {
@@ -79,7 +80,7 @@ async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn competing_commands_at_one_sequence_accept_exactly_one() {
-    let service = setup().await;
+    let (_database, service) = setup().await;
     let game = id("race");
     service.create(game.clone(), participants()).await.unwrap();
     let mut tasks = JoinSet::new();
@@ -125,7 +126,7 @@ async fn competing_commands_at_one_sequence_accept_exactly_one() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_identical_retries_all_receive_original_acceptance() {
-    let service = setup().await;
+    let (_database, service) = setup().await;
     let game = id("retry");
     service.create(game.clone(), participants()).await.unwrap();
     let command = movement("same-request", 0, Player::Black, "7g7f");
@@ -153,7 +154,7 @@ async fn concurrent_identical_retries_all_receive_original_acceptance() {
 
 #[tokio::test]
 async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
-    let service = setup().await;
+    let (_database, service) = setup().await;
     let game = id("rejection");
     let before = service.create(game.clone(), participants()).await.unwrap();
     for (command, expected) in [
@@ -203,7 +204,7 @@ async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
 
 #[tokio::test]
 async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
-    let service = setup().await;
+    let (_database, service) = setup().await;
     let game = id("ledger");
     service.create(game.clone(), participants()).await.unwrap();
     let first = movement("first", 0, Player::Black, "7g7f");
@@ -251,8 +252,8 @@ async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
 
 #[tokio::test]
 async fn games_and_independent_services_have_separate_id_namespaces() {
-    let service = setup().await;
-    let other = setup().await;
+    let (_database, service) = setup().await;
+    let (_other_database, other) = setup().await;
     let (a, b) = (id("a"), id("b"));
     let initial_a = service.create(a.clone(), participants()).await.unwrap();
     let initial_b = service.create(b.clone(), participants()).await.unwrap();
@@ -296,11 +297,12 @@ fn participants() -> Participants {
         white: user(Player::White),
     }
 }
-async fn setup() -> GameService {
+async fn setup() -> (TestDatabase, GameService) {
+    let database = TestDatabase::new().await;
     let store = Arc::new(
-        game_persistence::SeaOrmStore::connect("sqlite::memory:")
+        game_persistence::SeaOrmStore::connect(database.url())
             .await
             .unwrap(),
     );
-    GameService::new(store)
+    (database, GameService::new(store))
 }

@@ -8,6 +8,22 @@ permissions:
 jobs:
   contracts:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: shogi
+          POSTGRES_PASSWORD: shogi
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shogi -d postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://shogi:shogi@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
         with:

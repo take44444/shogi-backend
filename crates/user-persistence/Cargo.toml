@@ -6,10 +6,10 @@ publish.workspace = true
 [dependencies]
 user-application = { path = "../user-application" }
 async-trait = "0.1"
-sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "sqlx-sqlite", "runtime-tokio"] }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "sqlx-postgres", "runtime-tokio"] }
 uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 tokio.workspace = true
-tempfile = "3"
+pg-test-support = { path = "../pg-test-support" }
 [lints]
 workspace = true

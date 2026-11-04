@@ -90,8 +90,8 @@ impl ServerConfig {
             .parse()
             .map_err(|_| ConfigError("USER_BIND_ADDR must be a socket address"))?;
         let database_url = required("USER_DATABASE_URL")?;
-        if !database_url.starts_with("sqlite:") {
-            return Err(ConfigError("USER_DATABASE_URL must be SQLite"));
+        if !(database_url.starts_with("postgres://") || database_url.starts_with("postgresql://")) {
+            return Err(ConfigError("USER_DATABASE_URL must be PostgreSQL"));
         }
         Ok(Self {
             browser,

@@ -135,9 +135,31 @@ def user_tables(root: Path) -> list[str]:
         source,
         re.IGNORECASE,
     )
-    if not tables or len(declarations) != len(tables):
-        raise ValueError(f"Cannot parse every CREATE TABLE name before #[cfg(test)] in {path}; update the checker")
-    return sorted(set(tables))
+    builders = re.findall(r"\bTable::create\s*\(\s*\)", source)
+    identifiers = re.findall(
+        r"\bTable::create\s*\(\s*\)\s*\.table\s*\(\s*([A-Za-z_][A-Za-z_0-9]*)::Table\s*\)",
+        source,
+    )
+    builder_tables = []
+    for identifier in identifiers:
+        enum = re.search(
+            rf"#\[derive\([^\]]*\b(?:DeriveIden|Iden)\b[^\]]*\)\]\s*enum\s+{re.escape(identifier)}\s*\{{([^}}]*)\}}",
+            source,
+        )
+        if not enum:
+            break
+        table = re.search(r'(?:#\[iden\s*=\s*"([A-Za-z_][A-Za-z_0-9]*)"\]\s*)?\bTable\s*,', enum[1])
+        if not table:
+            break
+        name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", identifier)
+        name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
+        builder_tables.append(table[1] or name)
+    if (not tables and not builder_tables
+            or len(declarations) != len(tables)
+            or len(builders) != len(identifiers)
+            or len(identifiers) != len(builder_tables)):
+        raise ValueError(f"Cannot parse every table declaration before #[cfg(test)] in {path}; update the checker")
+    return sorted(set(tables + builder_tables))
 
 
 def render_inventory(root: Path) -> str:
@@ -159,7 +181,7 @@ def render_inventory(root: Path) -> str:
         "",
         *[f"- `{route}`" for route in user_routes(root)],
         "",
-        "ユーザーSQLiteのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。",
+        "ユーザーPostgreSQLのテーブル。定義は `crates/user-persistence/src/lib.rs`（テストコードを除く）。",
         "",
         *[f"- `{table}`" for table in user_tables(root)],
         "",
