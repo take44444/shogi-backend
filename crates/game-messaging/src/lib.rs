@@ -1,18 +1,13 @@
-//! Version-one JSON and Core NATS publication. An exact event echo confirms
-//! server acceptance after socket flush. It does not acknowledge delivery to
-//! other subscribers or durability.
+//! Version-one JSON notifications over Valkey Pub/Sub. A PUBLISH response
+//! confirms acceptance, not subscriber delivery or durable storage.
 #![warn(missing_docs)]
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use game_application::{
-    CommittedEvent, DomainEvent, EventKind, EventPublisher, GameId, PublishError,
+    CommittedEvent, DomainEvent, EventKind, GameId, NotificationPublisher, PublishError,
 };
 use serde::Serialize;
 use shogi_domain::{FinishReason, GameResult, Player};
-use std::{
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
-};
+use std::time::Duration;
 
 fn hex(value: &str) -> String {
     use std::fmt::Write;
@@ -22,9 +17,8 @@ fn hex(value: &str) -> String {
     }
     encoded
 }
-/// Exact per-game subject. Lowercase UTF-8 hex preserves arbitrary valid IDs,
-/// including dots, wildcards, Unicode, and NUL, in one safe NATS token.
-pub fn game_subject(game: &GameId) -> String {
+/// Exact per-game channel. UTF-8 hex preserves IDs without glob metacharacters.
+pub fn game_channel(game: &GameId) -> String {
     format!("shogi.games.{}.events", hex(game.as_str()))
 }
 fn kind(kind: EventKind) -> &'static str {
@@ -97,98 +91,56 @@ fn encode(event: &CommittedEvent) -> Result<Vec<u8>, PublishError> {
     .map_err(|e| PublishError(e.to_string()))
 }
 
-/// Waits for the server to process prior commands on this connection.
-/// A fresh private inbox echo supplies the round trip that `Client::flush` alone
-/// does not provide. Requires publish and subscribe access to private inboxes.
-/// Useful for subscription readiness. This does not prove that a preceding
-/// publication was accepted; the server may have rejected that publication.
-/// Returns an error if the echo is absent after five seconds or the transport fails.
-pub async fn server_barrier(client: &async_nats::Client) -> Result<(), PublishError> {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let inbox = client.new_inbox();
-        let mut subscription = client
-            .subscribe(inbox.clone())
-            .await
-            .map_err(|e| PublishError(e.to_string()))?;
-        client
-            .publish(inbox, "barrier".into())
-            .await
-            .map_err(|e| PublishError(e.to_string()))?;
-        client
-            .flush()
-            .await
-            .map_err(|e| PublishError(e.to_string()))?;
-        let message = subscription
-            .next()
-            .await
-            .ok_or_else(|| PublishError("NATS barrier subscription closed".into()))?;
-        if message.payload.as_ref() != b"barrier" {
-            return Err(PublishError("unexpected NATS barrier payload".into()));
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|_| PublishError("NATS server barrier exceeded five seconds".into()))?
+/// Valkey Pub/Sub adapter with one connection and no automatic reconnection.
+/// After an uncertain failure, discard this adapter. Stop the Tokio runtime
+/// before releasing exclusive outbox ownership to stop the connection driver.
+pub struct ValkeyEventPublisher {
+    connection: Option<redis::aio::MultiplexedConnection>,
 }
-
-/// Core NATS adapter. The process must stop its Tokio runtime before releasing
-/// the exclusive outbox guard, including on errors or uncertain network timeouts.
-/// Publication requires publish and subscribe access to the game event subject.
-pub struct NatsEventPublisher {
-    client: async_nats::Client,
-}
-impl NatsEventPublisher {
-    /// Connects within five seconds. Returns a transport error on failure.
+impl ValkeyEventPublisher {
+    /// Connects within five seconds using a Redis-compatible URL.
     pub async fn connect(url: &str) -> Result<Self, PublishError> {
-        let attempted = AtomicBool::new(false);
-        let options =
-            async_nats::ConnectOptions::new().reconnect_to_server_callback(move |_, _| {
-                let initial = !attempted.swap(true, Ordering::SeqCst);
-                async move {
-                    if initial {
-                        None
-                    } else {
-                        std::future::pending().await
-                    }
-                }
-            });
-        // async-nats has no disable-reconnect option. Park its reconnect selector
-        // before a second dial so an echo cannot confirm a PUB lost on an old socket.
-        let client = tokio::time::timeout(Duration::from_secs(5), options.connect(url))
-            .await
-            .map_err(|_| PublishError("NATS connection exceeded five seconds".into()))?
-            .map_err(|e| PublishError(e.to_string()))?;
-        Ok(Self { client })
+        let client = redis::Client::open(url).map_err(|e| PublishError(e.to_string()))?;
+        let config = redis::AsyncConnectionConfig::new()
+            .set_connection_timeout(Some(Duration::from_secs(5)))
+            .set_response_timeout(Some(Duration::from_secs(5)));
+        let connection = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.get_multiplexed_async_connection_with_config(&config),
+        )
+        .await
+        .map_err(|_| PublishError("Valkey connection exceeded five seconds".into()))?
+        .map_err(|e| PublishError(e.to_string()))?;
+        Ok(Self {
+            connection: Some(connection),
+        })
     }
 }
 #[async_trait]
-impl EventPublisher for NatsEventPublisher {
+impl NotificationPublisher for ValkeyEventPublisher {
     async fn publish(&mut self, event: &CommittedEvent) -> Result<(), PublishError> {
         let payload = encode(event)?;
-        let subject = game_subject(&event.game_id);
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let mut echoes = self
-                .client
-                .subscribe(subject.clone())
+        let mut connection = self
+            .connection
+            .take()
+            .ok_or_else(|| PublishError("Valkey connection is no longer usable".into()))?;
+        let response: redis::Value = tokio::time::timeout(Duration::from_secs(5), async {
+            redis::cmd("PUBLISH")
+                .arg(game_channel(&event.game_id))
+                .arg(payload)
+                .query_async(&mut connection)
                 .await
-                .map_err(|e| PublishError(e.to_string()))?;
-            self.client
-                .publish(subject.clone(), payload.clone().into())
-                .await
-                .map_err(|e| PublishError(e.to_string()))?;
-            self.client
-                .flush()
-                .await
-                .map_err(|e| PublishError(e.to_string()))?;
-            while let Some(message) = echoes.next().await {
-                if message.subject.as_str() == subject && message.payload.as_ref() == payload {
-                    return Ok(());
-                }
-            }
-            Err(PublishError("NATS event echo subscription closed".into()))
         })
         .await
-        .map_err(|_| PublishError("NATS event echo exceeded five seconds".into()))?
+        .map_err(|_| PublishError("Valkey publication exceeded five seconds".into()))?
+        .map_err(|e| PublishError(e.to_string()))?;
+        if !matches!(response, redis::Value::Int(count) if count >= 0) {
+            return Err(PublishError(
+                "Valkey returned an invalid subscriber count".into(),
+            ));
+        }
+        self.connection = Some(connection);
+        Ok(())
     }
 }
 
@@ -266,7 +218,7 @@ mod tests {
         assert!(drop["result"].is_null());
     }
     #[test]
-    fn subjects_encode_every_id_byte_without_collisions_or_nats_metacharacters() {
+    fn channels_encode_every_id_byte_without_collisions_or_glob_metacharacters() {
         let inputs = ["a.b", "a*b", "a>b", "棋\0\"", "6162", "ab"];
         let subjects: std::collections::HashSet<_> = inputs
             .into_iter()
@@ -283,7 +235,7 @@ mod tests {
                 let encoded = encode(&event).unwrap();
                 let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
                 assert_eq!(value["game_id"], id);
-                let subject = game_subject(&event.game_id);
+                let subject = game_channel(&event.game_id);
                 assert_eq!(subject.split('.').count(), 4);
                 assert!(
                     subject
@@ -298,7 +250,7 @@ mod tests {
             .collect();
         assert_eq!(subjects.len(), inputs.len());
         assert_eq!(
-            game_subject(&GameId::new("棋\0").unwrap()),
+            game_channel(&GameId::new("棋\0").unwrap()),
             "shogi.games.e6a38b00.events"
         );
     }
@@ -319,45 +271,53 @@ mod transport_tests {
         sync::oneshot,
     };
 
-    struct Queue {
-        event: CommittedEvent,
-        marked: Arc<AtomicBool>,
+    fn event() -> CommittedEvent {
+        CommittedEvent {
+            game_id: GameId::new("棋.*\0").unwrap(),
+            request_id: RequestId::new("move-0").unwrap(),
+            user_id: UserId::new("black").unwrap(),
+            seq: 1,
+            event: DomainEvent::MoveCommitted {
+                movement: "7g7f".parse().unwrap(),
+                in_check: false,
+                result: None,
+            },
+        }
     }
+    struct Queue(Arc<AtomicBool>);
     #[async_trait]
     impl OutboxRepository for Queue {
         type Cursor = ();
         async fn next_pending(&mut self) -> Result<Option<OutboxItem<()>>, ApplicationError> {
             Ok(Some(OutboxItem {
                 cursor: (),
-                event: self.event.clone(),
+                event: event(),
             }))
         }
         async fn mark_published(&mut self, _: &OutboxItem<()>) -> Result<(), ApplicationError> {
-            self.marked.store(true, Ordering::SeqCst);
+            self.0.store(true, Ordering::SeqCst);
             Ok(())
         }
     }
-    #[derive(Clone, Copy)]
-    enum Behavior {
-        Echo,
-        Reject,
-        Disconnect,
+    async fn command(reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>) -> Vec<Vec<u8>> {
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let count: usize = line.trim().strip_prefix('*').unwrap().parse().unwrap();
+        let mut args = Vec::new();
+        for _ in 0..count {
+            line.clear();
+            reader.read_line(&mut line).await.unwrap();
+            let length: usize = line.trim().strip_prefix('$').unwrap().parse().unwrap();
+            let mut bytes = vec![0; length + 2];
+            reader.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(&bytes[length..], b"\r\n");
+            bytes.truncate(length);
+            args.push(bytes);
+        }
+        args
     }
-    async fn message(
-        write: &mut tokio::net::tcp::OwnedWriteHalf,
-        subject: &str,
-        sid: &str,
-        payload: &[u8],
-    ) {
-        write
-            .write_all(format!("MSG {subject} {sid} {}\r\n", payload.len()).as_bytes())
-            .await
-            .unwrap();
-        write.write_all(payload).await.unwrap();
-        write.write_all(b"\r\n").await.unwrap();
-    }
-    async fn fake_server(
-        behavior: Behavior,
+    async fn server(
+        reply: &'static [u8],
     ) -> (
         String,
         oneshot::Receiver<()>,
@@ -365,213 +325,115 @@ mod transport_tests {
         tokio::task::JoinHandle<()>,
     ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = format!("nats://{}", listener.local_addr().unwrap());
-        let (observed_tx, observed_rx) = oneshot::channel();
+        let url = format!("redis://{}", listener.local_addr().unwrap());
+        let (seen_tx, seen_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
         let task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let (read, mut write) = stream.into_split();
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read, mut write) = socket.into_split();
             let mut reader = BufReader::new(read);
-            write
-                .write_all(b"INFO {\"server_id\":\"fake\",\"max_payload\":1048576,\"proto\":1}\r\n")
-                .await
-                .unwrap();
-            let mut subscription = None;
             loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.unwrap() == 0 {
-                    break;
-                }
-                let fields: Vec<_> = line.split_whitespace().collect();
-                match fields[0] {
-                    "CONNECT" => {}
-                    "PING" => {
-                        write.write_all(b"PONG\r\n").await.unwrap();
-                    }
-                    "SUB" => {
-                        subscription = Some((fields[1].to_owned(), fields[2].to_owned()));
-                    }
-                    "PUB" => {
-                        let size: usize = fields.last().unwrap().parse().unwrap();
-                        let mut payload = vec![0; size + 2];
-                        reader.read_exact(&mut payload).await.unwrap();
-                        let (subject, sid) = subscription
-                            .take()
-                            .expect("subscribe before publishing the event");
-                        assert!(subject.starts_with("shogi.games."));
-                        assert_eq!(fields[1], subject);
-                        let value: serde_json::Value =
-                            serde_json::from_slice(&payload[..size]).unwrap();
-                        assert_eq!(value["type"], "move_committed");
-                        if matches!(behavior, Behavior::Reject) {
-                            write.write_all(format!("-ERR 'Permissions Violation for Publish to \"{subject}\"'\r\n").as_bytes()).await.unwrap();
-                        }
-                        message(&mut write, &subject, &sid, b"barrier").await;
-                        message(&mut write, "unrelated.subject", &sid, &payload[..size]).await;
-                        observed_tx.send(()).unwrap();
-                        release_rx.await.unwrap();
-                        if matches!(behavior, Behavior::Disconnect) {
-                            drop(write);
-                            drop(reader);
-                            assert!(
-                                tokio::time::timeout(Duration::from_secs(6), listener.accept())
-                                    .await
-                                    .is_err(),
-                                "publisher must not reconnect across an uncertain publication"
-                            );
-                        } else {
-                            if matches!(behavior, Behavior::Echo) {
-                                message(&mut write, &subject, &sid, &payload[..size]).await;
-                            }
-                            let mut rest = Vec::new();
-                            let _ = reader.read_to_end(&mut rest).await;
-                        }
+                let args = command(&mut reader).await;
+                match args[0].as_slice() {
+                    b"CLIENT" => write.write_all(b"+OK\r\n").await.unwrap(),
+                    b"PUBLISH" => {
+                        assert_eq!(args.len(), 3);
+                        assert_eq!(args[1], game_channel(&event().game_id).as_bytes());
+                        assert_eq!(args[2], encode(&event()).unwrap());
                         break;
                     }
-                    other => panic!("unexpected fake NATS command {other}"),
+                    other => panic!("unexpected Valkey command {other:?}"),
                 }
             }
+            seen_tx.send(()).unwrap();
+            release_rx.await.unwrap();
+            if !reply.is_empty() {
+                let _ = write.write_all(reply).await;
+                let mut extra = Vec::new();
+                reader.read_to_end(&mut extra).await.unwrap();
+                assert!(
+                    extra.is_empty(),
+                    "failed publication must not send another command"
+                );
+            } else {
+                drop(write);
+                drop(reader);
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err(),
+                "transport must not reconnect"
+            );
         });
-        (address, observed_rx, release_tx, task)
+        (url, seen_rx, release_tx, task)
     }
     #[tokio::test]
-    async fn only_an_exact_event_echo_can_mark_even_after_permission_rejection() {
-        for behavior in [Behavior::Echo, Behavior::Reject, Behavior::Disconnect] {
-            let (address, observed, release, server) = fake_server(behavior).await;
-            let publisher = NatsEventPublisher::connect(&address).await.unwrap();
+    async fn outbox_marks_only_after_a_valid_publish_response_including_no_subscribers() {
+        for (reply, accepted) in [
+            (b":0\r\n".as_slice(), true),
+            (b":3\r\n".as_slice(), true),
+            (b"-NOPERM publish denied\r\n".as_slice(), false),
+            (b"+OK\r\n".as_slice(), false),
+            (b"$1\r\n0\r\n".as_slice(), false),
+            (b":-1\r\n".as_slice(), false),
+            (b"".as_slice(), false),
+        ] {
+            let (url, seen, release, server) = server(reply).await;
+            let transport = ValkeyEventPublisher::connect(&url).await.unwrap();
             let marked = Arc::new(AtomicBool::new(false));
-            let queue = Queue {
-                event: CommittedEvent {
-                    game_id: GameId::new("test").unwrap(),
-                    request_id: RequestId::new("r").unwrap(),
-                    user_id: UserId::new("black").unwrap(),
-                    seq: 1,
-                    event: DomainEvent::MoveCommitted {
-                        movement: "7g7f".parse().unwrap(),
-                        in_check: false,
-                        result: None,
-                    },
-                },
-                marked: marked.clone(),
-            };
+            let queue = Queue(marked.clone());
             let mut job =
                 tokio::spawn(
-                    async move { OutboxPublisher::new(queue, publisher).publish_next().await },
+                    async move { OutboxPublisher::new(queue, transport).publish_next().await },
                 );
-            tokio::time::timeout(Duration::from_secs(2), observed)
-                .await
-                .unwrap()
-                .unwrap();
+            seen.await.unwrap();
             assert!(
-                tokio::time::timeout(Duration::from_millis(50), &mut job)
+                tokio::time::timeout(Duration::from_millis(25), &mut job)
                     .await
                     .is_err()
             );
             assert!(!marked.load(Ordering::SeqCst));
             release.send(()).unwrap();
-            let outcome = tokio::time::timeout(Duration::from_secs(7), job)
-                .await
-                .unwrap()
-                .unwrap();
-            let expected = matches!(behavior, Behavior::Echo);
-            assert_eq!(outcome.is_ok(), expected);
-            assert_eq!(marked.load(Ordering::SeqCst), expected);
-            if matches!(behavior, Behavior::Disconnect) {
-                tokio::time::timeout(Duration::from_secs(2), server)
-                    .await
-                    .unwrap()
-                    .unwrap();
-            } else {
-                server.abort();
-            }
+            assert_eq!(job.await.unwrap().is_ok(), accepted);
+            assert_eq!(marked.load(Ordering::SeqCst), accepted);
+            server.await.unwrap();
         }
     }
     #[tokio::test]
-    async fn rejected_event_cannot_be_confirmed_by_an_unrelated_echo() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = format!("nats://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let (read, mut write) = stream.into_split();
-            let mut reader = BufReader::new(read);
-            write
-                .write_all(b"INFO {\"server_id\":\"fake\",\"max_payload\":1048576,\"proto\":1}\r\n")
-                .await
-                .unwrap();
-            let mut subscriptions = std::collections::HashMap::new();
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.unwrap() == 0 {
-                    break;
-                }
-                let fields: Vec<_> = line.split_whitespace().collect();
-                match fields[0] {
-                    "CONNECT" | "UNSUB" => {}
-                    "PING" => {
-                        write.write_all(b"PONG\r\n").await.unwrap();
-                    }
-                    "SUB" => {
-                        subscriptions.insert(fields[1].to_owned(), fields[2].to_owned());
-                    }
-                    "PUB" => {
-                        let size: usize = fields.last().unwrap().parse().unwrap();
-                        let mut payload = vec![0; size + 2];
-                        reader.read_exact(&mut payload).await.unwrap();
-                        if fields[1].starts_with("shogi.games.") {
-                            write
-                                .write_all(
-                                    format!(
-                                        "-ERR 'Permissions Violation for Publish to \"{}\"'\r\n",
-                                        fields[1]
-                                    )
-                                    .as_bytes(),
-                                )
-                                .await
-                                .unwrap();
-                            if let Some(sid) = subscriptions.get(fields[1]) {
-                                write
-                                    .write_all(
-                                        format!("MSG {} {sid} 7\r\nbarrier\r\n", fields[1])
-                                            .as_bytes(),
-                                    )
-                                    .await
-                                    .unwrap();
-                            }
-                        } else {
-                            let sid = subscriptions.get(fields[1]).unwrap();
-                            write
-                                .write_all(format!("MSG {} {sid} {size}\r\n", fields[1]).as_bytes())
-                                .await
-                                .unwrap();
-                            write.write_all(&payload).await.unwrap();
-                        }
-                    }
-                    other => panic!("unexpected command {other}"),
-                }
-            }
-        });
-        let publisher = NatsEventPublisher::connect(&address).await.unwrap();
-        let marked = Arc::new(AtomicBool::new(false));
-        let queue = Queue {
-            event: CommittedEvent {
-                game_id: GameId::new("test").unwrap(),
-                seq: 1,
-                request_id: RequestId::new("r").unwrap(),
-                user_id: UserId::new("black").unwrap(),
-                event: DomainEvent::MoveCommitted {
-                    movement: "7g7f".parse().unwrap(),
-                    in_check: false,
-                    result: None,
-                },
-            },
-            marked: marked.clone(),
-        };
-        let outcome = OutboxPublisher::new(queue, publisher).publish_next().await;
+    async fn cancelled_publication_cannot_reuse_a_connection_or_reconnect() {
+        let (url, seen, release, server) = server(b":0\r\n").await;
+        let mut publisher = ValkeyEventPublisher::connect(&url).await.unwrap();
         assert!(
-            !marked.load(Ordering::SeqCst),
-            "a rejected event must remain pending even when an unrelated echo succeeds"
+            tokio::time::timeout(Duration::from_millis(100), publisher.publish(&event()))
+                .await
+                .is_err()
         );
-        assert!(outcome.is_err());
-        server.abort();
+        seen.await.unwrap();
+        assert!(publisher.publish(&event()).await.is_err());
+        release.send(()).unwrap();
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn publication_timeout_leaves_the_outbox_pending() {
+        let (url, seen, release, server) = server(b":0\r\n").await;
+        let transport = ValkeyEventPublisher::connect(&url).await.unwrap();
+        let marked = Arc::new(AtomicBool::new(false));
+        let queue = Queue(marked.clone());
+        let job =
+            tokio::spawn(
+                async move { OutboxPublisher::new(queue, transport).publish_next().await },
+            );
+        seen.await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(6), job)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_err()
+        );
+        assert!(!marked.load(Ordering::SeqCst));
+        release.send(()).unwrap();
+        server.await.unwrap();
     }
 }

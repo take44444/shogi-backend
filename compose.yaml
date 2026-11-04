@@ -70,21 +70,26 @@ services:
     entrypoint: ["outbox-publisher"]
     environment:
       DATABASE_URL: postgres://shogi:shogi@postgres:5432/shogi
-      NATS_URL: nats://nats:4222
+      VALKEY_URL: redis://valkey:6379
     depends_on:
       postgres:
         condition: service_healthy
       game-server:
         condition: service_started
-      nats:
-        condition: service_started
+      valkey:
+        condition: service_healthy
     init: true
     restart: on-failure
     stop_signal: SIGINT
     stop_grace_period: 15s
-  nats:
-    image: nats:2.11.10-alpine
+  valkey:
+    image: valkey/valkey:8.1-alpine
     ports:
-      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 volumes:
   pg-data:

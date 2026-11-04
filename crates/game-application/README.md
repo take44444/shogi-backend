@@ -66,12 +66,19 @@ rejected commands, exact retries, and history restoration produce no new events.
 
 `OutboxRepository` exposes exclusive, ordered pending-event access separately
 from `GameRepository`. `OutboxPublisher::publish_next` reads one event, calls
-`EventPublisher`, and marks only that row after publication succeeds. Storage
-and transport errors stop the step. A later step reads the earliest pending
-row again. A successful send followed by an uncertain mark can cause a duplicate
-with the same identity. Consumers must deduplicate the full event identity and
-recover missing sequences from a snapshot. The game actor never invokes a
-transport, and broker availability does not gate command acceptance.
+`NotificationPublisher`, and marks only that row after the broker accepts the
+transient notification. This success does not guarantee subscriber delivery,
+durable storage, or consumer completion. A broker may accept a notification with
+no subscribers. Storage and transport errors stop the step. A failed notification
+attempt leaves its row pending. If the mark's outcome is uncertain, a later read
+checks the stored state and returns the earliest pending row.
+
+A successful send followed by an uncertain mark can cause a duplicate with the
+same identity. Consumers must deduplicate the full event identity and recover
+missing sequences from a snapshot. The `published` flag does not represent a
+rating update or AI job's completion. Future durable jobs need separate storage
+and consumer completion state. The game actor never invokes a transport, and
+broker availability does not gate command acceptance.
 
 `GameId`, `RequestId`, and `UserId` require 1 through 128 bytes without whitespace.
 User IDs are internal caller claims, not authentication credentials.

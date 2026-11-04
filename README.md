@@ -2,7 +2,7 @@
 
 Run a durable shogi game over gRPC with PostgreSQL and a generated Rust client.
 Committed moves and game results are stored in a transactional outbox. An
-independent publisher sends them to Core NATS.
+independent publisher sends transient notifications through Valkey Pub/Sub.
 Rust, Cargo, and Docker Compose are required for these local commands. Cargo supplies vendored protoc.
 Start PostgreSQL before the local server. The bootstrap creates separate `shogi` and `users` databases and a read-only `shogi_reader` role.
 
@@ -56,8 +56,8 @@ See [player-server](apps/player-server/README.md) for filters, limits, and error
 
 ## Prove persistence across container recreation
 
-Build and start the services. Compose runs `game-server`, `outbox-publisher`, and
-NATS, and PostgreSQL. The server and publisher connect to the `shogi` database. PostgreSQL stores both service databases in the `pg-data` named volume.
+Build and start the services. Compose runs `game-server`, `outbox-publisher`,
+Valkey, and PostgreSQL. The server and publisher connect to the `shogi` database. PostgreSQL stores both service databases in the `pg-data` named volume.
 Compose binds the gRPC port to the host loopback address. Set `GAME_SERVER_PORT` to
 change the host port. These commands assume the default port.
 
@@ -89,30 +89,38 @@ produces `GameFinished`. A mating move produces both at the same sequence.
 Exact command retries return their original acceptance without adding events.
 The game server accepts commands while the publisher or broker is unavailable.
 
-The publisher subscribes to the event's subject, sends the pending event, and
-waits for an echo with the exact payload on the same connection before recording
-it as published. It needs publish and subscribe access to game event subjects.
-A socket flush alone does not confirm server processing. Failed operations exit the worker,
-and Compose restarts it to retry pending rows. Transparent reconnection is
-disabled so an echo on a replacement connection cannot confirm an earlier send.
-A failed or uncertain operation can resend the same event.
-Consumers deduplicate the full event identity and use a game snapshot
-to recover missing sequences. Core NATS does not retain events for disconnected
-subscribers, and the publisher's echo does not acknowledge other subscribers' delivery.
-The echo confirms a matching event, rather than acknowledging a particular
-client's publish operation.
+`NotificationPublisher` succeeds when the broker accepts a transient notification.
+The Valkey adapter sends `PUBLISH` and accepts a nonnegative integer reply, including zero
+subscribers. Success does not mean that a subscriber received or stored the event.
+Valkey Pub/Sub retains no messages for absent or disconnected subscribers.
+Failed or timed out commands leave the row pending and exit the worker. Compose
+restarts it to retry pending rows. The adapter does not reconnect automatically.
+A failed or uncertain operation can resend the same event. Consumers deduplicate
+the full event identity and use a game snapshot to recover missing sequences.
+A future Gateway also needs periodic reconciliation to detect a lost final event.
 
-The PostgreSQL publisher supports one active process per game database. A dedicated connection holds a session advisory lock, so a second publisher fails startup. All queue reads and acknowledgements use that connection. Losing the connection stops publication. Dispatch holds no database transaction across network calls. Published rows remain stored, and the first pending failure blocks later events.
+The outbox's `published` flag records notification acceptance only. It does not
+record rating updates, AI processing, or any other consumer's completion. Durable
+jobs require separate PostgreSQL job rows and consumer completion state. Those
+workers and the Gateway are not implemented.
 
-For a local publisher, start NATS and use the same database URL as the server.
+The PostgreSQL publisher supports one active process per game database. A dedicated connection holds a session advisory lock, so a second publisher fails startup. All queue reads and acknowledgements use that connection. Losing the connection makes subsequent queue operations fail, and the worker exits on that failure. Dispatch holds no database transaction across network calls. Published rows remain stored, and the first pending failure blocks later events.
+
+Shutdown stops the Tokio runtime before releasing the PostgreSQL connection.
+This stops the local connection driver. A `PUBLISH` already sent to Valkey may
+still execute after ownership is lost. The pending row may then be retried by a
+replacement publisher, producing a delayed duplicate or a different arrival order.
+
+For a local publisher, start Valkey and use the same database URL as the server.
 
 ```sh
-DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' NATS_URL='nats://127.0.0.1:4222' cargo run -p outbox-publisher
+docker compose up -d --wait valkey
+DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' VALKEY_URL='redis://127.0.0.1:6379' cargo run -p outbox-publisher
 ```
 
-Events use the subject `shogi.games.<hex-game-id>.events`, where `<hex-game-id>`
+Events use the channel `shogi.games.<hex-game-id>.events`, where `<hex-game-id>`
 is lowercase hexadecimal of the game ID's UTF-8 bytes. This preserves IDs that
-contain dots, NATS wildcards, or Unicode. The JSON envelope has `schema_version`
+contain dots, wildcard characters, or Unicode. The JSON envelope has `schema_version`
 1, a stable `event_id`, `type`, original `game_id`, `seq`, `request_id`, and
 `user_id`. Move events also contain canonical USI `movement` and `in_check`.
 `result` is null for an ongoing game or contains `winner` and `reason`.
@@ -134,10 +142,11 @@ Run the Compose proof from the repository root.
 ```
 
 It creates an isolated Compose project with a disposable PostgreSQL database volume. It
-checks actual NATS payloads, exact retries, backlog after publisher downtime,
-server recreation, commands during a NATS outage, and recovery without
-republishing marked rows. It uses host ports 55051, 54222, and 55435 unless overridden
-by `GAME_SERVER_PORT`, `NATS_PORT`, and `POSTGRES_PORT`. Cleanup removes only that proof project's
+checks actual Valkey Pub/Sub payloads, exact retries, backlog after publisher downtime,
+server recreation, automatic publisher restart during a Valkey outage, and recovery
+without republishing marked rows. It also checks acceptance with no subscribers
+and snapshot recovery after the notification was missed. It uses host ports 55051, 56379, and 55435 unless overridden
+by `GAME_SERVER_PORT`, `VALKEY_PORT`, and `POSTGRES_PORT`. Cleanup removes only that proof project's
 containers and volume.
 
 ## Read the API documentation
