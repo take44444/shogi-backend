@@ -154,7 +154,11 @@ flowchart TB
   GW -->|内部セッション照会| USER
   GW -->|Game ID → Shard → Owner| R[Game Router<br/>各Gateway・Matchmaking内の共通モジュール]
   R -->|Shard配置表を参照・キャッシュして担当Podを解決| PG
-  R -->|所有者へgRPC: CreateGame / GetSnapshot / MakeMove / Resign| GAME[Game Service Cluster<br/>Tokio Game Actors]
+  R -->|所有者へgRPC: CreateGame / GetSnapshot / MakeMove / Resign| GAME
+  subgraph GAME_CLUSTER[Game Service Cluster / game-server]
+    GAME[Tokio Game Actors]
+    RATE[Rating Task<br/>Actorとは別の非同期ループ]
+  end
   API -->|マッチング申請・取消| MATCH[Matchmaking<br/>Rust / PostgreSQL]
   API -->|終局済み棋譜・読取専用| PG
   MATCH -->|固定Game IDで所有者を解決| R
@@ -168,8 +172,9 @@ flowchart TB
   API <-->|Rate Limit / Cache| VALKEY
   API -->|解析要求| AAPI[AI API]
   AAPI -->|永続Job| PG
-  PG -->|Rating Jobをclaim| RATE[Rating Worker<br/>レート更新]
-  RATE -->|両対局者のレート・適用履歴| RDB[(Rating schema / PostgreSQL)]
+  PG -->|Rating Jobをclaim| RATE
+  RATE -->|両対局者のレート・台帳・参加枠解放| RDB[(Rating schema / PostgreSQL)]
+  MATCH <-->|参加枠の確保・取消、確定レート照合| RDB
   API -->|読取専用| RDB
   MATCH -->|内部レート一括照会| API
   PG -->|AI Jobをclaim| AI[AI Workers<br/>USI Engine / LLM]
@@ -180,17 +185,17 @@ flowchart TB
   SM -->|配置/復旧調整| GAME
 ```
 
-上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Player Serviceへ認証を再統合しない。Gatewayの認証境界は3.2節の将来方針に従い、現行のHTTPログインだけでWSを認証できるとはしない。永続ジョブの作成・処理完了はPostgreSQLで管理する。AI完了の一時通知にはOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。Ratingの入力受入境界は9.4節に従う。
+上図は将来の論理構成であり、現行の独立したUser ServiceとユーザーDBの所有権を維持する。Player Serviceへ認証を再統合しない。Gatewayの認証境界は3.2節の将来方針に従い、現行のHTTPログインだけでWSを認証できるとはしない。永続ジョブの作成・処理完了はPostgreSQLで管理する。AI完了の一時通知にはOutbox等を用い、通知が欠落しても結果をAPIで取得可能にする。Rating Taskは初期には各game-serverプロセス内で動かす。Rating schemaも対局と同じDB内に置く。更新の責務・トランザクション境界は9.4節に従う。
 
 ### 3.1 アプリケーション単位
 
 - **User Service**: Google認証、登録、プロフィール、独自セッション。現行の `user-server` の責務を維持する
 - **Player Service（`player-server`）**: 対局者・観戦者向けHTTPの照会と受付。棋譜検索・詳細、レート取得、対局設定、マッチング申請・取消、AI解析受付・結果取得を各領域の契約で提供する。取得専用サービスではなく、対局準備の要求も受け付ける。詳細は3.3節
 - **Realtime Gateway**: WebSocketの接続認証、対局/観戦購読、着手の転送、再同期、送信キュー制限
-- **Game Service**: 各Game Actor、時計、合法手、結果確定、Shard復旧
+- **Game Service**: 各Game Actor、時計、合法手、結果確定、Shard復旧。初期はRating Taskも同じプロセスで実行する
 - **Shard Manager（独立アプリ）**: Game Podの登録・負荷収集、Shard配置・再配置計画、障害復旧の調整
 - **Matchmaking Worker**: 初期はPostgreSQLの待機データから候補を選び、9.3節の永続予約と対局作成の照合により成立を確定する
-- **Rating Worker**: PostgreSQLに保存した終局入力のジョブから両対局者のレートを更新する。計算、適用履歴、重複排除、復旧はRating領域が所有する。取得はPlayer Serviceが担当する。詳細は9.4節
+- **Rating Task（Game Service内）**: PostgreSQLに保存した終局入力のジョブから両対局者のレートを更新する。計算、適用履歴、重複排除、復旧はRatingモジュールが所有する。Game Actorの要求処理とは別に実行し、取得はPlayer Serviceが担当する。独立Deploymentへの分離条件は9.4節
 - **AI Worker**: USIエンジン実行・解析結果保存、必要に応じてLLM説明
 - **Background Worker**: 通知、統計、監査、不正検知など
 
@@ -510,7 +515,7 @@ Pub/Subの通知欠落には連番とSnapshotで対応する。最後の通知�
 
 ### 9.3 マッチング成立と対局作成（将来設計・未実装）
 
-初期はPostgreSQLに待機データと成立予約を保存し、候補を選ぶ。候補検索が負荷要件を満たさないと実測した場合だけ、Valkeyに再構築可能な候補インデックスを追加する。成立の正本は常にDBの永続予約とする。予約には`match_id`、固定した`game_id`、参加者、対局ルール、状態を保存する。同一ユーザーが複数の有効な予約へ参加しないようDBの一意制約で保護し、Valkey上の原子的処理だけに重複防止を依存させない。
+初期はPostgreSQLに待機データと成立予約を保存し、候補を選ぶ。候補検索が負荷要件を満たさないと実測した場合だけ、Valkeyに再構築可能な候補インデックスを追加する。成立の正本は常にDBの永続予約とする。予約には`match_id`、固定した`game_id`、参加者、対局ルール、状態を保存する。同一ユーザーが同じ対局区分で複数の有効予約へ参加しないようDBの一意制約で保護し、Valkey上の原子的処理だけに重複防止を依存させない。レーティング対局では、予約中から終局後のレート反映まで9.4節の参加枠も保持する。予約の成立確認だけでは参加枠を解放しない。
 
 分散構成では、Matchmaking Worker内のGame Routerが固定した`game_id`からShardを計算し、配置表で解決した所有者Podへ`CreateGame`を直接gRPC送信する。Shard ManagerはShardの配置を管理し、作成要求を中継しない。所有者が未配置・復旧中の場合は再試行可能な状態として待ち、任意のPodへ作成する代替経路は設けない。
 
@@ -522,7 +527,7 @@ Game Serviceは対局作成時も、対象Shardの所有者・Lease期限・Fenc
 |---|---|
 | `RESERVED` | 参加者を予約済み。作成開始時に`CREATING`へ移す。作成開始前のキャンセル・期限切れは`CANCELLED`へ移して予約を解放する |
 | `CREATING` | 固定した`game_id`で対局作成中。結果不明もこの状態に残し、照会・再試行で解決する |
-| `MATCHED` | 予約内容と一致する対局の作成を確認済み。同じ成立結果を返す |
+| `MATCHED` | 予約内容と一致する対局の作成を確認済み。同じ成立結果を返す。レーティング参加枠の解放を意味しない |
 | `CANCELLED` | 対局作成を開始せず予約を取消済み。この予約からの作成を許可しない |
 
 Game Serviceには、同じ`match_id`・`game_id`・参加者・ルールで対局作成を再試行すると既存の同じ結果を返し、内容が異なれば拒否する契約を追加する。現行の`CreateGame`はこの契約を実装していない。応答を失っても新しいIDで別の対局を作らず、保存済みIDで再照会・再試行する。
@@ -533,44 +538,138 @@ Game Serviceには、同じ`match_id`・`game_id`・参加者・ルールで対�
 
 レーティング対局の候補選択には、9.4節の内部一括取得APIから得たpool別の値・評価状態・versionを使い、予約に取得値と取得時刻を記録する。レーティング対象の可否、pool、判定ポリシー版も予約と対局作成の一致条件に含める。クライアントの申告値を採用せず、取得失敗は未評価者や初期値として扱わず待機・再試行する。
 
+レーティング対局の成立予約は、同じDBトランザクションで両参加者の参加枠を確保してから作成する。候補照会の値をそのまま開始レートにせず、参加枠の行ロック下でPrimaryの確定値・versionを再照合する。変化していれば候補条件を再評価し、条件を満たす場合だけ最新値で予約する。開始入力には両者のレート状態・version・直前の適用IDと、有効世代・計算版・必要な時刻等を固定する。
+
+すべてのレーティング対象の`CreateGame`は、同じ`match_id`・`game_id`・参加者・pool・開始入力に対応する`CREATING`の永続予約と両参加枠を、対局保存と同じトランザクションで検証する。直接RPCでもこの検証を省略しない。初期の同一DB構成では、対局保存・ShardのFencing検証・予約の`CREATING → MATCHED`を同時に確定する。Workerは保存済み結果を照合して応答する。既存対局への同一内容の作成再送は、参加枠が後続対局へ移っていても元の結果を返す。既存対局の同一性確認を、新規作成用の参加枠検証より先に行う。
+
 ### 9.4 レーティングの更新と取得（将来設計・未実装）
 
-レート更新と取得は、同じRating領域の契約を使う別の実行単位に分ける。既存の将来Player Serviceに取得を置き、更新は独立したRating Workerで処理する。取得専用サービスを追加する案は、独立した負荷・運用上の要件が生じた時点で検討する。
+初期はGame Service内のRating Taskで非同期に更新し、Player Serviceで取得する。Ratingの計算・保存契約はGame Actorから分離するが、更新用の独立プロセス・Deploymentは追加しない。独立したRating Workerは、実測した負荷や障害隔離の要件に応じて選ぶ配置とする。
 
-| 実行単位 | 責務・境界 |
+#### 必要な境界と実行配置
+
+対局結果は1局の状態である一方、レートは複数の対局・Shardをまたぐユーザーの状態である。そのため、対局を所有するActorだけではレート更新を排他できない。必要な保証は次のとおりとする。
+
+- 終局結果と更新入力を原子的に保存し、プロセス停止後も未処理入力を回収する。
+- 両対局者のレートと適用台帳を原子的に更新し、同じ対局を重複適用しない。
+- 同じユーザー・poolの次局は、前局のレート反映後にだけ予約する。ジョブの到着順でその人の適用順を変えない。
+- レート更新のロック待ち・再試行を終局応答や次の着手の処理経路に入れない。
+- 更新済みのレートをPlayer ServiceとMatchmakingから取得できるようにする。
+
+これらをDBの永続ジョブ・トランザクションとRatingモジュールの契約で実現する。別Deploymentであること自体は、競合・重複・順序を解決しない。配置は次の3案を比較する。
+
+| 配置案 | 得られる性質 | 負担・制約 | 初期の判断 |
+|---|---|---|---|
+| Game Actorの終局トランザクションで同期更新 | 終局応答時にレートも確定する | レート計算の失敗が終局確定を待たせる。共有レートをActorの処理経路へ持ち込む | 採用しない。終局は先に確定し、次局の予約を反映完了まで待たせる |
+| game-server内のRating Taskで非同期更新 | 終局と適用を分離し、既存Deploymentで実行できる | CPU・メモリ・プロセス障害・リリースをGame Actorと共有する | 採用する。永続ジョブで再開し、処理量を制限する |
+| 独立Rating Workerで非同期更新 | 更新処理の資源・再起動・リリースを独立させられる | Deployment・監視・配布設定が増える。共有DBの競合制御は引き続き必要 | 分離条件を満たした場合に採用する |
+
+レート計算の処理時間・終局件数は未計測であり、同居で目標負荷を処理できるという性能保証は置かない。独立した取得サービスや別DBも初期の前提にしない。
+
+| モジュール・実行単位 | 責務・境界 |
 |---|---|
-| Rating Worker（`rating-worker`） | 確定済み終局結果の検証、レート計算、両対局者の原子的更新、適用履歴と再送・復旧。Ratingデータの唯一の書込み担当 |
+| Ratingモジュール / Rating Task | 確定済み終局結果の検証、レート計算、両対局者の原子的更新、適用履歴と再送・復旧。Ratingデータの書込みはこの契約に限定し、初期はgame-server内で実行する |
 | Player Service（`player-server`） | 公開HTTPでのユーザー別取得と、Matchmaking向け内部一括取得。Ratingの照会契約と読取専用DB権限を使う |
-| Game Service | 参加者・ルール・対象判定・終局結果の正本。終局と更新入力を同じトランザクションで確定し、レート計算は行わない |
+| Game Actor / Game永続化 | 参加者・ルール・対象判定・終局結果の正本。終局と更新入力・ジョブを同じトランザクションで確定する。Rating Taskの適用完了を待たずに応答する |
 | User Service | 認証・プロフィール・セッションを維持する。Ratingは内部UserIdで参照し、ユーザーDBのテーブル・接続・スキーマ管理を共有しない |
+
+#### 競技上の順序と参加枠
+
+同じユーザー・poolでは、レーティング対局を1局だけ進行可能とし、前局のレート反映が完了するまで次局の成立予約を作らない。終局応答は先に返すが、画面は「レート反映待ち」を示し、同じpoolの再マッチを待たせる。異なるpoolは独立したレートを持つ。非レーティング対局の同時進行可否は別の対局ポリシーで決める。
+
+| 順序の決め方 | 性質・制約 | 判断 |
+|---|---|---|
+| pool全体の終局確定順を採番して順番に適用 | 同時進行を許容できるが、全対局の採番・欠番管理が必要。先頭の障害がpool全体を待たせる | 初期は採用しない |
+| ユーザー別に前局反映後の次局を予約 | その人の対局順と適用順が一致する。反映待ちの利用者は次局を開始できない | 採用する。1人1局という対局条件に対応する |
+| 固定期間の結果をまとめて計算 | 期間内の個別の適用順を制度から除けるが、反映時期と計算制度を変更する必要がある | 初期は採用しない |
+
+`rated_participations`は`(user_id, pool_id)`をキーとする永続参加枠であり、`FREE`か`HELD(match_id, game_id)`のいずれかとする。世代変更で同じ人に別枠を作らないため、キーにレートの世代を含めない。初回予約も一意キーで行を作成してロックし、同時に複数の枠を作れないようにする。両者が`FREE`であることの確認、両枠の確保、永続予約を一つのトランザクションで確定する。
+
+```mermaid
+stateDiagram-v2
+  [*] --> FREE
+  FREE --> HELD: 両者の枠と成立予約を同時確定
+  HELD --> HELD: 対局作成・進行・終局・反映待ち・障害復旧
+  HELD --> FREE: 作成開始前の取消を確定
+  HELD --> FREE: 両者のレート・台帳・ジョブ完了を同時確定
+```
+
+`HELD`はプロセスのLeaseではなく業務上の参加枠であり、TTL・Pod停止・Shard移動・ジョブclaim期限切れでは解放しない。作成前の取消は、予約が`RESERVED`であることと両枠が同じ予約を指すことを確認し、`CANCELLED`への遷移と同時に両枠を解放する。`CREATING`の結果不明時は9.3節の照合・再試行を継続し、作成済みか不明なまま枠を解放しない。対局開始後は、対象外・無効局も確定した判定を台帳に保存してから解放する。
+
+順序保証の対象は、各ユーザー・poolの対局間の因果関係とする。例えばA対Bの反映後にA対Cを開始する。独立したD対Eは、どちらを先に処理しても各利用者のレートが同じになる計算契約に限定する。pool全体の終局時刻順や、すべての利用者に共通する適用順は必要としない。
+
+このため、計算は両者の固定した開始状態、確定結果、版付きの制度設定だけから決まる関数とする。時刻依存の補正が必要なら基準時刻を入力に固定する。Workerの実行時刻、ジョブ取得順、poolの処理件数、他ユーザーの順位や途中状態を計算に使わない。この条件を満たさない計算方式や同一poolでの同時対局を導入する場合は、期間集計等も含めて順序保証を再設計する。
+
+#### Eloの採用と計算契約
+
+レーティング計算方式は、1局ごとに更新するEloを採用する。期待得点には底10・レート差の尺度400のロジスティック式を使う。この期待得点式は[Rosenthalの研究報告のChess Ratings and Expected Scores節](https://probability.ca/jeff/ftpdir/chessstreaksadd.pdf)を参照する。本アプリでは次の式を計算契約とする。
+
+```text
+E_A = 1 / (1 + 10^((R_B - R_A) / 400))
+E_B = 1 - E_A
+R_A_new = R_A + K_A * (S_A - E_A)
+R_B_new = R_B + K_B * (S_B - E_B)
+```
+
+`R_A`と`R_B`は予約確定時に固定した両者の開始レート、`E`は期待得点、`S`は確定結果の得点、`K`は更新幅を決める係数である。勝ちを1、負けを0とし、引分けを評価対象にする場合は両者を0.5とする。対象外・無効局には引分けの得点を代入せず、前述の値を変えない適用として記録する。両者の期待得点・更新量を同じ開始状態から計算し、片方の更新後の値をもう片方の計算に使わない。
+
+`K_A`と`K_B`は版付きの制度設定と各人の開始状態から決め、更新入力に固定する。暫定期間や対局数でKを変える場合も、その判定に必要な状態を開始入力に含める。適用時の現在時刻や、その後に集まった対局数からKを再選択しない。参考として[FIDEの2022年規則8.3節](https://handbook.fide.com/chapter/B022022)には期間集計とKの規則があるが、本アプリは1局単位の更新とし、その期間集計・Kの具体値・丸め規則は採用条件に含めない。
+
+このEloは両者の開始状態・結果・固定したKだけで計算できるため、前述の計算契約に適合する。参加者が重ならない対局は更新対象も計算入力も重ならず、処理順を入れ替えても同じ結果になる。同じユーザーの連続対局ではEloも適用順に依存するが、参加枠を前局の反映まで保持することで、その人の対局順に計算できる。
+
+再送・再構築で同じ結果を得るため、計算版には数値の保存精度、指数計算の方法と精度、中間値と最終値の丸め位置・規則も含める。表示用の丸め値を次局の入力に使わない。Kが両者で異なる場合や、丸め・レート下限を設ける場合は、増減の合計が0になると仮定しない。Kの具体値・選択規則、初期値、暫定期間、保存精度・丸め、レート差の上限制限・レート下限の有無は導入前に確定する。採用する数値実装には、同点・勝敗反転・大きなレート差・丸め境界・暫定状態の境界を含む既知の入出力を用意し、対応する実行環境で再現性を検証する。
 
 #### 更新入力と永続ジョブ
 
-poolはルール・持ち時間等で分けるレーティング区分を表す。信頼されたMatchmakingの予約に基づき、対局作成時に両参加者、pool、対象判定とそのポリシー版を固定する。Game Serviceは終局時に、これらと勝敗・終局理由、終局seq・確定時刻、入力ID・入力形式版をGame領域の確定入力として同じトランザクションで固定する。計算には適用直前の両者のレートを使い、マッチング時の表示値で上書きしない。
+poolはルール・持ち時間等で分けるレーティング区分を表す。信頼されたMatchmakingの予約に基づき、対局作成時に両参加者、pool、対象判定とそのポリシー版、両者の開始状態・version・直前の適用ID、有効世代・計算版を固定する。Game Serviceは終局時に、これらと勝敗・終局理由、終局seq・確定時刻、入力ID・入力形式版をGame領域の確定入力として同じトランザクションで固定する。適用時の現在値が開始versionと一致することを検証し、計算には固定した開始状態を使う。候補選択時の古い表示値やクライアントの申告値を使わない。
 
 現行の`CreateGame`と`GameFinished`には、この設定や両参加者を含む更新入力が揃っていない。導入時に作成契約・保存形式・通信形式を拡張する。現行イベントの`user_id`は操作した参加者であり、両対局者を示さない。入力の不足する旧イベントを推測で適用せず、初期導入は新契約で作成した対象対局から開始する。既存履歴の遡及計算は別途移行を設計する。
 
-Game領域とジョブ保存先が同じDBトランザクションを使える場合は、終局・固定入力・Rating用ジョブを原子的に保存する。Game側はジョブ作成だけを担い、Ratingの値・適用履歴を更新しない。別DB境界では、専用OutboxからRating側の永続Inboxへ同じ入力ID・内容を送り、受信側がInboxとジョブを原子的に保存した後にだけ受入確認を返す。送信元は確認後に宛先別の受入済み状態を記録し、確認不明時は同じIDで再送する。受信側は入力IDで重複を排除し、同一IDの異なる内容を隔離する。
+初期は対局・Rating schema・ジョブを同じPostgreSQLの同じDBへ配置し、終局・固定入力・Rating用ジョブを原子的に保存する。Game Actorの保存経路はジョブ作成までを担い、Ratingの値・適用履歴を更新しない。Rating Taskは永続ジョブを定期走査する。メモリ内のキューや通知を追加する場合も起床の補助に限定し、再起動後はDBから再開する。
+
+将来、DBも分割する場合は、専用OutboxからRating側の永続Inboxへ同じ入力ID・内容を送り、受信側がInboxとジョブを原子的に保存した後にだけ受入確認を返す。送信元は確認後に宛先別の受入済み状態を記録し、確認不明時は同じIDで再送する。受信側は入力IDで重複を排除し、同一IDの異なる内容を隔離する。ただし、この中継だけでは成立予約と参加枠の原子性を維持できない。別DB化は予約・枠確保・解放の分散プロトコルも具体化して検証するまで採用しない。実行プロセスだけの分離は同じDBとジョブを維持できる。
 
 この永続受入は、Ratingの業務完了とも、観戦通知用の`outbox_events.published`とも別の状態である。一時通知の完了・停止がRatingジョブの作成・再試行を消したり止めたりしないようにする。Pub/Subの購読からジョブへ転送する経路は使わない。現行の単一通知フラグは変更せず、永続ジョブの導入時に専用の状態と保存契約を実装する。
 
 #### 適用の一意性・順序・復旧
 
-Rating Workerは期限付きclaimでジョブを取得し、Rating専用schema内の一つのDBトランザクションで、poolの状態行をロックし、適用済み確認、両参加者の初期行作成・現在値更新、入力と更新前後の値・計算版・適用番号の記録を行う。`(世代, game_id)`を一意にし、イベントIDや申告poolが変わっても同じ対局を再加算しない。同一対局の異なる入力や未知の形式は適用せず、永続的に隔離・警報して調査する。対象外という判定も記録する。
+Rating Taskは期限付きclaimでジョブを取得し、有効なclaimを検証した一つのDBトランザクションで適用する。まず`(世代, game_id)`の台帳を照合し、同じ固定入力の適用済み対局ならレート・参加枠を変更せず完了を照合する。これにより、古い再送で後続対局の参加枠を解放しない。同じ対局の異なる入力や未知の形式は適用せず隔離・警報する。
 
-完了は業務更新のDB Commitを根拠に記録する。初期の同一DB構成では、両参加者の更新、適用台帳、ジョブ完了を同じトランザクションに含める。完了状態が別DB境界なら、業務Commit後に完了を記録し、その間の停止は適用履歴で重複排除する。Commit前の停止はclaim期限後に再実行し、結果不明のCommitは同じキーで照合する。両者を別トランザクションで更新せず、一時通知の受入状態に依存しない。
+未適用の対局では、行ロック取得後にも台帳を再確認し、未適用なら両参加枠が同じ予約・対局を保持すること、両者の現在version・直前の適用IDが固定入力と一致すること、世代・計算版が有効であることを検証する。両者の初期行作成・レート更新、更新前後の状態と因果関係を持つ適用台帳、ジョブ完了、両参加枠の解放を同時にCommitする。台帳は`(世代, game_id)`を一意とし、イベントIDや申告poolが変わっても再加算しない。対象外・無効局も値を変えない適用として記録し、両者のversionと直前の適用IDを進めてから解放する。初回のレート行なしは、制度で定めた初期状態・version 0・直前の適用IDなしとして検証する。通常適用以外の手動更新やプロフィール処理で、この契約を迂回してレートを書き換えない。
 
-初期は逐次処理とし、DBのpool単位の排他でも重複稼働・同一ユーザーの複数対局による更新消失を防ぐ。適用順はpoolごとのDB確定順とし、同じトランザクションで単調増加する適用番号を採番する。終局時刻順や複数Game Actorを横断したseq順は保証せず、遅着した結果は後から適用する。再構築には保存した順序・入力・計算版を使う。同じpoolの水平並列化や時刻順への変更は、計算結果と競合制御を検証してから導入する。
+予約・取消・対局作成・適用で複数行をロックする場合は、pool設定、成立予約、UserIdの固定順による参加枠、同じ順のレート行という共通の順序を使う。pool設定は共有ロックで読んで検証し、通常適用では書き換えない。新規成立予約は`OPEN`のときだけ許可する。既存予約の対局作成・取消・適用は`DRAINING`でも継続できるようにする。pool全体の排他ロックや全体適用番号の採番を通常経路に置かず、参加者の重ならない対局は並列に適用できるようにする。ロック待ちには上限を設けて再試行する。claimの取得トランザクションは先に終了し、業務トランザクションの完了時には所有者・世代・期限を条件付き更新で再検証する。旧claimの処理が失効していれば業務更新全体をロールバックする。
 
-ジョブ作成・受入の障害やDB復元による欠落に備え、一時通知や永続受入の状態にかかわらずGame側の確定入力全件とRatingの適用履歴を定期照合し、未適用の対局を同じIDで再投入する。確定入力と計算版は再構築可能な期間だけ保存・アーカイブし、削除前に適用完了と復旧対象期間を照合する。ジョブ・Inboxの保持期間、DBのバックアップ・復元、停止中に蓄積した結果の回収を運用要件とする。結果訂正や計算方式変更による再計算は通常の再送と分離する。別世代への再構築・検証・切替には、並行して到着する新結果を取りこぼさない境界と追従手順が必要であり、導入前に具体化する。
+各Game Podは同時処理数を制限したRating Taskを動かし、全Game Shard共通のジョブを取得する。Rating専用のShardは設けず、ジョブを終局したPodやGame Shardの所有権に紐付けない。Game ShardのLease・Fencing世代をジョブclaimや参加枠に流用しない。Pod停止後は別Podが期限切れclaimを回収し、同じ入力を適用する。Commit前の停止は再試行し、Commit結果不明は台帳で照合する。ジョブの実行順を変えても、同じユーザー・poolの後続レーティング対局は前局反映前に存在しないため追い越せない。
+
+入力・version・参加枠の不一致や未知形式は隔離し、未適用の当該対局が保持する枠を解放せず調査する。古い対局の不正な再送で、別の対局が持つ枠を変更しない。タイムアウトだけで適用を飛ばしたり枠を解放したりしない。正常な別参加者の対局は処理を続ける。障害中にレート適用が止まっても終局結果は確定できるが、その利用者の同じpoolでの次局は待機する。
+
+DB復元後はマッチング受付と適用を止め、成立予約・対局・確定入力・適用台帳・参加枠を同じ復旧境界で照合してから再開する。未適用の確定入力は同じIDで再投入する。処理済みフラグだけを根拠に枠を解放せず、未解決の作成や終局後の枠欠落は受付再開前に回復する。確定入力・開始状態・計算版・因果関係は再構築可能な期間だけ保存・アーカイブする。
+
+再構築は台帳に保存した両者それぞれの直前の適用IDを先行条件とし、両先行対局の再構築後に当該対局を計算する。依存のない対局間の順序は問わない。結果訂正や制度変更は通常再送で上書きせず別世代で再計算する。訂正・制度変更の再計算では、新世代の先行対局から開始状態を再生成する。元の開始状態・入力は旧世代の監査証跡として保持する。初期の世代切替ではpoolを`DRAINING`にして新規成立予約を止め、既存の予約・対局・未適用結果が解決して全参加枠が`FREE`になるまで待つ。その後poolを`FROZEN`にし、因果関係に沿う再構築・検証と有効世代の切替を行ってから`OPEN`へ戻す。設定状態の変更はpool設定の排他ロック下で行い、予約・適用時の共有ロックと競合させる。停止せずに再計算・切替する方式は初期には採用しない。
 
 #### 取得とMatchmakingの整合性
 
-公開取得はUserIdとpoolを指定し、値、未評価・暫定等の評価状態、適用対局数、レートのversion・計算版・最終適用番号・更新時刻を返す。認可はAPI境界で行い、本人のセッションはUser Serviceの内部照会で検証する。レート未作成と存在しないユーザーを区別するため、将来の内部ユーザー照会契約も用意する。存在する未評価者にはpool設定の初期状態を返し、初回対象対局の適用時に必要な行を原子的に作成する。認証・プロフィール登録のトランザクションにレート作成を加えない。
+公開取得はUserIdとpoolを指定し、値、未評価・暫定等の評価状態、適用対局数、レートのversion・計算版・最終適用ID・更新時刻を返す。本人の取得には参加枠に基づく予約中・対局中・反映待ち・要調査の状態も含める。これらは予約・対局・ジョブの正本から判断し、公開プロフィールへ予約ID等を漏らさない。認可はAPI境界で行い、本人のセッションはUser Serviceの内部照会で検証する。レート未作成と存在しないユーザーを区別するため、将来の内部ユーザー照会契約も用意する。存在する未評価者にはpool設定の初期状態を返し、初回対象対局の適用時に必要な行を原子的に作成する。認証・プロフィール登録のトランザクションにレート作成を加えない。
 
-終局確定と更新は非同期であり、終局の成功応答はレート更新完了を意味しない。取得は適用済みの値とその版を返し、更新待ち中は以前の値を返し得る。初期はRating schemaのPrimaryを読み、内部一括取得は一つのDB読取Snapshotで行う。Matchmakingは予約時の確定済み値による候補選択を許容し、その後の更新で予約を取り消さない。前局反映前の再マッチを禁止する保証は持たない。キャッシュや読取レプリカを導入する際は許容する反映遅延を定め、障害や遅延を未評価・初期値で隠さない。
+終局確定と更新は非同期であり、終局の成功応答はレート更新完了を意味しない。取得は適用済みの値とその版を返し、更新待ち中は以前の値と反映待ち状態を返す。初期はPrimaryを読み、内部一括取得は一つのDB読取Snapshotで行う。Matchmakingは参加枠を持つ利用者を同じpoolで予約せず、9.3節の成立トランザクションで最終確認する。HTTP画面の判定や読取Snapshotだけを予約の根拠にしない。キャッシュや読取レプリカを導入しても枠確保の判定はPrimaryで行い、障害や遅延を未評価・初期値で隠さない。
 
-更新APIは信頼された終局入力の処理に限定し、クライアントが勝敗や更新後のレートを直接指定するAPIは公開しない。計算式、初期値、暫定期間、pool分割、引分け・無効局・不正対局の扱いは16章の未決定事項とし、レーティング対局の公開前に確定する。
+更新APIは信頼された終局入力の処理に限定し、クライアントが勝敗や更新後のレートを直接指定するAPIは公開しない。計算方式は前述のEloに確定する。Kの規則、初期値、暫定期間、数値精度・丸め、pool分割、引分け・無効局・不正対局の扱いは16章の未決定事項とし、レーティング対局の公開前に確定する。
+
+#### 同居時の運用と分離条件
+
+Rating Taskには対局操作用とは別の上限付きDB接続プール、同時処理数、走査間隔、DB操作のタイムアウトを設ける。Game Pod数を増やす際は、Rating用接続・走査も増えるためDB全体の接続予算を検証する。計算は版を固定した短い処理とし、大量再計算を通常のTaskで走らせない。対局終了のたびに無制限のTaskを起動する方式は採用しない。
+
+再試行可能な更新エラーはTask内で扱い、Taskの異常終了は監視して再起動する。Ratingだけの滞留を理由にGame PodのReadinessを落としたり、Pod全体を再起動したりしない。計画停止では新規claimを止め、実行中の短いトランザクションを終了させる。強制停止時も永続ジョブとclaim期限から回収する。
+
+この配置ではCPU・メモリ・プロセス障害を共有する。Rating Taskの暴走やOOMが対局を停止させる可能性は残り、接続プールの分離だけでは共有DBのI/O・ロック競合も隔離できない。レート更新を止めても終局を確定できるという保証は、プロセスとDBが稼働している範囲の業務上の分離である。
+
+次のいずれかが必要になった場合は、Rating Taskを独立した`rating-worker` Deploymentへ移す。
+
+- 処理量・接続数を制限しても着手や時計の遅延目標を満たせず、Rating負荷との関係を負荷試験で確認した場合。
+- 対局と異なるCPU・メモリ配分、拡縮、更新・ロールバック周期が必要な場合。
+- Game Podがすべて停止していてもレート適用を継続する必要がある場合、またはRatingの障害を対局プロセスから隔離する必要がある場合。
+
+分離時も固定入力・ジョブ・適用台帳・取得契約を維持する。旧Taskの新規claimを止め、処理完了またはclaim期限切れを待って新Workerへ引き継ぐ。切替中の重複稼働も同じDBのclaim・poolロック・一意制約で保護する。別DB化は独立した判断であり、Workerの分離と同時には要求しない。
 
 ## 10. AI Platform
 
@@ -629,11 +728,12 @@ flowchart LR
 
 | テーブル | 内容 |
 |---|---|
-| `rating_pool_state` | Rating領域所有。poolの設定・計算版、有効世代、適用番号。pool単位の更新排他にも使う |
-| `player_ratings` | Rating領域所有。`(世代, user_id, pool_id)`ごとの現在値、評価状態、対局数、version |
-| `rating_applications` | Rating領域所有。`(世代, game_id)`が一意。固定入力、pool、両者の更新前後の状態、計算版・適用番号、対象外判定を保持する適用台帳 |
-| `match_reservations` | 永続match_id、固定game_id、参加者・ルール・レーティング設定、候補照会時のレートとversion、成立予約の状態。状態遷移と作成照合は9.3節に従う |
-| `match_participants` | 予約への参加者対応。同一ユーザーの有効予約をDB制約で一意に保つ |
+| `rating_pool_state` | Rating領域所有。poolの版付き設定・計算版、有効世代、`OPEN / DRAINING / FROZEN`。通常は共有ロックで検証し、受付停止・切替だけ排他更新する |
+| `player_ratings` | Rating領域所有。`(世代, user_id, pool_id)`ごとの現在値、評価状態、対局数、version、最終適用ID |
+| `rated_participations` | Rating領域所有。`(user_id, pool_id)`が一意。`FREE`または`HELD(match_id, game_id)`。予約確定からレート反映まで保持し、TTLでは解放しない |
+| `rating_applications` | Rating領域所有。`(世代, game_id)`が一意。固定入力、pool、両者の更新前後の状態・version・先行適用ID、計算版、対象外判定を保持する適用台帳 |
+| `match_reservations` | 永続match_id、固定game_id、参加者・ルール・レーティング設定、候補照会値と予約時の確定開始状態・version・先行適用ID、成立予約の状態。9.3節の成立時に参加枠と原子的に保存する |
+| `match_participants` | 予約への参加者対応。同一ユーザーの同じ対局区分の有効予約をDB制約で一意に保つ。終局後のレート反映待ちは参加枠で保護する |
 | `games` | 参加者・ルール・pool・対象判定等の対局メタ、手番、version、時計の確定状態。3.3節の棋譜検索に必要な時刻・公開範囲もGame側で管理 |
 | `game_moves` | `(game_id, seq)`をキーとする確定着手履歴、request_id |
 | `game_snapshots` | 局面・時計・連番の復元用Snapshot |
@@ -646,7 +746,7 @@ flowchart LR
 
 着手永続化は、`game_moves`追加、`games`更新、`outbox_events`追加を同一トランザクションで行う。`shard_leases`の所有権・期限・世代を同TX内で検証する。
 
-Ratingのテーブルは専用schemaと独立したスキーマ管理・DB権限で分離する。初期はGame領域と同じPostgreSQLに配置できるが、更新はRating Worker、取得はPlayer Serviceの読取専用契約に限定する。ユーザーDBへの外部キーや直接接続は持たない。Ratingの更新トランザクションと、Game Serviceによる結果・固定入力・ジョブ作成の確定トランザクションは独立する。ジョブ作成とRatingデータ更新の所有権は分ける。
+Ratingのテーブルは専用schemaと独立したスキーマ管理・DB権限で分離する。初期はGame領域と同じPostgreSQLの同じDBに置く。レート値・適用台帳の更新と終局後の参加枠解放はgame-server内のRating Taskだけが担う。Matchmakingには枠確保・作成前取消と必要な読取に限定した契約・DB権限を与え、レート値・台帳の更新権限は与えない。Gameの作成保存には予約・枠の検証と予約状態の確定に必要な権限を与える。Player Serviceの取得は読取専用契約を使い、ユーザーDBへの外部キーや直接接続は持たない。Ratingの適用トランザクションと、Game Actorの結果・固定入力・ジョブ作成の確定トランザクションは独立する。同じgame-serverプロセスが双方のDB資格情報を持つため、この権限分離は独立プロセス間のセキュリティ境界にはならない。
 
 大量着手履歴については、インデックス・パーティショニング・アーカイブを計画する。単純に2,500手/秒が24時間継続すると約2億1,600万手/日となるが、これは負荷試験上の上限シナリオであって実トラフィック予測ではない。
 
@@ -662,10 +762,10 @@ Ratingのテーブルは専用schemaと独立したスキーマ管理・DB権限
 | Player Service（Axum） | **Deployment** / 複数Pod | ClusterIP Service + Ingress / Load Balancer | ステートレス。HPAでCPU・リクエスト数等を参照 |
 | Realtime Gateway（Axum / WS） | **Deployment** / 複数Pod | ClusterIP Service + WebSocket対応Ingress | 接続数・メモリ・送信キュー・帯域を監視。Graceful Drainが必要 |
 | **Game Router** | **各Gateway・Matchmaking Pod内の共通Rustモジュール** | 独立Service不要。所有者PodへTonic / gRPC | 対局作成・照会・操作に共通のGame ID→Shard→所有者解決を使い、変更時に再解決 |
-| **Game Server / Game Service** | **Deployment** / 複数Pod | 通常Serviceに加え、所有者Podへの**直接RPC endpoint** | Game Actor・Shardを保持。対局作成・照会・着手は汎用Serviceのランダム分散で配送しない |
+| **Game Server / Game Service** | **Deployment** / 複数Pod | 通常Serviceに加え、所有者Podへの**直接RPC endpoint** | Game Actor・ShardとRating Taskを実行。対局作成・照会・着手は汎用Serviceのランダム分散で配送しない |
 | **Shard Manager** | **独立Deployment** / Leader + Standby（例: 2 Pod） | Pod情報・PostgreSQLへの接続。必要なら内部gRPC | Leaderのみ配置判断。Game Serverとは別にデプロイ・拡縮 |
 | Matchmaking Service / Worker | **Deployment** / 複数Pod | 内部Service / PostgreSQL、必要ならValkey | 初期は待機データも予約もDB。9.3節の一意制約・条件付き遷移・作成再試行で重複を防ぐ |
-| Rating Worker | **独立Deployment** | PostgreSQLのRating Job / Rating schema。公開Ingress不要 | 初期は逐次適用。DBでもpool単位に直列化し、滞留だけを理由に同一poolのWriterを増やさない |
+| Rating Task | **各game-serverプロセス内の非同期Task** | 同じDBのRating Job / Rating schema。独立Service不要 | 同時処理数と専用DBプールを制限。両参加枠をDBで排他し、参加者の異なる対局は並列適用。独立Deploymentへの分離条件は9.4節 |
 | AI Worker | **Deployment** / 専用Worker Pool | PostgreSQLのAI Job（通常Ingress不要） | CPU/GPU、待機ジョブ数、解析コストに応じて拡縮 |
 | Background Worker | **Deployment** / 複数Pod | PostgreSQLのConsumer別ジョブ | 期限付きclaim・再試行・隔離・冪等な業務更新 |
 | Outbox Publisher | **Deployment** / 初期1 Pod | PostgreSQL / Valkey Pub/Sub | 現行の単一Publisher排他を維持。複数Worker化は取得・順序保証を設計してから導入 |
@@ -684,8 +784,10 @@ flowchart TB
     INGRESS --> API[Player Service Deployment / Service]
     INGRESS --> GW[Gateway Deployment / Service<br/>各PodにGame Router]
     MATCH[Matchmaking Deployment<br/>各PodにGame Router]
-    RATE[Rating Worker Deployment]
-    GAME[Game Server Deployment<br/>Podごとに複数ShardとGame Actor]
+    subgraph GAME_DEPLOY[Game Server Deployment / 各Pod]
+      GAME[複数ShardとGame Actor]
+      RATE[Rating Task / 同じプロセス]
+    end
     SM[Shard Manager Deployment<br/>Leader + Standby]
     AI[AI Worker Deployment]
     BG[Background Worker Deployment]
@@ -708,7 +810,8 @@ flowchart TB
   MATCH -->|Game RouterがShard配置表を参照・キャッシュ| PG
   MATCH <-->|成立予約・再試行状態| PG
   MATCH -->|内部レート一括照会| API
-  RATE -->|レート・適用履歴| RDB
+  RATE -->|レート・台帳・参加枠解放| RDB
+  MATCH <-->|参加枠の確保・取消、確定レート照合| RDB
   API -->|読取専用| RDB
   SM <-->|配置表・Manager Leader Lease| PG
   GAME <-->|対局・Shard Lease・Fencing| PG
@@ -724,7 +827,7 @@ flowchart TB
   USER <--> USERDB[(User DB / 配置方式は未決定)]
 ```
 
-図のRating専用schemaはGame領域と同じManaged PostgreSQL内に配置でき、別クラスタを必須としない。User Serviceの接続先も将来配置の検討対象であり、独立したユーザーDBにはPostgreSQLを使い、本番配置と複数Podの運用条件は別途決める。これは実行配置の概念図であり、すべての通信を網羅しない。永続ジョブはPostgreSQLが保持し、Valkey Pub/Subは一時通知だけを扱う。
+図のRating専用schemaは初期にはGame領域と同じManaged PostgreSQLの同じDBに置く。Rating TaskもGame Serverと同じプロセス・Deploymentで動かす。User Serviceの接続先も将来配置の検討対象であり、独立したユーザーDBにはPostgreSQLを使い、本番配置と複数Podの運用条件は別途決める。これは実行配置の概念図であり、すべての通信を網羅しない。永続ジョブはPostgreSQLが保持し、Valkey Pub/Subは一時通知だけを扱う。
 
 ### 12.3 Game Server Podの発見・Shardの引き継ぎ
 
@@ -742,7 +845,7 @@ flowchart TB
 - **Realtime Gateway**: ローリングアップデート時は新規接続受付を停止し、既存WebSocketをDrainingしてクライアントに再接続・再同期させる。CPUだけでなく接続数・送信キュー・帯域を観測する。
 - **Game Server**: Pod終了前にDrainingを開始しShardを移管する。突然の停止ではLease + Fencingで復旧。Pod追加とShard再配置を連動させるため、HPA自動化は負荷試験後に導入する。
 - **Shard Manager**: LeaderとStandbyを別ノードに配置し、Leader LeaseをDB時刻で管理する。Leader切り替え中でも既存対局を継続できるようにする。
-- **Rating Worker**: 終局から適用までの遅延と未適用結果を監視する。停止・再配信・DB復元後は確定入力と適用台帳を照合する。更新停止は対局の結果確定を妨げないが、取得値の反映は遅れる。
+- **Rating Task**: 終局から適用までの遅延と未適用結果を監視する。停止・再配信・DB復元後は確定入力と適用台帳を照合する。Task単独の更新停止中もGame Actorは結果を確定できる。全Game Podの停止中は適用も停止する。同居の資源・障害共有、Task監視と停止手順は9.4節に従う。
 - **永続ジョブ**: PostgreSQLの滞留・claim期限切れ・再試行・隔離を監視し、DB復元後は業務台帳と照合する。RatingとAI等のConsumerごとに完了状態を保持する。
 - **Valkey**: Pub/Subの切断を前提にGatewayを再同期する。通知停止中も業務更新と永続ジョブを継続できるよう、障害境界を分ける。
 - **共通**: Resource requests / limits、PodDisruptionBudget、Topology Spread / Anti-Affinity、NetworkPolicy、TLS、Secret管理、OpenTelemetryを適用する。
@@ -763,10 +866,9 @@ Kubernetes Cluster
 │   ├── user-server               (独立Deployment候補 + Service; DB配置は未決定)
 │   ├── player-server             (Deployment + Service)
 │   ├── realtime-gateway          (Deployment + Service; Game Router内蔵)
-│   ├── game-server               (Deployment; Pod固有gRPC endpoint)
+│   ├── game-server               (Deployment; Pod固有gRPC endpoint; Rating Task内蔵)
 │   ├── shard-manager             (独立Deployment; Leader + Standby)
 │   ├── matchmaking-worker        (Deployment; Game Router内蔵)
-│   ├── rating-worker             (独立Deployment; PostgreSQL Job)
 │   ├── ai-worker                 (Deployment)
 │   ├── background-worker         (Deployment)
 │   └── outbox-publisher          (Deployment、またはBackground Worker内実装)
@@ -789,7 +891,7 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 | Game Server | 8 Pod | 25,000局時のActor負荷・着手p99 |
 | Shard Manager | 2 Pod（Leader + Standby） | リーダー切替・再配置遅延 |
 | Matchmaking | 2〜3 Pod | 待機人数・成立までの時間 |
-| Rating Worker | 初期は逐次処理 | 最古の未適用結果の経過時間、適用時間、poolのDBロック待ち。台数は負荷試験で決定 |
+| Rating Task | Game Server各Pod内。同時処理数は制限 | 最古の未適用結果の経過時間、適用時間、参加枠・レート行のDBロック待ち、次局待機時間、着手p99への影響。独立Podは初期には置かない |
 | AI Worker | 可変 | PostgreSQLジョブ滞留・CPU/GPU予算 |
 | Background Worker | 2〜3 Pod | ジョブ処理時間・再試行 |
 
@@ -825,7 +927,7 @@ Namespaceは権限・運用分離の単位であり、Namespaceを分けるだ�
 | PostgreSQL | Commit遅延、ロック待ち、WAL量、接続数、レプリカ遅延 |
 | Valkey Pub/Sub | 通知の受入遅延・失敗、購読数、欠落・再同期回数 |
 | PostgreSQL Job | Consumer別滞留・最古時刻、claim期限切れ、再試行、隔離、完了までの時間 |
-| Rating | 終局から適用までの遅延、未適用件数・最古時刻、重複・不整合・隔離件数、照合で回収した件数、取得失敗 |
+| Rating | 終局から適用までの遅延、反映待ち人数・次局待機時間、保持中・隔離中の参加枠、未適用件数・最古時刻、重複・不整合・隔離件数、照合で回収した件数、取得失敗 |
 | AI | 解析待ち時間、実行時間、CPU/GPU利用率 |
 
 SLO候補として、着手確定と観戦配信のp99を定義する。ただしネットワーク往復や地域を明示してから正式な数値目標を確定する。
@@ -838,9 +940,9 @@ SLO候補として、着手確定と観戦配信のp99を定義する。ただ�
 - 大量再接続とイベント欠落からの復帰
 - 後続イベントがない終局通知の欠落、Gatewayと各画面の反映番号の違い、定期照会失敗、通常の配信遅延からの再同期
 - 対局作成後の応答喪失、マッチングWorker停止、作成とキャンセルの競合、Valkey状態喪失からの永続予約の回収
-- レート更新のCommit前後・完了記録前の停止、重複・遅着・同一ユーザーの複数対局、初回行の競合、未知形式と異なる入力の隔離、取得時の未評価・未反映・障害の区別
+- レート更新のCommit前後の停止、重複・遅着、同一ユーザーの同じpoolでの競合予約・初回枠作成競合、開始version再照合、直接作成による参加枠検証の迂回拒否、未知形式・異なる入力の隔離、未評価・反映待ち・障害の区別
 - 棋譜の検索・詳細・履歴に共通した認可、ページ間の版変更・公開範囲変更、終局seqと履歴の整合、最大取得量とタイムアウト、初期化の原子性と再起動時の現行データ保持
-- Ratingジョブ作成と別DB境界の永続受入の障害、claim期限切れ・隔離、DB復元後の確定入力との照合・再投入、順序を保存したレート再構築と並行更新中の世代切替
+- Ratingジョブ作成の原子性、複数Game Podでの両者更新・台帳・完了・参加枠解放の原子性、別Podによる期限切れclaim回収、古い再送で後続対局の枠を解放しないこと、反映前の次局拒否、独立対局の適用順を入れ替えた同一結果、Task再起動、Rating停止中の終局確定と再マッチ待機、同居負荷、DB復元後の枠・台帳照合、因果関係に沿う再構築と受付停止中の世代切替。別DB化する場合は永続受入と参加枠の分散制御も検証する
 - Shard所有者切替中の対局作成、旧所有者による作成拒否、配送先再解決後の同一IDでの再送
 - Game Pod強制停止、Shard引き継ぎ、時計復元
 - PostgreSQLフェイルオーバー、Valkey切断、AI解析急増
@@ -861,7 +963,7 @@ Gatewayの公開前に、3.2節の認証境界を実装する。セッション�
 
 マッチング導入時には、9.3節の永続予約と冪等な対局作成契約を実装する。待機列の原子的操作だけで成立を確定せず、応答喪失・Worker停止・キャンセル競合・Valkey状態喪失から同じ成立結果へ復旧できることを検証する。
 
-レーティング対局の公開前に、9.4節の固定入力・作成契約の拡張、PostgreSQLのRatingジョブと必要な永続受入、Rating Worker、取得API、欠落照合と復旧検証を揃える。AI機能の導入時期とは独立した前提とする。
+レーティング対局の公開前に、9.4節の参加枠と開始入力を持つ作成契約、終局と原子的に保存するRatingジョブ、game-server内のRating Task、取得API、欠落照合と復旧検証を揃える。前局反映前の再マッチ拒否、両者の適用と参加枠解放の原子性、同居負荷とTask停止の影響も検証する。独立Rating Deploymentや別DB向けの永続受入は初期の公開条件に含めない。AI機能の導入時期とは独立した前提とする。
 
 Player Serviceの匿名公開棋譜は3.3節の範囲で実装済みである。参加者限定・追加ルールは、公開方針と認可の契約を拡張してから導入する。
 
@@ -936,10 +1038,9 @@ shogi-backend/
 │   ├── outbox-publisher/   # 現行の確定イベント配信
 │   ├── player-server/      # 棋譜・レート取得、対局準備・解析受付
 │   ├── realtime-gateway/
-│   ├── game-server/
+│   ├── game-server/        # Game ActorとRating Taskの組み立て・実行
 │   ├── shard-manager/
 │   ├── matchmaking-worker/ # マッチング処理の組み立て・実行
-│   ├── rating-worker/      # レート更新・永続イベント処理
 │   ├── ai-worker/
 │   └── background-worker/
 ├── crates/
@@ -952,8 +1053,7 @@ shogi-backend/
 │   ├── user-http/          # 現行のGoogle OIDC・HTTP
 │   ├── matchmaking-application/
 │   ├── rating-application/ # レート計算・更新と取得の契約
-│   ├── rating-persistence/ # Rating専用schemaの更新・読取
-│   ├── rating-jobs/        # 終局入力の永続受入・claim・完了
+│   ├── rating-persistence/ # Rating専用schemaの更新・読取、ジョブclaim・完了
 │   ├── shard-management/   # Shard / Lease / Fencing
 │   ├── game-routing/       # Gateway・Matchmaking共通のGame ID → 担当Pod解決
 │   ├── game-persistence/   # 対局・Outbox保存と棋譜の読取アダプター
@@ -977,7 +1077,7 @@ shogi-backend/
 
 `game-record-application`は棋譜の検索・取得だけの契約を持ち、Game Actorの操作・復旧契約から独立させる。`game-persistence`がこの契約を実装し、保存形式・スキーマ管理はGame領域内に保つ。`apps/player-server`は現在、棋譜の読取アダプターと`player-http`のHTTP境界を組み立てる。Ratingの照会、Matchmaking・AI APIへの要求は将来追加する。棋譜用の別DB・永続化crateは初期には追加しない。
 
-`rating-application`は版付きの計算、更新・取得ユースケースとRepository契約を所有する。`rating-persistence`がRating専用schemaを、`rating-jobs`が終局入力のジョブ取得・完了、必要な別DB境界の永続受入を実装する。`apps/rating-worker`が更新側を、`apps/player-server`が読取専用の取得側を組み立てる。終局入力の固定とジョブ作成・永続受入への送信はGame側が所有し、Ratingの計算をGame Actorへ持ち込まない。これらも将来案であり、現行の15.1節の一覧には追加しない。
+`rating-application`は版付きの計算、参加枠・適用・取得の契約を所有する。`rating-persistence`がRating専用schemaの保存・読取、参加枠のロック、ジョブclaim・完了を実装する。成立予約と両参加枠を一つのトランザクションで確定する永続化契約をMatchmakingへ提供する。`apps/game-server`が適用ユースケースを独立した非同期Taskとして組み立て、`apps/player-server`が読取専用の取得側を組み立てる。終局入力の固定とジョブ作成はGame側の保存契約に含め、Ratingの計算をGame Actorへ持ち込まない。初期には`apps/rating-worker`や`rating-jobs`専用crateを追加しない。実行部分の独立配置と別DB化は9.4節の条件に従う。これらも将来案であり、現行の15.1節の一覧には追加しない。
 
 Domain層はAxum、SeaORM、Valkeyなどに依存させない。Game Actorと永続化の境界をTraitで切り、単一プロセス版から分散版へ進化できるようにする。
 
@@ -990,7 +1090,7 @@ Domain層はAxum、SeaORM、Valkeyなどに依存させない。Game Actorと永
 5. **AI予算とSLO**: 解析深度、同時実行、課金/制限、エンジンのライセンス。
 6. **DB拡張**: PostgreSQLの本番配置、レプリカ、パーティショニング、アーカイブの導入タイミング。ユーザーDBの本番配置と複数Pod方式も独立して決める。
 7. **認証境界の拡張**: HTTPセッションを利用する画面の配置、将来のGateway・WS接続認証・内部サービスへの本人情報の伝達方法。ユーザー管理の所有権を維持して設計する。
-8. **レーティング制度と公開条件**: 計算式・パラメーター版、初期値・暫定期間、pool・シーズンの区分、引分け・無効局・不正対局、公開範囲と内部照会の認証、許容反映遅延。初期のDB確定順による適用の競技上の妥当性、結果訂正・再計算・世代切替、既存履歴の移行範囲も導入前に決める。
+8. **レーティング制度と公開条件**: 計算方式は9.4節の1局単位のEloを採用する。Kの具体値・選択規則、初期値・暫定期間、数値精度・指数計算・丸め、レート差の上限制限・レート下限、pool・シーズンの区分、引分け・無効局・不正対局、公開範囲と内部照会の認証、許容反映遅延と次局待機時間は導入前に決める。ユーザー・poolごとの1局制限と前局反映後の次局予約は9.4節で確定する。結果訂正の承認・再計算範囲、受付停止を伴う世代切替の運用手順、既存履歴の移行範囲も導入前に決める。
 9. **棋譜公開の拡張**: 3.3節の匿名公開APIを前提に、参加者限定の認可・公開範囲変更・追加ルール・4096操作を超える履歴の分割取得を導入する条件を決める。
 
 ## 17. 設計方針のまとめ（将来構成）
@@ -1002,7 +1102,7 @@ Domain層はAxum、SeaORM、Valkeyなどに依存させない。Game Actorと永
 - **リクエスト配送**: Gateway・Matchmaking内の共通Game Router + 所有者PodへのgRPC。対局作成にも同じ配送規則を使う
 - **観戦リアルタイム配信**: WebSocket + Valkey Pub/Sub + Snapshot・Sequence・定期照合
 - **非同期AI**: PostgreSQLジョブ + 専用AI Worker
-- **レーティング**: Rating Workerで非同期更新、Player Serviceで取得。永続終局入力、両者の原子的更新、適用台帳で再送・復旧を扱う
+- **レーティング**: 1局単位のEloを採用し、初期はGame Service内のRating Taskで非同期更新、Player Serviceで取得。同じユーザー・poolでは前局の反映後に次局を予約する。両者の更新・適用台帳・参加枠解放を原子的に確定し、再送・復旧を扱う。必要時に独立Workerへ移す
 - **データの正本**: 現在はPostgreSQL。Domain / Application層はDB製品に依存させない
 - **一時状態・Presence**: Valkey。マッチング待機データ・成立予約はPostgreSQLから始める
 - **レート制限**: Valkey Token Bucketを基本、ログイン失敗等はカウンター方式を併用
