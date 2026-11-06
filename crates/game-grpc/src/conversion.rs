@@ -1,5 +1,3 @@
-//! Converts domain snapshots and application failures into stable protobuf outputs and statuses.
-
 use crate::proto;
 use game_application::{Acceptance, ApplicationError, Snapshot};
 use shogi_domain::{CommandError, FinishReason, GameResult, HandPiece, PieceKind, Player, Square};

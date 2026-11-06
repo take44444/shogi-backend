@@ -92,8 +92,6 @@ def user_routes(root: Path) -> list[str]:
     path = root / "crates/user-http/src/lib.rs"
     source = read_required(path)
     message = f"Cannot parse every HTTP route in {path}; update the checker"
-    # This deliberately accepts only the two supported registration forms. New
-    # composition syntax must extend this parser and its command-line fixtures.
     if re.search(r"\.(?:nest|merge|route_service|nest_service|fallback|fallback_service)\s*\(", source):
         raise ValueError(message)
     classic_calls = re.findall(r"\.route\s*\(", source)

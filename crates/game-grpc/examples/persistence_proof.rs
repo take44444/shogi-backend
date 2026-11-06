@@ -1,6 +1,3 @@
-//! Checks durable replay across separate seed, resume, and finished client invocations.
-//! Protobuf artifacts preserve requests and responses for comparison after server restarts.
-
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 use prost::Message;
 use std::{fs, path::Path};

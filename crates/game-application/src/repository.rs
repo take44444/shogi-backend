@@ -1,6 +1,3 @@
-//! Repository contracts and durable journal values.
-//! Adapters persist staged changes; the application generates events and validates replay.
-
 use async_trait::async_trait;
 use shogi_domain::{GameResult, Move};
 

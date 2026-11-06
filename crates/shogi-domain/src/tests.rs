@@ -211,7 +211,6 @@ fn every_piece_has_the_expected_moves_for_both_colors() {
     ] {
         for player in [Player::Black, Player::White] {
             let mut rows = vec![vec![String::new(); 9]; 9];
-            // Kings on off-diagonal corners avoid interfering with center sliders.
             rows[0][2] = "k".into();
             rows[8][6] = "K".into();
             if piece == "K" {

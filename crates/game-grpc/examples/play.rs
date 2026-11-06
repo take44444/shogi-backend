@@ -1,5 +1,3 @@
-//! Drives a complete game through a running gRPC server using a new game and caller-supplied participant IDs.
-
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 
 #[tokio::main]

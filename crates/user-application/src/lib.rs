@@ -1,4 +1,3 @@
-//! Account, identity, login attempt, and session storage boundary.
 use async_trait::async_trait;
 pub use user_id::{InvalidId, UserId};
 

@@ -1,4 +1,3 @@
-//! Public record queries use an independently permissioned PostgreSQL pool.
 use crate::schema::a;
 use async_trait::async_trait;
 use game_record_application::{

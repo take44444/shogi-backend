@@ -1,4 +1,3 @@
-//! Isolated PostgreSQL databases for integration tests.
 use sqlx::{Connection, PgConnection};
 
 /// A disposable database owned by one test. Requires a role with CREATEDB and CREATEROLE.

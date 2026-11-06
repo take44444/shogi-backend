@@ -1,5 +1,3 @@
-//! Strict USI parsing and canonical formatting, independent of position legality.
-
 use crate::{HandPiece, Move, Square};
 use std::{error::Error, fmt, str::FromStr};
 

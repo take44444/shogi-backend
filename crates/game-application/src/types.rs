@@ -1,5 +1,3 @@
-//! Validated IDs, participant bindings, commands, snapshots, and application errors.
-
 use std::{error::Error, fmt};
 
 use shogi_domain::{CommandError, GameResult, Move, Player, PositionView};

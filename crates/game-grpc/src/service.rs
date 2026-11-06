@@ -1,5 +1,3 @@
-//! Validates wire input and delegates to the application, mapping outcomes to gRPC status.
-
 use crate::{conversion::application_status, proto};
 use game_application::{GameId, GameService, MakeMove, Participants, RequestId, Resign, UserId};
 use tonic::{Request, Response, Status};

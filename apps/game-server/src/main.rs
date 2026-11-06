@@ -1,5 +1,3 @@
-//! Composes PostgreSQL persistence, the application services, and a plaintext gRPC listener.
-
 use game_application::GameService;
 use game_grpc::{GameRpc, proto::game_service_server::GameServiceServer};
 use game_persistence::SeaOrmStore;

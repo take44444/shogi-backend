@@ -1,5 +1,3 @@
-//! Domain values, absolute board coordinates, and immutable position snapshots.
-
 use std::{error::Error, fmt};
 
 /// Black moves first and advances toward rank 1. White advances toward rank 9.

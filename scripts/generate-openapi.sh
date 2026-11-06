@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Generate both documents without starting services or loading their configuration.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 output=${1:-target/openapi}
