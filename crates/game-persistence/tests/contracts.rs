@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, GameService,
-    MakeMove, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
+    MakeMove, MutationRequest, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
 };
 use game_persistence::SeaOrmStore;
 use pg_test_support::TestDatabase;
@@ -19,10 +19,7 @@ fn id() -> GameId {
     GameId::new("game").unwrap()
 }
 fn participants() -> Participants {
-    Participants {
-        black: user("black"),
-        white: user("white"),
-    }
+    Participants::new(user("black"), user("white")).unwrap()
 }
 fn movement(request: &str, expected_seq: u64, user_id: &str, usi: &str) -> MakeMove {
     MakeMove {
@@ -65,15 +62,7 @@ async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable()
         let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
         let service = GameService::new(store);
         assert_eq!(
-            service
-                .create(
-                    id(),
-                    Participants {
-                        black: user("black"),
-                        white: user("black")
-                    }
-                )
-                .await,
+            Participants::new(user("black"), user("black")),
             Err(Error::InvalidParticipants)
         );
         let before = service.create(id(), participants()).await.unwrap();
@@ -81,10 +70,7 @@ async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable()
             service
                 .create(
                     id(),
-                    Participants {
-                        black: user("white"),
-                        white: user("black")
-                    }
+                    Participants::new(user("white"), user("black")).unwrap()
                 )
                 .await,
             Err(Error::AlreadyExists)
@@ -223,10 +209,12 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     let database = TestDatabase::new().await;
     let (store, service) = setup(database.url()).await;
     let receipt = Receipt {
-        request_id: RequestId::new("r").unwrap(),
-        user_id: user("outsider"),
-        expected_seq: 0,
-        action: Action::Move("7g7f".parse().unwrap()),
+        request: MutationRequest {
+            request_id: RequestId::new("r").unwrap(),
+            user_id: user("outsider"),
+            expected_seq: 0,
+            action: Action::Move("7g7f".parse().unwrap()),
+        },
         acceptance: Acceptance {
             seq: 1,
             in_check: false,
@@ -241,7 +229,7 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     );
     assert_eq!(store.version(&id()).await.unwrap(), 0);
     let mut bad = receipt.clone();
-    bad.expected_seq = u64::MAX;
+    bad.request.expected_seq = u64::MAX;
     bad.acceptance.seq = 0;
     assert_eq!(
         StagedGameChange::new(id(), bad),
@@ -254,10 +242,10 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
         .await
         .unwrap();
     let mut duplicate = receipt;
-    duplicate.user_id = user("white");
-    duplicate.expected_seq = 1;
+    duplicate.request.user_id = user("white");
+    duplicate.request.expected_seq = 1;
     duplicate.acceptance.seq = 2;
-    duplicate.action = Action::Move("3c3d".parse().unwrap());
+    duplicate.request.action = Action::Move("3c3d".parse().unwrap());
     assert_eq!(
         store
             .commit_change(&StagedGameChange::new(id(), duplicate).unwrap())
@@ -329,8 +317,8 @@ impl GameRepository for FaultStore {
         }
         if mode == 4 {
             let mut different = change.receipt().clone();
-            different.user_id = user("white");
-            different.action = Action::Resign;
+            different.request.user_id = user("white");
+            different.request.action = Action::Resign;
             different.acceptance.result = Some(shogi_domain::GameResult {
                 winner: Player::Black,
                 reason: shogi_domain::FinishReason::Resignation,
@@ -721,10 +709,7 @@ async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
         games
             .create(
                 id.clone(),
-                Participants {
-                    black: black.clone(),
-                    white: white.clone(),
-                },
+                Participants::new(black.clone(), white.clone()).unwrap(),
             )
             .await
             .unwrap();
@@ -745,7 +730,10 @@ async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
     );
     let record = store.load_game(&game).await.unwrap();
     assert_eq!(record.id, game);
-    assert_eq!(record.participants, Participants { black, white });
-    assert_eq!(record.journal[0].request_id, command.request_id);
+    assert_eq!(
+        record.participants,
+        Participants::new(black, white).unwrap()
+    );
+    assert_eq!(record.journal[0].request.request_id, command.request_id);
     assert_eq!(restored.snapshot(&literal).await.unwrap().seq, 0);
 }

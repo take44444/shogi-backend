@@ -234,21 +234,21 @@ struct MetadataDto {
 impl From<Metadata> for MetadataDto {
     fn from(m: Metadata) -> Self {
         Self {
-            id: m.id.as_str().into(),
-            black: m.black.as_str().into(),
-            white: m.white.as_str().into(),
+            id: m.id().as_str().into(),
+            black: m.black().as_str().into(),
+            white: m.white().as_str().into(),
             rule: RuleDto::Standard,
             result: ResultDto {
-                winner: player(m.result.winner),
-                reason: if m.result.reason == FinishReason::Checkmate {
+                winner: player(m.result().winner),
+                reason: if m.result().reason == FinishReason::Checkmate {
                     ReasonDto::Checkmate
                 } else {
                     ReasonDto::Resignation
                 },
             },
-            finished_at: m.finished_at,
-            final_seq: m.final_seq,
-            final_move_ply: m.final_move_ply,
+            finished_at: m.finished_at().get(),
+            final_seq: m.final_seq().get(),
+            final_move_ply: m.final_move_ply().get(),
         }
     }
 }
@@ -293,7 +293,7 @@ impl From<Detail> for DetailDto {
                 .history
                 .into_iter()
                 .map(|o| OperationDto {
-                    seq: o.seq,
+                    seq: o.seq.get(),
                     player: player(o.player),
                     action: match o.action {
                         PublicAction::Move(m) => ActionDto::Move { usi: m.to_string() },
@@ -309,3 +309,6 @@ mod tests;
 
 #[cfg(test)]
 mod openapi_tests;
+
+#[cfg(test)]
+mod contract_tests;

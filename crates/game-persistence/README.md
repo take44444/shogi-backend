@@ -26,13 +26,9 @@ The publisher reads one pending row and marks that exact row after a successful 
 
 ## Public completed records
 
-`PostgresGameRecords::connect(&url)` implements the separate `game-record-application` read port. It uses a dedicated PostgreSQL pool and never initializes a schema or exposes a game write repository. Startup requires schema version 5 and the expected game and journal columns. The pool has four connections, a two-second acquisition timeout, and a two-second statement timeout. Connections default to read-only transactions.
-
-Deployments must also restrict PostgreSQL role permissions. [The bootstrap SQL](../../scripts/init-postgres.sql) creates `shogi_reader` with SELECT grants on tables owned by the game writer. It grants neither table writes nor object ownership. The role remains unable to mutate game tables if a session disables the read-only transaction default. Compose's `records` profile passes this role's credentials through `PLAYER_GAME_DATABASE_URL`.
+The read-only adapter lives in [game-record-persistence](../game-record-persistence/src/lib.rs). Its production dependency graph excludes this writer crate and the Game Actor. Deployments use the separate reader role from [the bootstrap SQL](../../scripts/init-postgres.sql).
 
 Version 5 requires non-null `rule`, `visibility`, and `final_move_ply`. Only an ongoing game may have a null `finished_at`; a completed game must have a finish timestamp and a complete result. New games explicitly use `standard`, `public`, and a zero move count. Accepted moves increment the count. Resignation advances sequence without advancing moves. A terminal commit stores UTC microseconds from the writer's wall clock inside the transaction that updates version, journal, and outbox. The timestamp marks commit preparation. An exact retry returns its original acceptance and does not update metadata.
-
-Search selects game metadata only and applies public completion, period, and all filters before the limit. Partial indexes support finished-time ordering and participant searches. Detail uses one consistent database snapshot for metadata and a bounded ordered journal. It validates IDs, action syntax, participant colors, alternating move turns, contiguous sequences, move counts, and terminal result consistency. It does not replay move legality. Neither query returns request IDs, expected sequences, acceptance receipts, or outbox data.
 
 ## Verification
 

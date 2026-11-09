@@ -228,7 +228,9 @@ Game gRPC still accepts caller-supplied identity claims and belongs on a trusted
 internal network. The user service does not authenticate game gRPC requests.
 Game creation binds two distinct user IDs without consulting the user database.
 Matchmaking, shards, leases, game clocks, Game Router, and Realtime Gateway remain
-outside this implementation. The [architecture document](docs/design/architecture.md)
-distinguishes this implementation from the proposed distributed system.
-The [domain event and outbox design](docs/design/domain-events.md) explains event
-ownership, publication guarantees, and publisher locking.
+outside this implementation. The [design index](docs/design/README.md) links to
+adopted decisions, unfinished work, and future plans.
+The [event delivery decision](docs/adr/0003-game-event-delivery.md) explains why
+events are fixed at acceptance and transient notifications are separate from durable work.
+See the [storage reference](crates/game-persistence/README.md) for publication
+guarantees and publisher locking.

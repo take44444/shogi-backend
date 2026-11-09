@@ -43,16 +43,31 @@ id!(
     RequestId
 );
 /// Permanent side bindings. Game creation requires distinct user IDs.
-/// Constructing this value alone does not validate those requirements.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Participants {
-    /// The user bound to Black.
-    pub black: UserId,
-    /// The user bound to White.
-    pub white: UserId,
+    black: UserId,
+    white: UserId,
 }
 
 impl Participants {
+    /// Creates permanent bindings for distinct users.
+    pub fn new(black: UserId, white: UserId) -> Result<Self, ApplicationError> {
+        if black == white {
+            return Err(ApplicationError::InvalidParticipants);
+        }
+        Ok(Self { black, white })
+    }
+
+    /// The user bound to Black.
+    pub fn black(&self) -> &UserId {
+        &self.black
+    }
+
+    /// The user bound to White.
+    pub fn white(&self) -> &UserId {
+        &self.white
+    }
+
     /// Looks up a user's bound side, checking Black first.
     ///
     /// # Errors
@@ -187,5 +202,29 @@ impl Error for ApplicationError {
             Self::Domain(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn participant_bindings_are_distinct_and_preserve_sides() {
+        let black = UserId::new("black").unwrap();
+        let white = UserId::new("white").unwrap();
+        assert_eq!(
+            Participants::new(black.clone(), black.clone()),
+            Err(ApplicationError::InvalidParticipants)
+        );
+        let participants = Participants::new(black.clone(), white.clone()).unwrap();
+        assert_eq!(participants.black(), &black);
+        assert_eq!(participants.white(), &white);
+        assert_eq!(participants.side(&black), Ok(Player::Black));
+        assert_eq!(participants.side(&white), Ok(Player::White));
+        assert_eq!(
+            participants.side(&UserId::new("outsider").unwrap()),
+            Err(ApplicationError::NonParticipant)
+        );
     }
 }

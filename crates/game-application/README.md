@@ -4,7 +4,7 @@
 The application and domain contain no SQL or ORM types. Production composition
 injects `Arc<game_persistence::SeaOrmStore>`. There is no default in-memory store.
 
-`GameService::create(GameId, Participants { black, white })` binds two distinct user IDs
+`GameService::create(GameId, Participants::new(black, white)?)` binds two distinct user IDs
 permanently to the game's sides. Equal IDs return `InvalidParticipants`.
 A duplicate game returns `AlreadyExists`. The shared `user-id` crate owns `UserId`.
 The game service trusts caller-supplied IDs and never queries an account database.

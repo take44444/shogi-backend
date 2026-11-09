@@ -12,15 +12,13 @@
 #![warn(missing_docs)]
 
 mod outbox;
-mod record;
 mod schema;
 pub use outbox::{OutboxOpenError, PostgresCursor, PostgresOutbox};
-pub use record::PostgresGameRecords;
 
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository,
-    Participants, Receipt, RequestId, StagedGameChange, UserId,
+    MutationRequest, Participants, Receipt, RequestId, StagedGameChange, UserId,
 };
 use schema::a;
 use sea_orm::sea_query::{Expr, ExprTrait, JoinType, Order, Query, Value};
@@ -99,6 +97,15 @@ pub(crate) fn decode_id(value: &str) -> Result<String, Error> {
     Ok(decoded)
 }
 
+fn prepare_finish_time() -> Result<game_record_application::PreparedFinishTime, Error> {
+    let micros = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|time| i64::try_from(time.as_micros()).ok())
+        .ok_or(Error::Unavailable)?;
+    game_record_application::PreparedFinishTime::try_from(micros).map_err(|_| Error::Unavailable)
+}
+
 fn signed(seq: u64) -> Result<i64, Error> {
     i64::try_from(seq).map_err(|_| Error::SequenceExhausted)
 }
@@ -150,9 +157,6 @@ fn result(row: &QueryResult, prefix: &str) -> Result<Option<GameResult>, Error> 
 #[async_trait]
 impl GameRepository for SeaOrmStore {
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
-        if participants.black == participants.white {
-            return Err(Error::InvalidParticipants);
-        }
         let tx = self.db.begin().await.map_err(storage)?;
         let inserted = tx
             .execute(
@@ -169,8 +173,8 @@ impl GameRepository for SeaOrmStore {
                     ])
                     .values_panic([
                         encode_id(id.as_str()).into(),
-                        encode_id(participants.black.as_str()).into(),
-                        encode_id(participants.white.as_str()).into(),
+                        encode_id(participants.black().as_str()).into(),
+                        encode_id(participants.white().as_str()).into(),
                         0_i64.into(),
                         "standard".into(),
                         "public".into(),
@@ -243,16 +247,17 @@ impl GameRepository for SeaOrmStore {
                 &first.try_get::<String>("", "g_id").map_err(corrupt)?,
             )?)
             .map_err(corrupt)?,
-            participants: Participants {
-                black: UserId::new(decode_id(
+            participants: Participants::new(
+                UserId::new(decode_id(
                     &first.try_get::<String>("", "g_black").map_err(corrupt)?,
                 )?)
                 .map_err(corrupt)?,
-                white: UserId::new(decode_id(
+                UserId::new(decode_id(
                     &first.try_get::<String>("", "g_white").map_err(corrupt)?,
                 )?)
                 .map_err(corrupt)?,
-            },
+            )
+            .map_err(corrupt)?,
             version: unsigned(first.try_get("", "g_version").map_err(corrupt)?)?,
             result: result(first, "g_")?,
             journal: Vec::new(),
@@ -269,16 +274,18 @@ impl GameRepository for SeaOrmStore {
                 _ => return Err(Error::Corrupt),
             };
             record.journal.push(Receipt {
-                request_id: RequestId::new(decode_id(
-                    &row.try_get::<String>("", "request_id").map_err(corrupt)?,
-                )?)
-                .map_err(corrupt)?,
-                user_id: UserId::new(decode_id(
-                    &row.try_get::<String>("", "user_id").map_err(corrupt)?,
-                )?)
-                .map_err(corrupt)?,
-                expected_seq: unsigned(row.try_get("", "expected_seq").map_err(corrupt)?)?,
-                action,
+                request: MutationRequest {
+                    request_id: RequestId::new(decode_id(
+                        &row.try_get::<String>("", "request_id").map_err(corrupt)?,
+                    )?)
+                    .map_err(corrupt)?,
+                    user_id: UserId::new(decode_id(
+                        &row.try_get::<String>("", "user_id").map_err(corrupt)?,
+                    )?)
+                    .map_err(corrupt)?,
+                    expected_seq: unsigned(row.try_get("", "expected_seq").map_err(corrupt)?)?,
+                    action,
+                },
                 acceptance: Acceptance {
                     seq: unsigned(seq)?,
                     in_check: row.try_get("", "in_check").map_err(corrupt)?,
@@ -292,7 +299,7 @@ impl GameRepository for SeaOrmStore {
     async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {
         let id = change.game_id();
         let receipt = change.receipt();
-        let expected = signed(receipt.expected_seq)?;
+        let expected = signed(receipt.request.expected_seq)?;
         let seq = signed(receipt.acceptance.seq)?;
         let tx = self.db.begin().await.map_err(storage)?;
         let operation = async {
@@ -300,14 +307,9 @@ impl GameRepository for SeaOrmStore {
             let finished_at = receipt
                 .acceptance
                 .result
-                .map(|_| {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .ok()
-                        .and_then(|time| i64::try_from(time.as_micros()).ok())
-                        .ok_or(Error::Unavailable)
-                })
-                .transpose()?;
+                .map(|_| prepare_finish_time())
+                .transpose()?
+                .map(game_record_application::PreparedFinishTime::get);
             let updated = tx
                 .execute(
                     Query::update()
@@ -318,7 +320,7 @@ impl GameRepository for SeaOrmStore {
                         .value(
                             a("final_move_ply"),
                             Expr::col(a("final_move_ply"))
-                                .add(i64::from(matches!(receipt.action, Action::Move(_)))),
+                                .add(i64::from(matches!(receipt.request.action, Action::Move(_)))),
                         )
                         .value(a("finished_at"), finished_at)
                         .and_where(Expr::col(a("id")).eq(encode_id(id.as_str())))
@@ -338,7 +340,7 @@ impl GameRepository for SeaOrmStore {
                     .map_err(storage)?
                     .ok_or(Error::NotFound)?;
                 return Err(Error::SequenceMismatch {
-                    expected: receipt.expected_seq,
+                    expected: receipt.request.expected_seq,
                     actual: unsigned(row.try_get("", "version").map_err(corrupt)?)?,
                 });
             }
@@ -354,10 +356,12 @@ impl GameRepository for SeaOrmStore {
                 .ok_or(Error::NotFound)?;
             let black = decode_id(&row.try_get::<String>("", "black").map_err(corrupt)?)?;
             let white = decode_id(&row.try_get::<String>("", "white").map_err(corrupt)?)?;
-            if receipt.user_id.as_str() != black && receipt.user_id.as_str() != white {
+            if receipt.request.user_id.as_str() != black
+                && receipt.request.user_id.as_str() != white
+            {
                 return Err(Error::NonParticipant);
             }
-            let (action, usi): (i32, Option<String>) = match receipt.action {
+            let (action, usi): (i32, Option<String>) = match receipt.request.action {
                 Action::Move(movement) => (1, Some(movement.to_string())),
                 Action::Resign => (2, None),
             };
@@ -379,8 +383,8 @@ impl GameRepository for SeaOrmStore {
                     .values_panic([
                         encode_id(id.as_str()).into(),
                         seq.into(),
-                        encode_id(receipt.request_id.as_str()).into(),
-                        encode_id(receipt.user_id.as_str()).into(),
+                        encode_id(receipt.request.request_id.as_str()).into(),
+                        encode_id(receipt.request.user_id.as_str()).into(),
                         expected.into(),
                         action.into(),
                         usi.into(),

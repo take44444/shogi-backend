@@ -947,11 +947,14 @@ dependencies = [
  "async-trait",
  "game-application",
  "game-record-application",
+ "game-record-persistence",
  "pg-test-support",
  "sea-orm",
  "sea-query-sqlx",
  "shogi-domain",
+ "syn 2.0.119",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -964,6 +967,19 @@ dependencies = [
  "sha2 0.10.9",
  "shogi-domain",
  "user-id",
+]
+
+[[package]]
+name = "game-record-persistence"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "game-record-application",
+ "pg-test-support",
+ "sea-orm",
+ "sea-query-sqlx",
+ "shogi-domain",
+ "tokio",
 ]
 
 [[package]]
@@ -1913,6 +1929,7 @@ dependencies = [
  "game-application",
  "game-persistence",
  "game-record-application",
+ "game-record-persistence",
  "http-body-util",
  "pg-test-support",
  "serde",
@@ -1928,8 +1945,8 @@ name = "player-server"
 version = "0.1.0"
 dependencies = [
  "axum",
- "game-persistence",
  "game-record-application",
+ "game-record-persistence",
  "player-http",
  "tokio",
 ]
@@ -3542,6 +3559,7 @@ dependencies = [
  "http-body-util",
  "openidconnect",
  "pg-test-support",
+ "sea-orm",
  "serde",
  "serde_json",
  "sha2 0.10.9",

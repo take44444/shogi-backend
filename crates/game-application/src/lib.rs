@@ -45,7 +45,7 @@ pub use events::*;
 mod repository;
 mod types;
 
-use actor::{Actor, Command, Pending};
+use actor::{Actor, Command};
 pub use repository::*;
 use std::{
     collections::HashMap,
@@ -80,8 +80,7 @@ impl GameService {
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationError::InvalidParticipants`] for equal users,
-    /// [`ApplicationError::AlreadyExists`] for a duplicate game, or storage, actor,
+    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate game, or storage, actor,
     /// or restoration errors from [`Self::snapshot`].
     ///
     /// # Panics
@@ -92,9 +91,6 @@ impl GameService {
         id: GameId,
         participants: Participants,
     ) -> Result<Snapshot, ApplicationError> {
-        if participants.black == participants.white {
-            return Err(ApplicationError::InvalidParticipants);
-        }
         self.repository
             .create_game(id.clone(), participants)
             .await?;
@@ -143,16 +139,7 @@ impl GameService {
         id: &GameId,
         command: MakeMove,
     ) -> Result<Acceptance, ApplicationError> {
-        self.mutate(
-            id,
-            Pending {
-                request_id: command.request_id,
-                user_id: command.user_id,
-                expected_seq: command.expected_seq,
-                action: Action::Move(command.movement),
-            },
-        )
-        .await
+        self.mutate(id, command.into()).await
     }
 
     /// Resigns on behalf of a bound participant, including off turn.
@@ -172,16 +159,7 @@ impl GameService {
         id: &GameId,
         command: Resign,
     ) -> Result<Acceptance, ApplicationError> {
-        self.mutate(
-            id,
-            Pending {
-                request_id: command.request_id,
-                user_id: command.user_id,
-                expected_seq: command.expected_seq,
-                action: Action::Resign,
-            },
-        )
-        .await
+        self.mutate(id, command.into()).await
     }
 
     async fn sender(&self, id: &GameId) -> Result<mpsc::Sender<Command>, ApplicationError> {
@@ -209,7 +187,11 @@ impl GameService {
         Ok(sender)
     }
 
-    async fn mutate(&self, id: &GameId, receipt: Pending) -> Result<Acceptance, ApplicationError> {
+    async fn mutate(
+        &self,
+        id: &GameId,
+        receipt: MutationRequest,
+    ) -> Result<Acceptance, ApplicationError> {
         let sender = self.sender(id).await?;
         let (reply, response) = oneshot::channel();
         sender

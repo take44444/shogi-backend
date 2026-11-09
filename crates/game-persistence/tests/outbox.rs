@@ -28,10 +28,7 @@ async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService, DatabaseConnection)
     service
         .create(
             id(),
-            Participants {
-                black: user("black"),
-                white: user("white"),
-            },
+            Participants::new(user("black"), user("white")).unwrap(),
         )
         .await
         .unwrap();
@@ -273,10 +270,7 @@ async fn frozen_events_preserve_identifiers_with_nul_and_backslashes() {
     service
         .create(
             game.clone(),
-            Participants {
-                black: black.clone(),
-                white: user("white"),
-            },
+            Participants::new(black.clone(), user("white")).unwrap(),
         )
         .await
         .unwrap();

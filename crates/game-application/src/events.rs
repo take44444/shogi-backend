@@ -90,23 +90,25 @@ impl StagedGameChange {
     /// an expected sequence at `i64::MAX`. Returns [`ApplicationError::Corrupt`] for
     /// in-range nonconsecutive sequences or inconsistent action and result.
     pub fn new(game_id: GameId, receipt: Receipt) -> Result<Self, ApplicationError> {
-        if receipt.expected_seq >= i64::MAX as u64 || receipt.acceptance.seq > i64::MAX as u64 {
+        if receipt.request.expected_seq >= i64::MAX as u64
+            || receipt.acceptance.seq > i64::MAX as u64
+        {
             return Err(ApplicationError::SequenceExhausted);
         }
-        if receipt.expected_seq + 1 != receipt.acceptance.seq {
+        if receipt.request.expected_seq + 1 != receipt.acceptance.seq {
             return Err(ApplicationError::Corrupt);
         }
         let mut events = Vec::with_capacity(2);
         let mut push = |event| {
             events.push(CommittedEvent {
                 game_id: game_id.clone(),
-                request_id: receipt.request_id.clone(),
-                user_id: receipt.user_id.clone(),
+                request_id: receipt.request.request_id.clone(),
+                user_id: receipt.request.user_id.clone(),
                 seq: receipt.acceptance.seq,
                 event,
             })
         };
-        match receipt.action {
+        match receipt.request.action {
             Action::Move(movement) => {
                 if receipt
                     .acceptance
@@ -272,16 +274,19 @@ impl<R: OutboxRepository + ?Sized> OutboxRepository for &mut R {
 mod tests {
     use super::*;
     use crate::Acceptance;
+    use crate::MutationRequest;
     use shogi_domain::Player;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
     fn receipt(action: Action, result: Option<GameResult>) -> Receipt {
         Receipt {
-            request_id: RequestId::new("request").unwrap(),
-            user_id: UserId::new("black").unwrap(),
-            expected_seq: 0,
-            action,
+            request: MutationRequest {
+                request_id: RequestId::new("request").unwrap(),
+                user_id: UserId::new("black").unwrap(),
+                expected_seq: 0,
+                action,
+            },
             acceptance: Acceptance {
                 seq: 1,
                 in_check: result.is_some(),
@@ -360,12 +365,12 @@ mod tests {
             (1, 1, ApplicationError::Corrupt),
         ] {
             let mut receipt = receipt(Action::Move("7g7f".parse().unwrap()), None);
-            receipt.expected_seq = expected;
+            receipt.request.expected_seq = expected;
             receipt.acceptance.seq = accepted;
             assert_eq!(StagedGameChange::new(game(), receipt), Err(error));
         }
         let mut receipt = receipt(Action::Move("7g7f".parse().unwrap()), None);
-        receipt.expected_seq = limit - 1;
+        receipt.request.expected_seq = limit - 1;
         receipt.acceptance.seq = limit;
         let change = StagedGameChange::new(game(), receipt.clone()).unwrap();
         assert_eq!(change.game_id(), &game());

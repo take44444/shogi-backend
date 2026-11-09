@@ -2,7 +2,11 @@ use sea_orm::sea_query::{
     Alias, ColumnDef, ConditionalStatement, Expr, ExprTrait, ForeignKey, Index, IndexOrder, Query,
     Table, TableCreateStatement,
 };
-use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement, TransactionTrait};
+use sea_orm::{
+    ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbBackend, DbErr, Statement,
+    TransactionTrait,
+};
+use std::collections::BTreeSet;
 
 pub(crate) enum SchemaError {
     Database(DbErr),
@@ -30,55 +34,7 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
         ))
         .await?;
     if tables.is_empty() {
-        for table in [
-            Table::create()
-                .table(a("schema_version"))
-                .col(
-                    ColumnDef::new(a("id"))
-                        .big_integer()
-                        .primary_key()
-                        .not_null(),
-                )
-                .col(ColumnDef::new(a("version")).big_integer().not_null())
-                .to_owned(),
-            games(),
-            journal(),
-            outbox(),
-        ] {
-            tx.execute(&table).await?;
-        }
-        tx.execute(
-            Query::insert()
-                .into_table(a("schema_version"))
-                .columns([a("id"), a("version")])
-                .values_panic([0_i64.into(), 5_i64.into()]),
-        )
-        .await?;
-        tx.execute(
-            Index::create()
-                .name("outbox_pending")
-                .table(a("outbox_events"))
-                .col(a("published"))
-                .col(a("id")),
-        )
-        .await?;
-        for (name, participant) in [
-            ("records_finished", None),
-            ("records_black", Some("black")),
-            ("records_white", Some("white")),
-        ] {
-            let mut index = Index::create();
-            index.name(name).table(a("games"));
-            if let Some(participant) = participant {
-                index.col(a(participant));
-            }
-            index
-                .col((a("finished_at"), IndexOrder::Desc))
-                .col((Expr::cust("id COLLATE \"C\""), IndexOrder::Desc))
-                .and_where(Expr::col(a("visibility")).eq("public"))
-                .and_where(Expr::col(a("finished_at")).is_not_null());
-            tx.execute(&index).await?;
-        }
+        create_schema(&tx).await?;
     } else {
         let names = tables
             .iter()
@@ -104,6 +60,27 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
         }) {
             return Err(SchemaError::Corrupt);
         }
+        let actual = schema_fingerprint(&tx).await?;
+        let probe = tx.begin().await?;
+        let expected_schema = format!("game_expected_{}", uuid::Uuid::new_v4().simple());
+        probe
+            .execute_raw(Statement::from_string(
+                DbBackend::Postgres,
+                format!("CREATE SCHEMA {expected_schema}"),
+            ))
+            .await?;
+        probe
+            .execute_raw(Statement::from_string(
+                DbBackend::Postgres,
+                format!("SET LOCAL search_path TO {expected_schema}"),
+            ))
+            .await?;
+        create_schema(&probe).await?;
+        let expected = schema_fingerprint(&probe).await?;
+        probe.rollback().await?;
+        if !expected.is_subset(&actual) {
+            return Err(SchemaError::Corrupt);
+        }
         let rows = tx
             .query_all(
                 Query::select()
@@ -126,6 +103,108 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
     }
     tx.commit().await?;
     Ok(())
+}
+
+async fn create_schema(tx: &DatabaseTransaction) -> Result<(), SchemaError> {
+    for table in [
+        Table::create()
+            .table(a("schema_version"))
+            .col(
+                ColumnDef::new(a("id"))
+                    .big_integer()
+                    .primary_key()
+                    .not_null(),
+            )
+            .col(ColumnDef::new(a("version")).big_integer().not_null())
+            .to_owned(),
+        games(),
+        journal(),
+        outbox(),
+    ] {
+        tx.execute(&table).await?;
+    }
+    tx.execute(
+        Query::insert()
+            .into_table(a("schema_version"))
+            .columns([a("id"), a("version")])
+            .values_panic([0_i64.into(), 5_i64.into()]),
+    )
+    .await?;
+    tx.execute(
+        Index::create()
+            .name("outbox_pending")
+            .table(a("outbox_events"))
+            .col(a("published"))
+            .col(a("id")),
+    )
+    .await?;
+    for (name, participant) in [
+        ("records_finished", None),
+        ("records_black", Some("black")),
+        ("records_white", Some("white")),
+    ] {
+        let mut index = Index::create();
+        index.name(name).table(a("games"));
+        if let Some(participant) = participant {
+            index.col(a(participant));
+        }
+        index
+            .col((a("finished_at"), IndexOrder::Desc))
+            .col((Expr::cust("id COLLATE \"C\""), IndexOrder::Desc))
+            .and_where(Expr::col(a("visibility")).eq("public"))
+            .and_where(Expr::col(a("finished_at")).is_not_null());
+        tx.execute(&index).await?;
+    }
+    Ok(())
+}
+
+async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>, SchemaError> {
+    tx.query_all_raw(Statement::from_string(
+        DbBackend::Postgres,
+        r#"
+        SELECT definition FROM (
+            SELECT format('relation|%s|%s|%s|%s|%s', c.relname, c.relkind,
+                          c.relpersistence, c.relrowsecurity, c.relforcerowsecurity) AS definition
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = current_schema()
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events')
+            UNION ALL
+            SELECT format('column|%s|%s|%s|%s|%s|%s|%s|%s', c.relname,
+                          a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
+                          COALESCE(pg_get_expr(d.adbin, d.adrelid), ''),
+                          a.attidentity, a.attgenerated, COALESCE(coll.collname, ''))
+            FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+            LEFT JOIN pg_collation coll ON coll.oid = a.attcollation
+            WHERE n.nspname = current_schema() AND a.attnum > 0 AND NOT a.attisdropped
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events')
+            UNION ALL
+            SELECT format('constraint|%s|%s|%s|%s|%s', c.relname,
+                          replace(pg_get_constraintdef(k.oid), quote_ident(current_schema()) || '.', ''),
+                          k.condeferrable, k.condeferred, k.convalidated)
+            FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = current_schema()
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events')
+            UNION ALL
+            SELECT format('index|%s|%s|%s|%s|%s', c.relname, i.indisunique,
+                          substr(pg_get_indexdef(i.indexrelid), length(format('CREATE %sINDEX %I ON %I.%I ',
+                              CASE WHEN i.indisunique THEN 'UNIQUE ' ELSE '' END,
+                              idx.relname, current_schema(), c.relname)) + 1),
+                          i.indisvalid, i.indisready)
+            FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+            JOIN pg_class idx ON idx.oid = i.indexrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = current_schema()
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events')
+        ) definitions
+        "#,
+    ))
+    .await?
+    .into_iter()
+    .map(|row| row.try_get("", "definition").map_err(SchemaError::Database))
+    .collect()
 }
 
 fn games() -> TableCreateStatement {

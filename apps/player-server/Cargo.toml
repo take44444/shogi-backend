@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 [dependencies]
 game-record-application = { path = "../../crates/game-record-application" }
-game-persistence = { path = "../../crates/game-persistence" }
+game-record-persistence = { path = "../../crates/game-record-persistence" }
 player-http = { path = "../../crates/player-http" }
 tokio.workspace = true
 axum = "0.8"

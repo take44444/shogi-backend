@@ -30,10 +30,11 @@ impl proto::game_service_server::GameService for GameRpc {
     ) -> Result<Response<proto::Snapshot>, Status> {
         let request = request.into_inner();
         let id = GameId::new(request.game_id).map_err(invalid)?;
-        let participants = Participants {
-            black: UserId::new(request.black_user_id).map_err(invalid)?,
-            white: UserId::new(request.white_user_id).map_err(invalid)?,
-        };
+        let participants = Participants::new(
+            UserId::new(request.black_user_id).map_err(invalid)?,
+            UserId::new(request.white_user_id).map_err(invalid)?,
+        )
+        .map_err(application_status)?;
         let snapshot = self
             .games
             .create(id, participants)

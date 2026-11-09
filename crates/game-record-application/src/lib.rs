@@ -45,7 +45,7 @@ pub struct Filters {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seek {
-    pub finished_at: i64,
+    pub finished_at: PreparedFinishTime,
     pub id: GameId,
 }
 
@@ -88,7 +88,8 @@ impl Search {
                     return Err(Error::InvalidQuery);
                 }
                 Ok(Seek {
-                    finished_at: time,
+                    finished_at: PreparedFinishTime::try_from(time)
+                        .map_err(|_| Error::InvalidQuery)?,
                     id: GameId::new(id)?,
                 })
             })
@@ -112,8 +113,8 @@ impl Search {
         URL_SAFE_NO_PAD.encode(
             serde_json::to_vec(&(
                 1u8,
-                last.finished_at,
-                last.id.as_str(),
+                last.finished_at().get(),
+                last.id().as_str(),
                 fingerprint(&self.filters),
             ))
             .expect("cursor tuple serializes"),
@@ -144,16 +145,134 @@ fn fingerprint(filters: &Filters) -> String {
     ))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OperationSequence(u64);
+impl OperationSequence {
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+impl TryFrom<u64> for OperationSequence {
+    type Error = Error;
+    fn try_from(value: u64) -> Result<Self, Error> {
+        if value > i64::MAX as u64 {
+            return Err(Error::Corrupt);
+        }
+        Ok(Self(value))
+    }
+}
+impl TryFrom<i64> for OperationSequence {
+    type Error = Error;
+    fn try_from(value: i64) -> Result<Self, Error> {
+        Self::try_from(u64::try_from(value).map_err(|_| Error::Corrupt)?)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MovePly(u64);
+impl MovePly {
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+impl TryFrom<u64> for MovePly {
+    type Error = Error;
+    fn try_from(value: u64) -> Result<Self, Error> {
+        if value > i64::MAX as u64 {
+            return Err(Error::Corrupt);
+        }
+        Ok(Self(value))
+    }
+}
+impl TryFrom<i64> for MovePly {
+    type Error = Error;
+    fn try_from(value: i64) -> Result<Self, Error> {
+        Self::try_from(u64::try_from(value).map_err(|_| Error::Corrupt)?)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PreparedFinishTime(i64);
+impl PreparedFinishTime {
+    pub fn get(self) -> i64 {
+        self.0
+    }
+}
+impl TryFrom<i64> for PreparedFinishTime {
+    type Error = Error;
+    fn try_from(value: i64) -> Result<Self, Error> {
+        if value < 0 {
+            return Err(Error::Corrupt);
+        }
+        Ok(Self(value))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
-    pub id: GameId,
-    pub black: UserId,
-    pub white: UserId,
-    pub rule: Rule,
-    pub result: GameResult,
-    pub finished_at: i64,
-    pub final_seq: u64,
-    pub final_move_ply: u64,
+    id: GameId,
+    black: UserId,
+    white: UserId,
+    rule: Rule,
+    result: GameResult,
+    finished_at: PreparedFinishTime,
+    final_seq: OperationSequence,
+    final_move_ply: MovePly,
+}
+impl Metadata {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: GameId,
+        black: UserId,
+        white: UserId,
+        rule: Rule,
+        result: GameResult,
+        finished_at: PreparedFinishTime,
+        final_seq: OperationSequence,
+        final_move_ply: MovePly,
+    ) -> Result<Self, Error> {
+        if black == white
+            || final_seq.get() == 0
+            || final_move_ply.get()
+                != final_seq.get() - u64::from(result.reason == FinishReason::Resignation)
+        {
+            return Err(Error::Corrupt);
+        }
+        Ok(Self {
+            id,
+            black,
+            white,
+            rule,
+            result,
+            finished_at,
+            final_seq,
+            final_move_ply,
+        })
+    }
+    pub fn id(&self) -> &GameId {
+        &self.id
+    }
+    pub fn black(&self) -> &UserId {
+        &self.black
+    }
+    pub fn white(&self) -> &UserId {
+        &self.white
+    }
+    pub fn rule(&self) -> Rule {
+        self.rule
+    }
+    pub fn result(&self) -> GameResult {
+        self.result
+    }
+    pub fn finished_at(&self) -> PreparedFinishTime {
+        self.finished_at
+    }
+    pub fn final_seq(&self) -> OperationSequence {
+        self.final_seq
+    }
+    pub fn final_move_ply(&self) -> MovePly {
+        self.final_move_ply
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PublicAction {
@@ -162,7 +281,7 @@ pub enum PublicAction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicOperation {
-    pub seq: u64,
+    pub seq: OperationSequence,
     pub player: Player,
     pub action: PublicAction,
 }
@@ -235,6 +354,99 @@ mod tests {
         }
     }
     #[test]
+    fn record_scalars_reject_values_outside_storage_bounds() {
+        for value in [0u64, 1, i64::MAX as u64] {
+            assert_eq!(OperationSequence::try_from(value).unwrap().get(), value);
+            assert_eq!(MovePly::try_from(value).unwrap().get(), value);
+        }
+        for value in [i64::MAX as u64 + 1, u64::MAX] {
+            assert_eq!(OperationSequence::try_from(value), Err(Error::Corrupt));
+            assert_eq!(MovePly::try_from(value), Err(Error::Corrupt));
+        }
+        for value in [i64::MIN, -1] {
+            assert_eq!(OperationSequence::try_from(value), Err(Error::Corrupt));
+            assert_eq!(MovePly::try_from(value), Err(Error::Corrupt));
+            assert_eq!(PreparedFinishTime::try_from(value), Err(Error::Corrupt));
+        }
+        for value in [0i64, 1, i64::MAX] {
+            assert_eq!(
+                OperationSequence::try_from(value).unwrap().get(),
+                value as u64
+            );
+            assert_eq!(MovePly::try_from(value).unwrap().get(), value as u64);
+            assert_eq!(PreparedFinishTime::try_from(value).unwrap().get(), value);
+        }
+    }
+
+    #[test]
+    fn metadata_construction_requires_distinct_players_and_consistent_finish_counts() {
+        for (black, white, reason, seq, ply, valid) in [
+            ("black", "white", FinishReason::Checkmate, 1u64, 1u64, true),
+            ("black", "white", FinishReason::Resignation, 1, 0, true),
+            ("black", "white", FinishReason::Resignation, 3, 2, true),
+            ("black", "white", FinishReason::Checkmate, 0, 0, false),
+            ("black", "white", FinishReason::Resignation, 0, 0, false),
+            ("black", "black", FinishReason::Resignation, 1, 0, false),
+            ("black", "white", FinishReason::Resignation, 1, 1, false),
+            ("black", "white", FinishReason::Checkmate, 1, 0, false),
+            ("black", "white", FinishReason::Checkmate, 1, 2, false),
+            (
+                "black",
+                "white",
+                FinishReason::Resignation,
+                i64::MAX as u64,
+                i64::MAX as u64 - 1,
+                true,
+            ),
+            (
+                "black",
+                "white",
+                FinishReason::Checkmate,
+                i64::MAX as u64,
+                i64::MAX as u64,
+                true,
+            ),
+        ] {
+            let metadata = Metadata::new(
+                GameId::new("id").unwrap(),
+                UserId::new(black).unwrap(),
+                UserId::new(white).unwrap(),
+                Rule::Standard,
+                GameResult {
+                    winner: Player::Black,
+                    reason,
+                },
+                PreparedFinishTime::try_from(0).unwrap(),
+                OperationSequence::try_from(seq).unwrap(),
+                MovePly::try_from(ply).unwrap(),
+            );
+            assert_eq!(
+                metadata.is_ok(),
+                valid,
+                "{black}, {white}, {reason:?}, {seq}, {ply}"
+            );
+            if let Ok(metadata) = metadata {
+                assert_eq!(metadata.id().as_str(), "id");
+                assert_eq!(metadata.black().as_str(), black);
+                assert_eq!(metadata.white().as_str(), white);
+                assert_eq!(metadata.rule(), Rule::Standard);
+                assert_eq!(
+                    metadata.result(),
+                    GameResult {
+                        winner: Player::Black,
+                        reason
+                    }
+                );
+                assert_eq!(metadata.finished_at().get(), 0);
+                assert_eq!(metadata.final_seq().get(), seq);
+                assert_eq!(metadata.final_move_ply().get(), ply);
+            } else {
+                assert_eq!(metadata, Err(Error::Corrupt));
+            }
+        }
+    }
+
+    #[test]
     fn bounds_and_cursor_binding() {
         for (from, to, min, max, limit) in [
             (0, 0, None, None, 30),
@@ -251,20 +463,29 @@ mod tests {
             assert!(Search::new(f, limit, None).is_err());
         }
         let search = Search::new(filters(), 1, None).unwrap();
-        let metadata = Metadata {
-            id: GameId::new("id").unwrap(),
-            black: UserId::new("black").unwrap(),
-            white: UserId::new("white").unwrap(),
-            rule: Rule::Standard,
-            result: GameResult {
+        let metadata = Metadata::new(
+            GameId::new("id").unwrap(),
+            UserId::new("black").unwrap(),
+            UserId::new("white").unwrap(),
+            Rule::Standard,
+            GameResult {
                 winner: Player::Black,
                 reason: FinishReason::Resignation,
             },
-            finished_at: 20,
-            final_seq: 1,
-            final_move_ply: 0,
-        };
+            PreparedFinishTime::try_from(20).unwrap(),
+            OperationSequence::try_from(1u64).unwrap(),
+            MovePly::try_from(0u64).unwrap(),
+        )
+        .unwrap();
         let cursor = search.cursor(&metadata);
+        assert_eq!(
+            cursor,
+            "WzEsMjAsImlkIiwiOFNDYU54TWdkOElJOVlnbVpKZ2gzZWctd0xmMTM5YW9XdkYzRWZ1bjJNayJd"
+        );
+        let decoded = Search::new(filters(), 100, Some(&cursor)).unwrap();
+        let seek = decoded.seek().unwrap();
+        assert_eq!(seek.finished_at.get(), 20);
+        assert_eq!(seek.id.as_str(), "id");
         assert!(Search::new(filters(), 100, Some(&cursor)).is_ok());
         let mut changed = filters();
         changed.participant = Some(UserId::new("black").unwrap());

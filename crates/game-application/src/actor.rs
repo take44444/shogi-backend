@@ -1,23 +1,15 @@
 use crate::{
-    Acceptance, Action, ApplicationError, GameId, GameRecord, GameRepository, Participants,
-    Receipt, RequestId, Snapshot, StagedGameChange, UserId,
+    Acceptance, Action, ApplicationError, GameId, GameRecord, GameRepository, MutationRequest,
+    Participants, Receipt, RequestId, Snapshot, StagedGameChange, UserId,
 };
 use shogi_domain::Game;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 
-#[derive(Clone)]
-pub(crate) struct Pending {
-    pub request_id: RequestId,
-    pub user_id: UserId,
-    pub expected_seq: u64,
-    pub action: Action,
-}
-
 pub(crate) enum Command {
     Snapshot(oneshot::Sender<Result<Snapshot, ApplicationError>>),
     Mutate {
-        receipt: Pending,
+        receipt: MutationRequest,
         reply: oneshot::Sender<Result<Acceptance, ApplicationError>>,
     },
 }
@@ -63,30 +55,31 @@ impl State {
             participants: record.participants,
             accepted: HashMap::new(),
         };
-        if state.participants.black == state.participants.white || record.version > i64::MAX as u64
-        {
+        if record.version > i64::MAX as u64 {
             return Err(ApplicationError::Corrupt);
         }
         for receipt in record.journal {
-            if receipt.expected_seq != state.seq
+            if receipt.request.expected_seq != state.seq
                 || receipt.acceptance.seq
                     != next_sequence(state.seq).map_err(|_| ApplicationError::Corrupt)?
-                || state.accepted.contains_key(&receipt.request_id)
+                || state.accepted.contains_key(&receipt.request.request_id)
             {
                 return Err(ApplicationError::Corrupt);
             }
             execute(
                 &mut state.game,
                 &state.participants,
-                &receipt.user_id,
-                receipt.action,
+                &receipt.request.user_id,
+                receipt.request.action,
             )
             .map_err(|_| ApplicationError::Corrupt)?;
             state.seq += 1;
             if receipt.acceptance != state.acceptance() {
                 return Err(ApplicationError::Corrupt);
             }
-            state.accepted.insert(receipt.request_id.clone(), receipt);
+            state
+                .accepted
+                .insert(receipt.request.request_id.clone(), receipt);
         }
         if state.seq != record.version || state.game.result() != record.result {
             return Err(ApplicationError::Corrupt);
@@ -102,15 +95,12 @@ impl State {
         }
     }
 
-    fn replay(&self, receipt: &Pending) -> Result<Option<Acceptance>, ApplicationError> {
-        self.participants.side(&receipt.user_id)?;
+    fn replay(&self, request: &MutationRequest) -> Result<Option<Acceptance>, ApplicationError> {
+        self.participants.side(&request.user_id)?;
         self.accepted
-            .get(&receipt.request_id)
+            .get(&request.request_id)
             .map(|original| {
-                if original.user_id == receipt.user_id
-                    && original.expected_seq == receipt.expected_seq
-                    && original.action == receipt.action
-                {
+                if original.request == *request {
                     Ok(original.acceptance)
                 } else {
                     Err(ApplicationError::RequestConflict)
@@ -181,7 +171,7 @@ impl Actor {
         }
     }
 
-    async fn apply(&mut self, pending: Pending) -> Result<Acceptance, ApplicationError> {
+    async fn apply(&mut self, pending: MutationRequest) -> Result<Acceptance, ApplicationError> {
         self.refresh().await?;
         let state = self.state.as_ref().ok_or(ApplicationError::Internal)?;
         if let Some(acceptance) = state.replay(&pending)? {
@@ -202,10 +192,7 @@ impl Actor {
             pending.action,
         )?;
         let receipt = Receipt {
-            request_id: pending.request_id.clone(),
-            user_id: pending.user_id.clone(),
-            expected_seq: pending.expected_seq,
-            action: pending.action,
+            request: pending.clone(),
             acceptance: Acceptance {
                 seq,
                 in_check: candidate.in_check(),
@@ -221,7 +208,7 @@ impl Actor {
                 state.seq = seq;
                 state
                     .accepted
-                    .insert(receipt.request_id.clone(), receipt.clone());
+                    .insert(receipt.request.request_id.clone(), receipt.clone());
                 Ok(receipt.acceptance)
             }
             Err(error) => {

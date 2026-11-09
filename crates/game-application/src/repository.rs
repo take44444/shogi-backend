@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use shogi_domain::{GameResult, Move};
 
 use crate::{
-    Acceptance, ApplicationError, GameId, Participants, RequestId, StagedGameChange, UserId,
+    Acceptance, ApplicationError, GameId, MakeMove, Participants, RequestId, Resign,
+    StagedGameChange, UserId,
 };
 
 /// The typed action stored for exact retry matching and journal replay.
@@ -14,9 +15,9 @@ pub enum Action {
     Resign,
 }
 
-/// One accepted command and its original response. Rejections have no receipt.
+/// The complete identity of a mutation, preserved for exact retries.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Receipt {
+pub struct MutationRequest {
     /// The request ID, unique among accepted commands in this game.
     pub request_id: RequestId,
     /// The bound participant who issued the command.
@@ -25,6 +26,45 @@ pub struct Receipt {
     pub expected_seq: u64,
     /// The action used for replay and exact retry comparison.
     pub action: Action,
+}
+
+impl From<MakeMove> for MutationRequest {
+    fn from(command: MakeMove) -> Self {
+        let MakeMove {
+            request_id,
+            user_id,
+            expected_seq,
+            movement,
+        } = command;
+        Self {
+            request_id,
+            user_id,
+            expected_seq,
+            action: Action::Move(movement),
+        }
+    }
+}
+impl From<Resign> for MutationRequest {
+    fn from(command: Resign) -> Self {
+        let Resign {
+            request_id,
+            user_id,
+            expected_seq,
+        } = command;
+        Self {
+            request_id,
+            user_id,
+            expected_seq,
+            action: Action::Resign,
+        }
+    }
+}
+
+/// One accepted command and its original response. Rejections have no receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Receipt {
+    /// The original request, compared as one value during replay.
+    pub request: MutationRequest,
     /// The original response; its sequence is `expected_seq + 1`.
     pub acceptance: Acceptance,
 }
@@ -76,8 +116,7 @@ pub trait GameRepository: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationError::InvalidParticipants`] for equal users,
-    /// [`ApplicationError::AlreadyExists`] for a duplicate game, or
+    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate game, or
     /// [`ApplicationError::Unavailable`] for a storage failure.
     async fn create_game(
         &self,
@@ -104,7 +143,7 @@ pub trait GameRepository: Send + Sync {
     async fn version(&self, id: &GameId) -> Result<u64, ApplicationError>;
     /// Atomically persists the supplied receipt, events, and resulting metadata.
     ///
-    /// Compares the current version with [`Receipt::expected_seq`], verifies
+    /// Compares the current version with [`MutationRequest::expected_seq`], verifies
     /// participant membership, and preserves per-game request and sequence uniqueness.
     /// The updated version, result, receipt, and all supplied events must commit
     /// together or not at all. The application generates events before calling this

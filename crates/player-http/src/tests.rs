@@ -1,7 +1,8 @@
 use super::*;
 use axum::{body::Body, http::Request};
 use game_application::{GameId as WriteId, GameService, MakeMove, Participants, RequestId, Resign};
-use game_persistence::{PostgresGameRecords, SeaOrmStore};
+use game_persistence::SeaOrmStore;
+use game_record_persistence::PostgresGameRecords;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -28,10 +29,8 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
     games
         .create(
             id.clone(),
-            Participants {
-                black: UserId::new("black").unwrap(),
-                white: UserId::new("white").unwrap(),
-            },
+            Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -61,10 +60,8 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
     games
         .create(
             WriteId::new("ongoing").unwrap(),
-            Participants {
-                black: UserId::new("black").unwrap(),
-                white: UserId::new("white").unwrap(),
-            },
+            Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
+                .unwrap(),
         )
         .await
         .unwrap();

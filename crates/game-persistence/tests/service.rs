@@ -292,10 +292,7 @@ fn user(side: Player) -> UserId {
     .unwrap()
 }
 fn participants() -> Participants {
-    Participants {
-        black: user(Player::Black),
-        white: user(Player::White),
-    }
+    Participants::new(user(Player::Black), user(Player::White)).unwrap()
 }
 async fn setup() -> (TestDatabase, GameService) {
     let database = TestDatabase::new().await;

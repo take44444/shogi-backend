@@ -1,11 +1,13 @@
-use crate::schema::a;
+#![doc = "Read-only record access without schema initialization or game mutation."]
+#![warn(missing_docs)]
+
 use async_trait::async_trait;
 use game_record_application::{
-    Detail, Error, GameId, MAX_HISTORY, Metadata, Page, PublicAction, PublicOperation,
-    RecordRepository, Rule, Search, UserId,
+    Detail, Error, GameId, MAX_HISTORY, Metadata, MovePly, OperationSequence, Page,
+    PreparedFinishTime, PublicAction, PublicOperation, RecordRepository, Rule, Search, UserId,
 };
 use sea_orm::sea_query::{
-    Cond, Expr, ExprTrait, Order, PostgresQueryBuilder, Query, SelectStatement,
+    Alias, Cond, Expr, ExprTrait, Order, PostgresQueryBuilder, Query, SelectStatement,
 };
 use sea_orm::sqlx::{
     self, AssertSqlSafe, PgPool, Postgres, Row,
@@ -196,31 +198,21 @@ fn number(row: &PgRow, column: &str) -> Result<u64, Error> {
     u64::try_from(row.try_get::<i64, _>(column).map_err(corrupt)?).map_err(corrupt)
 }
 fn metadata(row: &PgRow) -> Result<Metadata, Error> {
-    let data = Metadata {
-        id: GameId::new(decode(row.try_get::<String, _>("id").map_err(corrupt)?)?)
+    Metadata::new(
+        GameId::new(decode(row.try_get::<String, _>("id").map_err(corrupt)?)?).map_err(corrupt)?,
+        UserId::new(decode(row.try_get::<String, _>("black").map_err(corrupt)?)?)
             .map_err(corrupt)?,
-        black: UserId::new(decode(row.try_get::<String, _>("black").map_err(corrupt)?)?)
+        UserId::new(decode(row.try_get::<String, _>("white").map_err(corrupt)?)?)
             .map_err(corrupt)?,
-        white: UserId::new(decode(row.try_get::<String, _>("white").map_err(corrupt)?)?)
-            .map_err(corrupt)?,
-        rule: Rule::Standard,
-        result: GameResult {
+        Rule::Standard,
+        GameResult {
             winner: side(row.try_get("winner").map_err(corrupt)?)?,
             reason: reason(row.try_get("reason").map_err(corrupt)?)?,
         },
-        finished_at: row.try_get("finished_at").map_err(corrupt)?,
-        final_seq: number(row, "version")?,
-        final_move_ply: number(row, "final_move_ply")?,
-    };
-    if data.black == data.white
-        || data.finished_at < 0
-        || data.final_seq == 0
-        || data.final_move_ply
-            != data.final_seq - u64::from(data.result.reason == FinishReason::Resignation)
-    {
-        return Err(Error::Corrupt);
-    }
-    Ok(data)
+        PreparedFinishTime::try_from(row.try_get::<i64, _>("finished_at").map_err(corrupt)?)?,
+        OperationSequence::try_from(row.try_get::<i64, _>("version").map_err(corrupt)?)?,
+        MovePly::try_from(row.try_get::<i64, _>("final_move_ply").map_err(corrupt)?)?,
+    )
 }
 #[async_trait]
 impl RecordRepository for PostgresGameRecords {
@@ -233,8 +225,8 @@ impl RecordRepository for PostgresGameRecords {
         if let Some(id) = &f.participant {
             query.cond_where(
                 Cond::any()
-                    .add(Expr::col(a("black")).eq(crate::encode_id(id.as_str())))
-                    .add(Expr::col(a("white")).eq(crate::encode_id(id.as_str()))),
+                    .add(Expr::col(a("black")).eq(encode_id(id.as_str())))
+                    .add(Expr::col(a("white")).eq(encode_id(id.as_str()))),
             );
         }
         if let Some(winner) = f.winner {
@@ -262,14 +254,11 @@ impl RecordRepository for PostgresGameRecords {
         if let Some(seek) = search.seek() {
             query.cond_where(
                 Cond::any()
-                    .add(Expr::col(a("finished_at")).lt(seek.finished_at))
+                    .add(Expr::col(a("finished_at")).lt(seek.finished_at.get()))
                     .add(
                         Cond::all()
-                            .add(Expr::col(a("finished_at")).eq(seek.finished_at))
-                            .add(
-                                Expr::cust("id COLLATE \"C\"")
-                                    .lt(crate::encode_id(seek.id.as_str())),
-                            ),
+                            .add(Expr::col(a("finished_at")).eq(seek.finished_at.get()))
+                            .add(Expr::cust("id COLLATE \"C\"").lt(encode_id(seek.id.as_str()))),
                     ),
             );
         }
@@ -302,7 +291,7 @@ impl RecordRepository for PostgresGameRecords {
             .await
             .map_err(unavailable)?;
         let (sql, values) = metadata_query()
-            .and_where(Expr::col(a("id")).eq(crate::encode_id(id.as_str())))
+            .and_where(Expr::col(a("id")).eq(encode_id(id.as_str())))
             .build_sqlx(PostgresQueryBuilder);
         let row = sqlx::query_with(AssertSqlSafe(sql), values)
             .fetch_optional(&mut *tx)
@@ -310,7 +299,7 @@ impl RecordRepository for PostgresGameRecords {
             .map_err(unavailable)?
             .ok_or(Error::NotFound)?;
         let metadata = metadata(&row)?;
-        if metadata.final_seq > MAX_HISTORY {
+        if metadata.final_seq().get() > MAX_HISTORY {
             return Err(Error::HistoryTooLong);
         }
         let (sql, values) = Query::select()
@@ -321,7 +310,7 @@ impl RecordRepository for PostgresGameRecords {
                 .map(a),
             )
             .from(a("journal"))
-            .and_where(Expr::col(a("game_id")).eq(crate::encode_id(id.as_str())))
+            .and_where(Expr::col(a("game_id")).eq(encode_id(id.as_str())))
             .order_by(a("seq"), Order::Asc)
             .limit(MAX_HISTORY + 1)
             .build_sqlx(PostgresQueryBuilder);
@@ -329,7 +318,7 @@ impl RecordRepository for PostgresGameRecords {
             .fetch_all(&mut *tx)
             .await
             .map_err(unavailable)?;
-        if rows.len() as u64 != metadata.final_seq {
+        if rows.len() as u64 != metadata.final_seq().get() {
             return Err(Error::Corrupt);
         }
         let mut history = Vec::with_capacity(rows.len());
@@ -340,9 +329,9 @@ impl RecordRepository for PostgresGameRecords {
                 return Err(Error::Corrupt);
             }
             let user = decode(row.try_get("user_id").map_err(corrupt)?)?;
-            let player = if user == metadata.black.as_str() {
+            let player = if user == metadata.black().as_str() {
                 Player::Black
-            } else if user == metadata.white.as_str() {
+            } else if user == metadata.white().as_str() {
                 Player::White
             } else {
                 return Err(Error::Corrupt);
@@ -367,17 +356,17 @@ impl RecordRepository for PostgresGameRecords {
             };
             let winner: Option<i32> = row.try_get("winner").map_err(corrupt)?;
             let finish: Option<i32> = row.try_get("reason").map_err(corrupt)?;
-            if seq == metadata.final_seq {
-                if winner.map(side).transpose()? != Some(metadata.result.winner)
-                    || finish.map(reason).transpose()? != Some(metadata.result.reason)
+            if seq == metadata.final_seq().get() {
+                if winner.map(side).transpose()? != Some(metadata.result().winner)
+                    || finish.map(reason).transpose()? != Some(metadata.result().reason)
                 {
                     return Err(Error::Corrupt);
                 }
-                match (&action, metadata.result.reason) {
+                match (&action, metadata.result().reason) {
                     (PublicAction::Resign, FinishReason::Resignation)
-                        if player.opponent() == metadata.result.winner => {}
+                        if player.opponent() == metadata.result().winner => {}
                     (PublicAction::Move(_), FinishReason::Checkmate)
-                        if player == metadata.result.winner
+                        if player == metadata.result().winner
                             && row.try_get::<bool, _>("in_check").map_err(corrupt)? => {}
                     _ => return Err(Error::Corrupt),
                 }
@@ -386,12 +375,12 @@ impl RecordRepository for PostgresGameRecords {
                 return Err(Error::Corrupt);
             }
             history.push(PublicOperation {
-                seq,
+                seq: OperationSequence::try_from(seq)?,
                 player,
                 action,
             });
         }
-        if move_ply != metadata.final_move_ply {
+        if move_ply != metadata.final_move_ply().get() {
             return Err(Error::Corrupt);
         }
         tx.commit().await.map_err(unavailable)?;
@@ -399,18 +388,67 @@ impl RecordRepository for PostgresGameRecords {
     }
 }
 
+fn a(name: &str) -> Alias {
+    Alias::new(name)
+}
+
+fn encode_id(value: &str) -> String {
+    value
+        .replace('\u{1}', "\u{1}\u{2}")
+        .replace('\0', "\u{1}\u{1}")
+}
+
 fn decode(value: String) -> Result<String, Error> {
-    crate::decode_id(&value).map_err(corrupt)
+    let mut decoded = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(character) = chars.next() {
+        decoded.push(match character {
+            '\u{1}' => match chars.next() {
+                Some('\u{2}') => '\u{1}',
+                Some('\u{1}') => '\0',
+                _ => return Err(Error::Corrupt),
+            },
+            other => other,
+        });
+    }
+    Ok(decoded)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn identifier_codec_preserves_storage_escapes_and_rejects_malformed_values() {
+        for (raw, stored) in [
+            ("plain", "plain"),
+            ("a\0b", "a\u{1}\u{1}b"),
+            ("a\u{1}b", "a\u{1}\u{2}b"),
+            ("\0\u{1}\0", "\u{1}\u{1}\u{1}\u{2}\u{1}\u{1}"),
+        ] {
+            assert_eq!(encode_id(raw), stored);
+            assert_eq!(decode(stored.to_owned()).unwrap(), raw);
+        }
+        for malformed in ["\u{1}", "a\u{1}x", "a\u{1}\u{2}\u{1}"] {
+            assert_eq!(decode(malformed.to_owned()), Err(Error::Corrupt));
+        }
+    }
+
+    async fn initialize(url: &str) {
+        let pool = PgPool::connect(url).await.unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../game-persistence/tests/fixtures/schema-v5.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    }
+
     #[tokio::test]
     async fn database_role_denies_writes_even_when_read_only_mode_is_disabled() {
         let database = pg_test_support::TestDatabase::new().await;
-        let writer = crate::SeaOrmStore::connect(database.url()).await.unwrap();
+        initialize(database.url()).await;
         let reader = PostgresGameRecords::connect(&database.reader_url().await)
             .await
             .unwrap();
@@ -432,17 +470,54 @@ mod tests {
         );
         drop(connection);
         reader.close().await;
-        writer.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fifth_reader_connection_times_out_until_one_of_four_is_released() {
+        let database = pg_test_support::TestDatabase::new().await;
+        initialize(database.url()).await;
+        let reader = PostgresGameRecords::connect(&database.reader_url().await)
+            .await
+            .unwrap();
+        let mut held = Vec::new();
+        for _ in 0..4 {
+            held.push(reader.connection().await.unwrap());
+        }
+        assert_eq!(reader.pool.size(), 4);
+        assert_eq!(
+            reader.pool.options().get_acquire_timeout(),
+            Duration::from_secs(2)
+        );
+        assert!(matches!(
+            reader.pool.acquire().await,
+            Err(sqlx::Error::PoolTimedOut)
+        ));
+        drop(held.pop());
+        let mut recovered = reader.connection().await.unwrap();
+        sqlx::query("SELECT 1")
+            .execute(&mut *recovered)
+            .await
+            .unwrap();
+        drop(recovered);
+        drop(held);
+        reader.close().await;
     }
 
     #[tokio::test]
     async fn statement_timeout_interrupts_real_database_work_and_connection_recovers() {
         let database = pg_test_support::TestDatabase::new().await;
-        let writer = crate::SeaOrmStore::connect(database.url()).await.unwrap();
+        initialize(database.url()).await;
         let reader = PostgresGameRecords::connect(&database.reader_url().await)
             .await
             .unwrap();
         let mut connection = reader.connection().await.unwrap();
+        for command in ["SHOW statement_timeout", "SHOW lock_timeout"] {
+            let row = sqlx::query(command)
+                .fetch_one(&mut *connection)
+                .await
+                .unwrap();
+            assert_eq!(row.get::<String, _>(0), "2s");
+        }
         let error = sqlx::query("SELECT pg_sleep(10)")
             .execute(&mut *connection)
             .await
@@ -457,6 +532,5 @@ mod tests {
             .unwrap();
         drop(connection);
         reader.close().await;
-        writer.close().await.unwrap();
     }
 }

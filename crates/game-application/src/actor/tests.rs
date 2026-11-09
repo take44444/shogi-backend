@@ -7,8 +7,8 @@ struct RecordStore(Mutex<GameRecord>, Mutex<Vec<StagedGameChange>>);
 fn id() -> GameId {
     GameId::new("lifecycle").unwrap()
 }
-fn receipt() -> Pending {
-    Pending {
+fn receipt() -> MutationRequest {
+    MutationRequest {
         request_id: RequestId::new("request").unwrap(),
         user_id: UserId::new("black").unwrap(),
         expected_seq: 0,
@@ -19,10 +19,11 @@ fn store() -> Arc<RecordStore> {
     Arc::new(RecordStore(
         Mutex::new(GameRecord {
             id: id(),
-            participants: Participants {
-                black: UserId::new("black").unwrap(),
-                white: UserId::new("white").unwrap(),
-            },
+            participants: Participants::new(
+                UserId::new("black").unwrap(),
+                UserId::new("white").unwrap(),
+            )
+            .unwrap(),
             version: 0,
             result: None,
             journal: vec![],
@@ -65,7 +66,7 @@ async fn actor_supplies_events_before_commit_change_and_skips_retries_and_reject
     assert_eq!(actor.apply(first.clone()).await, Ok(accepted));
     assert_eq!(
         actor
-            .apply(Pending {
+            .apply(MutationRequest {
                 request_id: RequestId::new("rejected").unwrap(),
                 expected_seq: 1,
                 ..first.clone()
@@ -75,7 +76,7 @@ async fn actor_supplies_events_before_commit_change_and_skips_retries_and_reject
             shogi_domain::CommandError::WrongTurn
         ))
     );
-    let resignation = Pending {
+    let resignation = MutationRequest {
         request_id: RequestId::new("end").unwrap(),
         user_id: UserId::new("white").unwrap(),
         expected_seq: 1,
@@ -238,4 +239,81 @@ async fn unknown_games_never_register_actors() {
         );
     }
     assert!(service.games.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mutation_errors_prioritize_request_conflict_then_sequence_mismatch_then_game_finished() {
+    let service = GameService::new(store());
+    let mut command = MakeMove {
+        request_id: RequestId::new("oversized").unwrap(),
+        user_id: UserId::new("black").unwrap(),
+        expected_seq: u64::MAX,
+        movement: "7g7f".parse().unwrap(),
+    };
+    assert_eq!(
+        service.make_move(&id(), command.clone()).await,
+        Err(ApplicationError::SequenceMismatch {
+            expected: u64::MAX,
+            actual: 0
+        })
+    );
+    command.expected_seq = 0;
+    assert_eq!(
+        service.make_move(&id(), command.clone()).await.unwrap().seq,
+        1
+    );
+    command.expected_seq = u64::MAX;
+    assert_eq!(
+        service.make_move(&id(), command.clone()).await,
+        Err(ApplicationError::RequestConflict)
+    );
+    service
+        .resign(
+            &id(),
+            crate::Resign {
+                request_id: RequestId::new("finish").unwrap(),
+                user_id: UserId::new("white").unwrap(),
+                expected_seq: 1,
+            },
+        )
+        .await
+        .unwrap();
+    command.request_id = RequestId::new("after-finish").unwrap();
+    assert_eq!(
+        service.make_move(&id(), command.clone()).await,
+        Err(ApplicationError::SequenceMismatch {
+            expected: u64::MAX,
+            actual: 2
+        })
+    );
+    command.expected_seq = 2;
+    assert_eq!(
+        service.make_move(&id(), command).await,
+        Err(ApplicationError::Domain(
+            shogi_domain::CommandError::GameFinished
+        ))
+    );
+}
+
+#[tokio::test]
+async fn exhausted_state_still_checks_expected_sequence_before_advancing() {
+    let repository = store();
+    let mut actor = Actor::new(id(), repository.clone());
+    actor.refresh().await.unwrap();
+    actor.state.as_mut().unwrap().seq = i64::MAX as u64;
+    repository.0.lock().unwrap().version = i64::MAX as u64;
+    let mut request = receipt();
+    request.expected_seq = u64::MAX;
+    assert_eq!(
+        actor.apply(request.clone()).await,
+        Err(ApplicationError::SequenceMismatch {
+            expected: u64::MAX,
+            actual: i64::MAX as u64
+        })
+    );
+    request.expected_seq = i64::MAX as u64;
+    assert_eq!(
+        actor.apply(request).await,
+        Err(ApplicationError::SequenceExhausted)
+    );
 }

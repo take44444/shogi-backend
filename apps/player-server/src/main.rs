@@ -1,5 +1,5 @@
-use game_persistence::PostgresGameRecords;
 use game_record_application::GameRecords;
+use game_record_persistence::PostgresGameRecords;
 use std::{net::SocketAddr, sync::Arc};
 
 #[tokio::main]

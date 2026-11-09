@@ -2,7 +2,7 @@
 
 The standalone HTTP account service composes `user-http`, `user-application`, and `user-persistence`. It runs independently of `game-server` and uses a separate PostgreSQL database.
 
-The [authentication design](../../docs/design/user-authentication.md) explains the login flow, session model, and service boundaries. The [HTTP API reference](../../crates/user-http/README.md) describes the routes.
+The [authentication decision](../../docs/adr/0002-browser-authentication.md) explains authentication choices. See [unfinished work](../../docs/design/unfinished-work.md) for remaining features and verification limits. The [HTTP API reference](../../crates/user-http/README.md) describes the routes.
 
 ## Configuration
 

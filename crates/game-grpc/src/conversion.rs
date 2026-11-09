@@ -123,8 +123,8 @@ impl From<Snapshot> for proto::Snapshot {
             .collect();
         Self {
             game_id: value.game_id.as_str().to_owned(),
-            black_user_id: value.participants.black.as_str().to_owned(),
-            white_user_id: value.participants.white.as_str().to_owned(),
+            black_user_id: value.participants.black().as_str().to_owned(),
+            white_user_id: value.participants.white().as_str().to_owned(),
             seq: value.seq,
             board,
             hands,
