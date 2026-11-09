@@ -1,9 +1,11 @@
-# RPC reference
+# game-grpc
 
 The generated `shogi.v1.GameService` API uses plaintext gRPC. The schema is
 [`proto/game.proto`](../../proto/game.proto). Vendored protoc builds Rust clients
 and servers. `GameRpc::new(GameService)` dispatches game operations.
 User management belongs to the separate HTTP service and has no gRPC methods.
+
+## Requests and responses
 
 | Method | Required request fields | Response |
 |---|---|---|
@@ -17,18 +19,19 @@ optional solely to distinguish omission from valid zero. Both mutation methods
 reject an omitted sequence. `MakeMove` accepts strict USI move notation.
 User IDs are supplied claims. This API is unauthenticated and intended for trusted
 internal callers. Creating a game requires two valid, distinct IDs and performs no
-account lookup. The new HTTP user service does not authenticate these gRPC calls.
+account lookup. The HTTP user service does not authenticate these gRPC calls.
 
-Mutation input field 4 and the name `player` are reserved. `MakeMove.user_id` is
-field 6 and `Resign.user_id` is field 5. Clients choose a bound user, and the server
-derives the side. The `Player` enum remains in outputs. Snapshot fields 9 and 10
-are `black_user_id` and `white_user_id`. Existing output field numbers are retained.
+Clients supply a bound user ID, and the server derives the side. The `Player`
+enum remains in outputs. Reserved fields and wire numbers are defined in
+[`game.proto`](../../proto/game.proto).
 
 `Snapshot` contains an occupied-square board, all fourteen hand counts, turn,
 check, optional result, legal USI moves, participant IDs, and sequence.
 Finished snapshots retain the position and turn with no legal moves.
 `Acceptance` contains the accepted sequence, check, and optional result.
 Exact retries return the original acceptance, including after restart or finish.
+
+## Errors and retries
 
 | Application outcome | gRPC code |
 |---|---|
@@ -45,6 +48,14 @@ Exact retries return the original acceptance, including after restart or finish.
 After `Unavailable` or a lost response, retry the same request ID with identical
 contents. Cancellation after enqueue does not cancel a durable command.
 
-The `play` example verifies a complete game. `persistence_proof` has separate
+## Examples and verification
+
+The `play` example exercises moves and resignation. `persistence_proof` has separate
 `seed`, `resume`, and `finished` invocations for restart testing with protobuf
 artifacts. The [root README](../../README.md) contains runnable commands.
+
+Run adapter tests from the repository root.
+
+```sh
+cargo test --locked -p game-grpc
+```

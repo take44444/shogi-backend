@@ -1,14 +1,37 @@
 # game-persistence
 
-`SeaOrmStore::connect(&str).await` connects to PostgreSQL and initializes or validates the game schema before returning the shared adapter. The database and role must already exist. `SeaOrmStore` implements the backend-neutral `GameRepository` port. Its database contains game state and the durable event outbox. It does not query or connect to the user service. SeaORM 2.0.4 is pinned with default features disabled and the PostgreSQL driver enabled.
+`SeaOrmStore::connect(&str).await` connects to PostgreSQL and initializes or
+validates the game schema. `SeaOrmStore` implements `GameRepository` for game
+state, accepted requests, and the durable event outbox. Account storage belongs
+to the separate user service.
 
-Ordinary data operations and table/index definitions use SeaQuery builders. SeaORM executes its generated statements directly. The record reader and Outbox retain their dedicated SQLx connections and use `sea-query-sqlx` to pass generated SQL and bound values separately. Handwritten SQL is limited to PostgreSQL locks, connection settings, catalog inspection, and the `C` collation expression. Test fixtures retain SQL for deliberate corruption and compatibility with the previous schema.
+Data operations, table definitions, and index definitions use SeaQuery builders.
+SeaORM executes generated statements. The outbox uses a dedicated SQLx connection
+and `sea-query-sqlx` to keep values separate from SQL text. PostgreSQL-specific
+operations use handwritten SQL. Test fixtures also use SQL to inject corruption
+and check compatibility with the previous schema.
+
+## Schema startup
+
+The database and role must already exist. The role needs database `CREATE`
+permission and permission to create objects in the target schema. Existing-schema
+validation also requires database `CREATE`: it builds a reference schema inside
+a savepoint and rolls it back after comparison.
+
+Startup takes a PostgreSQL transaction advisory lock. An empty schema receives
+the version 5 ledger, tables, constraints, and indexes atomically. Existing
+schemas must have the current ledger and required definitions, including column
+types, NULL constraints, keys, CHECK constraints, and indexes. Extra columns,
+indexes, and unrelated tables are permitted when required definitions remain.
+
+An incompatible schema returns `Corrupt`; database failures return `Unavailable`.
+Startup does not upgrade, rebuild, repair, or delete existing data. The reference
+schema uses the same creation function as initialization to keep the expected
+definitions in one place.
 
 ## Game storage
 
 `games` stores immutable participant IDs, the current version, and the final result. `journal` stores each accepted request's user, expected sequence, typed action encoded as canonical USI or resignation, and receipt. Foreign keys bind each journal entry to its game and each outbox row to its journal entry. A distinct-participant check rejects equal bindings. Composite uniqueness protects game sequence and game request ID. Result-pair checks reject either missing half of a terminal result. Identifiers use an order-preserving escape for NUL and the escape byte because PostgreSQL TEXT excludes NUL. The adapter decodes them before returning application values. All durable sequence conversions check the signed 64-bit range.
-
-Schema startup serializes initialization with a PostgreSQL advisory lock inside the schema transaction. An empty database receives the version 5 ledger, tables, constraints, and indexes atomically. It does not create account tables. Existing databases must contain the current ledger and required application tables. An empty or malformed ledger, a missing ledger, missing application tables, and any other version fail closed without changing existing data. Startup does not upgrade, rebuild, or delete existing data. Database errors return `Unavailable`; an incompatible schema returns `Corrupt`.
 
 Game creation and `commit_change` use PostgreSQL transactions. `commit_change(&StagedGameChange)` updates the game only at the expected version and inserts the supplied receipt and already generated events in the same transaction. The application constructs the change and freezes event content before commit. The adapter does not generate events. It verifies participant membership before committing. A failed statement rolls back the transaction. The application reconciles every commit failure through a fresh durable load.
 
@@ -24,11 +47,23 @@ The application stops its Tokio runtime before releasing the queue connection. T
 
 The publisher reads one pending row and marks that exact row after a successful transport handoff. Marking is idempotent. A failed or uncertain handoff or mark leaves recovery to the next read. This single publisher preserves the order of new event attempts, but uncertain sends can produce late duplicates. A blocked head event blocks later events. The adapter does not implement parallel delivery workers or publisher leases.
 
-## Public completed records
+## Completed-game metadata
 
 The read-only adapter lives in [game-record-persistence](../game-record-persistence/src/lib.rs). Its production dependency graph excludes this writer crate and the Game Actor. Deployments use the separate reader role from [the bootstrap SQL](../../scripts/init-postgres.sql).
 
-Version 5 requires non-null `rule`, `visibility`, and `final_move_ply`. Only an ongoing game may have a null `finished_at`; a completed game must have a finish timestamp and a complete result. New games explicitly use `standard`, `public`, and a zero move count. Accepted moves increment the count. Resignation advances sequence without advancing moves. A terminal commit stores UTC microseconds from the writer's wall clock inside the transaction that updates version, journal, and outbox. The timestamp marks commit preparation. An exact retry returns its original acceptance and does not update metadata.
+Version 5 requires non-null `rule`, `visibility`, and `final_move_ply`. Only an
+ongoing game may have a null `finished_at`; a completed game requires a timestamp
+and complete result. New games use `standard`, `public`, and zero moves.
+Accepted moves increment the move count. Resignation advances the operation
+sequence without incrementing moves.
+
+A terminal commit samples UTC microseconds from the writer's wall clock inside
+the transaction that updates the game, journal, and outbox. The timestamp marks
+commit preparation, not the database commit instant. An exact retry returns its
+original acceptance without changing metadata.
+
+The writer has no 4096-operation limit. That limit belongs to public detail
+reads. Durable sequences must fit in a signed 64-bit integer.
 
 ## Verification
 

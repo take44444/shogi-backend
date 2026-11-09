@@ -1,8 +1,13 @@
-# User server
+# user-server
 
-The standalone HTTP account service composes `user-http`, `user-application`, and `user-persistence`. It runs independently of `game-server` and uses a separate PostgreSQL database.
+Run Google login, profiles, and browser sessions through the HTTP account
+service. It uses a separate PostgreSQL database and runs independently of
+`game-server`.
 
-The [authentication decision](../../docs/adr/0002-browser-authentication.md) explains authentication choices. See [unfinished work](../../docs/design/unfinished-work.md) for remaining features and verification limits. The [HTTP API reference](../../crates/user-http/README.md) describes the routes.
+The [HTTP API reference](../../crates/user-http/README.md) describes requests,
+cookies, and errors. The [authentication decision](../../docs/adr/0002-browser-authentication.md)
+records the chosen approach. [Unfinished work](../../docs/design/unfinished-work.md)
+lists remaining features and verification limits.
 
 ## Configuration
 
@@ -20,10 +25,12 @@ Create a Google OAuth client of type **Web application**. Its authorized redirec
 
 ## Run locally
 
-Run commands from the repository root. Start PostgreSQL with `docker compose up -d --wait postgres`. Copy the configuration template unless `.env` already exists.
+Run commands from the repository root. Start PostgreSQL and copy the
+configuration template if `.env` does not already exist.
 
 ```sh
-cp .env.example .env
+docker compose up -d --wait postgres
+if [ ! -e .env ]; then cp .env.example .env; fi
 ```
 
 Set the Google credentials in `.env`. A local configuration is:
@@ -43,7 +50,7 @@ The application and Cargo do not load `.env` automatically. Export its values in
 set -a
 . ./.env
 set +a
-cargo run -p user-server
+cargo run --locked -p user-server
 ```
 
 Startup reports `user HTTP server listening on 127.0.0.1:8080`. Open `http://localhost:8080/auth/google/start` to sign in. A successful callback redirects to `/me`, which returns the authenticated profile as JSON. First login creates an account; later logins resolve the same internal user ID.
@@ -66,6 +73,11 @@ Store the user database on persistent storage. Keep `.env` and Google credential
 
 Startup requires Google discovery and JWKS access before the listener opens. Code exchange retrieves them again to reflect key rotation. Outbound requests use HTTPS, disable redirects, and have a five-second connection timeout and a ten-second timeout per request.
 
+The database and role must already exist. Startup initializes or validates the
+account schema. The role needs database `CREATE` permission on every startup and
+permission to create objects in `public`. See the
+[account storage reference](../../crates/user-persistence/README.md#schema-startup).
+
 ## Verification
 
 Run the account-service tests from the repository root.
@@ -76,7 +88,6 @@ Run the account-service tests from the repository root.
 
 Tests cover signed ID-token validation, PKCE code exchange, browser-bound login attempts, concurrent registration, profile updates, CSRF checks, session expiry, restart, and logout. Local HTTP tests use a simulated provider; real Google login requires a configured OAuth client and browser interaction.
 
-`GET /openapi.json` serves the OpenAPI 3.1 contract. To export it without server
-startup or configuration, run `cargo run -p user-http --example user-openapi`.
-See the [HTTP adapter reference](../../crates/user-http/README.md) for generation
-and contract checks.
+`GET /openapi.json` serves the OpenAPI 3.1 contract. The
+[HTTP adapter reference](../../crates/user-http/README.md#openapi) describes
+exporting it without server startup or configuration.

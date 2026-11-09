@@ -4,6 +4,8 @@
 The application and domain contain no SQL or ORM types. Production composition
 injects `Arc<game_persistence::SeaOrmStore>`. There is no default in-memory store.
 
+## Game creation and snapshots
+
 `GameService::create(GameId, Participants::new(black, white)?)` binds two distinct user IDs
 permanently to the game's sides. Equal IDs return `InvalidParticipants`.
 A duplicate game returns `AlreadyExists`. The shared `user-id` crate owns `UserId`.
@@ -13,13 +15,20 @@ User management and authentication belong to a separate HTTP service.
 `snapshot` returns the participants, sequence, owned position, legal moves,
 turn, check, and result. An uncached game loads from durable storage.
 Unknown IDs return `NotFound` without retaining actors. A closed actor reloads
-the durable game. Each game has one actor per service registry and a mailbox
-of 64 commands. Registry locks never span database or channel waits.
+the durable game. Each game has one actor per service registry. Registry locks
+never span database or channel waits.
+
+The mailbox holds up to 64 queued commands per game. A send waits asynchronously
+when the queue is full; the service has no enqueue timeout. A command being
+processed and callers waiting to enqueue do not count toward those 64 slots.
+
+## Commands and retries
 
 `make_move(MakeMove)` and `resign(Resign)` take a `user_id`, request ID, and
 required typed `expected_seq: u64`. The service derives the side from the binding.
 A nonparticipant returns `NonParticipant` before receipt lookup.
-Either participant may resign off turn. Existing domain rules remain unchanged.
+Either participant may resign off turn. The [domain reference](../shogi-domain/README.md)
+describes move legality and terminal results.
 
 Sequence starts at zero and advances once per accepted command, including
 resignation. The portable durable limit is `i64::MAX`; exhaustion precedes
@@ -28,6 +37,13 @@ match command kind, user ID, expected sequence, and typed move. They return the
 original `Acceptance`, even after later commands or game completion. Changed
 contents return `RequestConflict`. Rejected request IDs remain reusable.
 Replay precedes stale-sequence and finished-game checks.
+
+The `i64::MAX` bound is a storage sequence limit, not a promise that the rules
+engine can execute that many moves. Engine capacity failures return
+`Domain(RulesFailure)`. The 4096-operation public-history limit does not restrict
+game commands.
+
+## Durable state and recovery
 
 Before each snapshot or mutation, the actor checks the durable version and
 reloads if it differs or its state was invalidated. A failed storage read returns
@@ -54,6 +70,8 @@ contents with the same request ID. Do not assign a new ID to an uncertain retry.
 Dropping the last service closes its senders. Actors drain queued commands and
 exit. Finished games remain queryable and replayable across process restarts.
 
+## Event publication
+
 `StagedGameChange` privately binds the game ID, receipt, and generated
 `CommittedEvent` values. Its constructor checks sequence bounds, continuity, and
 action/result consistency. Its accessors expose shared references only.
@@ -77,8 +95,24 @@ A successful send followed by an uncertain mark can cause a duplicate with the
 same identity. Consumers must deduplicate the full event identity and recover
 missing sequences from a snapshot. The `published` flag does not represent a
 rating update or AI job's completion. Future durable jobs need separate storage
-and consumer completion state. The game actor never invokes a transport, and
-broker availability does not gate command acceptance.
+and consumer completion state. See the [future event-processing plan](../../docs/design/event-processing-plan.md).
+The game actor never invokes a transport. Broker availability does not gate
+command acceptance.
+
+## Identifiers
 
 `GameId`, `RequestId`, and `UserId` require 1 through 128 bytes without whitespace.
 User IDs are internal caller claims, not authentication credentials.
+
+## Verification
+
+Run application tests from the repository root.
+
+```sh
+cargo test --locked -p game-application
+python3 scripts/check-contract-interfaces.py
+```
+
+The unit tests use repository fixtures. PostgreSQL integration tests live in
+`game-persistence`. The interface check verifies public API access restrictions
+with the Rust compiler.
