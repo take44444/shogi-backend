@@ -2381,6 +2381,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rating-domain"
+version = "0.1.0"
+dependencies = [
+ "shogi-domain",
+]
+
+[[package]]
 name = "realtime-gateway"
 version = "0.1.0"
 dependencies = [

@@ -10,6 +10,7 @@ import sys
 PACKAGES = {
     "user-id": ("value", "shared"),
     "shogi-domain": ("domain", "game"),
+    "rating-domain": ("domain", "game"),
     "user-application": ("application", "user"),
     "game-application": ("application", "game"),
     "game-record-application": ("application", "game"),
@@ -23,6 +24,7 @@ PACKAGES = {
     "realtime-gateway": ("protocol", "gateway"),
     "user-server": ("server", "user"),
     "game-server": ("server", "game"),
+    "rating-worker-server": ("server", "game"),
     "player-server": ("server", "game"),
     "outbox-publisher": ("publisher", "game"),
     "realtime-gateway-server": ("server", "gateway"),
@@ -32,14 +34,16 @@ PACKAGES = {
 DEPENDENCIES = {
     "user-id": set(),
     "shogi-domain": {"rsshogi"},
+    "rating-domain": {"shogi-domain"},
+    "rating-worker-server": {"game-application", "game-persistence", "tokio"},
     "user-application": {"user-id", "async-trait", "thiserror"},
-    "game-application": {"user-id", "shogi-domain", "tokio", "async-trait"},
+    "game-application": {"user-id", "rating-domain", "shogi-domain", "tokio", "async-trait"},
     "game-record-application": {
-        "user-id", "shogi-domain", "async-trait", "base64", "serde_json", "sha2",
+        "user-id", "rating-domain", "shogi-domain", "async-trait", "base64", "serde_json", "sha2",
     },
     "user-persistence": {"user-application", "async-trait", "sea-orm", "uuid"},
     "game-persistence": {
-        "game-application", "game-record-application", "shogi-domain", "async-trait",
+        "game-application", "game-record-application", "rating-domain", "shogi-domain", "async-trait",
         "sea-orm", "sea-query-sqlx", "uuid",
     },
     "game-record-persistence": {

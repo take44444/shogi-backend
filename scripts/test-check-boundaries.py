@@ -11,12 +11,14 @@ CHECKER = Path(__file__).with_name("check-boundaries.py").resolve()
 BASE = {
     "user-id": [],
     "shogi-domain": [],
+    "rating-domain": ["shogi-domain"],
+    "rating-worker-server": ["game-application", "game-persistence"],
     "user-application": ["user-id"],
     "user-persistence": ["user-application"],
     "user-http": ["user-application"],
     "user-server": ["user-http", "user-persistence"],
-    "game-application": ["user-id", "shogi-domain"],
-    "game-record-application": ["user-id", "shogi-domain"],
+    "game-application": ["user-id", "shogi-domain", "rating-domain"],
+    "game-record-application": ["user-id", "shogi-domain", "rating-domain"],
     "game-record-persistence": ["game-record-application", "shogi-domain"],
     "game-persistence": ["game-application"],
     "game-grpc": ["game-application"],
@@ -148,6 +150,14 @@ class BoundaryTests(unittest.TestCase):
     def test_game_and_user_share_only_value_id(self):
         self.workspace.add("game-application", "user-application")
         self.assert_rejected("game-application -> user-application", "share only user-id")
+
+    def test_rating_domain_cannot_acquire_writer_or_database_capabilities(self):
+        self.workspace.add("rating-domain", "game-persistence")
+        self.assert_rejected("rating-domain -> game-persistence", "forbidden normal dependency")
+
+    def test_public_reader_cannot_import_rating_worker(self):
+        self.workspace.add("player-server", "rating-worker-server")
+        self.assert_rejected("player-server -> rating-worker-server", "forbidden normal dependency")
 
     def test_core_adapter_independence(self):
         self.workspace.add("shogi-domain", "game-grpc")
