@@ -145,6 +145,19 @@ pub struct GameRecord {
 /// ```
 #[async_trait]
 pub trait GameRepository: Send + Sync {
+    /// Atomically creates the game, frozen starts and both participation slots.
+    async fn create_rated_game(
+        &self,
+        id: GameId,
+        participants: Participants,
+        pool: crate::rating::Pool,
+    ) -> Result<(), ApplicationError>;
+    /// Reads durable rated identity for reconciliation. Casual games return None.
+    async fn rated_game(
+        &self,
+        id: &GameId,
+    ) -> Result<Option<crate::rating::RatedGame>, ApplicationError>;
+
     /// Loads visibility, participants and history from one coherent database view.
     /// Implementations should hide inaccessible and absent games equally.
     async fn load_game_for_viewer(

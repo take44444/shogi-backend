@@ -48,7 +48,14 @@ def main():
     try:
         run("up", "-d", "--wait", "postgres")
         sql(writer.username, writer.path[1:], "CREATE TABLE public.permission_probe (value INTEGER); INSERT INTO public.permission_probe VALUES (1)")
-        sql(reader.username, reader.path[1:], "SELECT value FROM public.permission_probe")
+        for table in ["schema_version", "games", "journal", "rating_states"]:
+            sql(writer.username, writer.path[1:], f"CREATE TABLE public.{table} (value INTEGER); GRANT SELECT ON public.{table} TO shogi_reader")
+            sql(reader.username, reader.path[1:], f"SELECT value FROM public.{table}")
+        for table in ["permission_probe", "rated_games", "rating_slots", "rating_jobs", "rating_applications"]:
+            if table != "permission_probe":
+                sql(writer.username, writer.path[1:], f"CREATE TABLE public.{table} (value INTEGER)")
+            denied = sql(reader.username, reader.path[1:], f"SELECT * FROM public.{table}", success=False)
+            assert denied.returncode != 0 and "42501" in denied.stderr, f"reader must not read {table}: {denied.stderr}"
         sql(accounts.username, accounts.path[1:], "SELECT 1")
         for database, statement, expected in [
             (reader.path[1:], "UPDATE public.permission_probe SET value=2", "42501"),

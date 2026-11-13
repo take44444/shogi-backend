@@ -145,6 +145,8 @@ pub struct Snapshot {
 pub enum ApplicationError {
     /// A game with this ID already exists.
     AlreadyExists,
+    /// A participant has an unapplied rated game in this pool.
+    RatingPoolBusy,
     /// The supplied user is not bound to either side.
     NonParticipant,
     /// The two participant IDs are equal.
@@ -176,6 +178,7 @@ pub enum ApplicationError {
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RatingPoolBusy => f.write_str("a participant already has a rated game in this pool"),
             Self::AlreadyExists => f.write_str("resource already exists"),
             Self::NonParticipant => f.write_str("user is not a game participant"),
             Self::InvalidParticipants => f.write_str("participants must be distinct user IDs"),

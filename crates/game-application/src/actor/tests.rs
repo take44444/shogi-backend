@@ -36,6 +36,21 @@ fn store() -> Arc<RecordStore> {
 }
 #[async_trait]
 impl GameRepository for RecordStore {
+    async fn create_rated_game(
+        &self,
+        _id: GameId,
+        _participants: Participants,
+        _pool: crate::rating::Pool,
+    ) -> Result<(), ApplicationError> {
+        panic!("actor fixture does not support rated admission")
+    }
+    async fn rated_game(
+        &self,
+        _id: &GameId,
+    ) -> Result<Option<crate::rating::RatedGame>, ApplicationError> {
+        panic!("actor fixture does not support rated identity")
+    }
+
     async fn load_game_for_viewer(
         &self,
         id: &GameId,

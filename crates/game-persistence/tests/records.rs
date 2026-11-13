@@ -580,10 +580,10 @@ fn storage_id(value: &str) -> String {
 }
 
 #[tokio::test]
-async fn legacy_schema_remains_readable_and_writable_with_query_builders() {
+async fn current_schema_remains_readable_and_writable_with_query_builders() {
     let database = pg_test_support::TestDatabase::new().await;
     let raw = Database::connect(database.url()).await.unwrap();
-    raw.execute_unprepared(include_str!("fixtures/schema-v5.sql"))
+    raw.execute_unprepared(include_str!("fixtures/schema-v6.sql"))
         .await
         .unwrap();
     let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
@@ -622,11 +622,11 @@ async fn legacy_schema_remains_readable_and_writable_with_query_builders() {
 }
 
 #[tokio::test]
-async fn fresh_builder_schema_matches_the_previous_schema_definition() {
+async fn fresh_builder_schema_matches_the_current_schema_fixture() {
     let previous = pg_test_support::TestDatabase::new().await;
     let previous_db = Database::connect(previous.url()).await.unwrap();
     previous_db
-        .execute_unprepared(include_str!("fixtures/schema-v5.sql"))
+        .execute_unprepared(include_str!("fixtures/schema-v6.sql"))
         .await
         .unwrap();
     let current = pg_test_support::TestDatabase::new().await;

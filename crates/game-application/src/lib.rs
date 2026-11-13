@@ -42,6 +42,7 @@
 mod actor;
 mod events;
 pub use events::*;
+pub mod rating;
 mod repository;
 mod types;
 
@@ -95,6 +96,27 @@ impl GameService {
             .create_game(id.clone(), participants)
             .await?;
         self.snapshot(&id).await
+    }
+
+    /// Creates a rated game, reserving each participant's selected pool.
+    pub async fn create_rated(
+        &self,
+        id: GameId,
+        participants: Participants,
+        pool: rating::Pool,
+    ) -> Result<Snapshot, ApplicationError> {
+        self.repository
+            .create_rated_game(id.clone(), participants, pool)
+            .await?;
+        self.snapshot(&id).await
+    }
+
+    /// Reads immutable creation identity independently of the actor cache.
+    pub async fn rated_game(
+        &self,
+        id: &GameId,
+    ) -> Result<Option<rating::RatedGame>, ApplicationError> {
+        self.repository.rated_game(id).await
     }
 
     /// Returns an owned snapshot after checking the durable version.

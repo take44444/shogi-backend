@@ -293,6 +293,21 @@ struct FaultStore {
 }
 #[async_trait]
 impl GameRepository for FaultStore {
+    async fn create_rated_game(
+        &self,
+        id: GameId,
+        participants: Participants,
+        pool: game_application::rating::Pool,
+    ) -> Result<(), Error> {
+        self.inner.create_rated_game(id, participants, pool).await
+    }
+    async fn rated_game(
+        &self,
+        id: &GameId,
+    ) -> Result<Option<game_application::rating::RatedGame>, Error> {
+        self.inner.rated_game(id).await
+    }
+
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -617,7 +632,7 @@ async fn failed_bootstrap_rolls_back_the_entire_schema() {
         .unwrap();
     assert_eq!(
         integer_query(&raw, "SELECT version AS value FROM schema_version").await,
-        5
+        6
     );
 }
 

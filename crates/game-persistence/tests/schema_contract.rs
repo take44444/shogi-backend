@@ -46,6 +46,11 @@ async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() 
         "ALTER TABLE games DROP CONSTRAINT games_rule_check",
         "ALTER TABLE outbox_events ALTER COLUMN id DROP IDENTITY",
         "DROP INDEX records_black",
+        "DROP INDEX rating_jobs_pending",
+        "ALTER TABLE rating_states DROP CONSTRAINT rating_states_check",
+        "ALTER TABLE rating_slots DROP CONSTRAINT rating_slots_pkey",
+        "ALTER TABLE rating_jobs ALTER COLUMN generation DROP NOT NULL",
+        "ALTER TABLE rating_applications DROP COLUMN delta_black",
     ] {
         let database = TestDatabase::new().await;
         SeaOrmStore::connect(database.url())
@@ -75,10 +80,10 @@ async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() 
 }
 
 #[tokio::test]
-async fn previous_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged() {
+async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged() {
     let database = TestDatabase::new().await;
     let raw = Database::connect(database.url()).await.unwrap();
-    raw.execute_unprepared(include_str!("fixtures/schema-v5.sql"))
+    raw.execute_unprepared(include_str!("fixtures/schema-v6.sql"))
         .await
         .unwrap();
     raw.execute_unprepared(
@@ -99,6 +104,22 @@ async fn previous_schema_with_unrelated_tables_and_additional_indexes_is_accepte
         .close()
         .await
         .unwrap();
+    assert_eq!(snapshot(&raw).await, before);
+    raw.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn version_five_is_rejected_without_migration_or_deletion() {
+    let database = TestDatabase::new().await;
+    let raw = Database::connect(database.url()).await.unwrap();
+    raw.execute_unprepared(include_str!("fixtures/schema-v5.sql"))
+        .await
+        .unwrap();
+    let before = snapshot(&raw).await;
+    assert_eq!(
+        SeaOrmStore::connect(database.url()).await.map(|_| ()),
+        Err(Error::Corrupt)
+    );
     assert_eq!(snapshot(&raw).await, before);
     raw.close().await.unwrap();
 }

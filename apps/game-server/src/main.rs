@@ -12,7 +12,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://shogi:shogi@localhost:5432/shogi".to_owned());
-    let store = Arc::new(SeaOrmStore::connect(&url).await?);
+    let store = Arc::new(SeaOrmStore::connect(&url).await.map_err(|error| {
+        std::io::Error::other(format!("Game DB startup failed: {error}. This release requires schema version 6. For an older schema, preserve its data and provision a separate empty database."))
+    })?);
     let service = GameRpc::new(GameService::new(store));
     eprintln!("game-server listening on {address}");
     tonic::transport::Server::builder()
