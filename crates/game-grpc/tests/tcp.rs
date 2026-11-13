@@ -576,3 +576,86 @@ async fn generated_tcp_client_restores_database_across_two_server_restarts() {
     drop(client);
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn rated_rpc_requires_a_pool_preserves_casual_creation_and_exposes_durable_identity() {
+    let server = TestServer::start().await;
+    let mut client = server.client().await;
+    let request = |id: &str, pool: i32| proto::CreateRatedGameRequest {
+        game_id: id.into(),
+        black_user_id: "black".into(),
+        white_user_id: "white".into(),
+        pool,
+    };
+    for pool in [0, 99] {
+        assert_eq!(
+            client
+                .create_rated_game(request("invalid", pool))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::InvalidArgument
+        );
+    }
+    client
+        .create_rated_game(request("rated", proto::RatingPool::TenMinute30 as i32))
+        .await
+        .unwrap();
+    let identity = client
+        .get_rated_game(proto::GetSnapshotRequest {
+            game_id: "rated".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(identity.game_id, "rated");
+    assert_eq!(identity.black_user_id, "black");
+    assert_eq!(identity.white_user_id, "white");
+    assert_eq!(identity.pool, proto::RatingPool::TenMinute30 as i32);
+    assert_eq!(
+        identity.black_start.unwrap(),
+        proto::RatingStart {
+            rating: None,
+            completed_rated_games: 0
+        }
+    );
+    assert_eq!(
+        identity.white_start.unwrap(),
+        proto::RatingStart {
+            rating: None,
+            completed_rated_games: 0
+        }
+    );
+    assert_eq!(
+        client
+            .create_rated_game(request("overlap", proto::RatingPool::TenMinute30 as i32))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+    assert_eq!(
+        client
+            .create_rated_game(request("rated", proto::RatingPool::TenMinute30 as i32))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::AlreadyExists
+    );
+    client
+        .create_rated_game(request("other-pool", proto::RatingPool::Byoyomi30 as i32))
+        .await
+        .unwrap();
+    create(&mut client, "casual").await;
+    assert_eq!(
+        client
+            .get_rated_game(proto::GetSnapshotRequest {
+                game_id: "casual".into()
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        Code::NotFound
+    );
+    server.shutdown().await;
+}

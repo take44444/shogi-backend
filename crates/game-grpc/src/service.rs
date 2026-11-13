@@ -43,6 +43,64 @@ impl proto::game_service_server::GameService for GameRpc {
         Ok(Response::new(snapshot.into()))
     }
 
+    async fn create_rated_game(
+        &self,
+        request: Request<proto::CreateRatedGameRequest>,
+    ) -> Result<Response<proto::Snapshot>, Status> {
+        let request = request.into_inner();
+        let pool = match proto::RatingPool::try_from(request.pool) {
+            Ok(proto::RatingPool::TenMinute30) => game_application::rating::Pool::TenMinute30,
+            Ok(proto::RatingPool::Byoyomi30) => game_application::rating::Pool::Byoyomi30,
+            _ => {
+                return Err(Status::invalid_argument(
+                    "a supported rating pool is required",
+                ));
+            }
+        };
+        let id = GameId::new(request.game_id).map_err(invalid)?;
+        let participants = Participants::new(
+            UserId::new(request.black_user_id).map_err(invalid)?,
+            UserId::new(request.white_user_id).map_err(invalid)?,
+        )
+        .map_err(application_status)?;
+        let snapshot = self
+            .games
+            .create_rated(id, participants, pool)
+            .await
+            .map_err(application_status)?;
+        Ok(Response::new(snapshot.into()))
+    }
+
+    async fn get_rated_game(
+        &self,
+        request: Request<proto::GetSnapshotRequest>,
+    ) -> Result<Response<proto::RatedGameIdentity>, Status> {
+        let id = GameId::new(request.into_inner().game_id).map_err(invalid)?;
+        let game = self
+            .games
+            .rated_game(&id)
+            .await
+            .map_err(application_status)?
+            .ok_or_else(|| Status::not_found("rated game not found"))?;
+        let start = |state: game_application::rating::RatingState| proto::RatingStart {
+            rating: state.rating(),
+            completed_rated_games: state.completed(),
+        };
+        Ok(Response::new(proto::RatedGameIdentity {
+            game_id: game.game_id.as_str().into(),
+            black_user_id: game.participants.black().as_str().into(),
+            white_user_id: game.participants.white().as_str().into(),
+            pool: match game.pool {
+                game_application::rating::Pool::TenMinute30 => {
+                    proto::RatingPool::TenMinute30 as i32
+                }
+                game_application::rating::Pool::Byoyomi30 => proto::RatingPool::Byoyomi30 as i32,
+            },
+            black_start: Some(start(game.black_start)),
+            white_start: Some(start(game.white_start)),
+        }))
+    }
+
     async fn get_snapshot(
         &self,
         request: Request<proto::GetSnapshotRequest>,

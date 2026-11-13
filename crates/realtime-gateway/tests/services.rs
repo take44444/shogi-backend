@@ -82,6 +82,19 @@ struct HeldSnapshotRpc {
 
 #[tonic::async_trait]
 impl GameRpcService for HeldSnapshotRpc {
+    async fn create_rated_game(
+        &self,
+        request: tonic::Request<proto::CreateRatedGameRequest>,
+    ) -> Result<tonic::Response<proto::Snapshot>, tonic::Status> {
+        self.inner.create_rated_game(request).await
+    }
+    async fn get_rated_game(
+        &self,
+        request: tonic::Request<proto::GetSnapshotRequest>,
+    ) -> Result<tonic::Response<proto::RatedGameIdentity>, tonic::Status> {
+        self.inner.get_rated_game(request).await
+    }
+
     async fn create_game(
         &self,
         request: tonic::Request<proto::CreateGameRequest>,
