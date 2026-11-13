@@ -115,6 +115,21 @@ services:
     restart: on-failure
     stop_signal: SIGINT
     stop_grace_period: 15s
+  rating-worker-server:
+    build: .
+    entrypoint: ["rating-worker-server"]
+    environment:
+      DATABASE_URL: postgres://shogi:shogi@postgres:5432/shogi
+      RATING_WORKER_ID: compose-rating-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      game-server:
+        condition: service_started
+    init: true
+    restart: on-failure
+    stop_signal: SIGINT
+    stop_grace_period: 15s
   outbox-publisher:
     build: .
     entrypoint: ["outbox-publisher"]

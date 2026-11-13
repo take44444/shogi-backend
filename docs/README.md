@@ -13,9 +13,11 @@
 
 [未完成の機能と未検証の範囲](design/unfinished-work.md)に、実装と検証が残る項目をまとめる。
 [イベント配信と永続ジョブの将来設計](design/event-processing-plan.md)は、導入時の方針を記述する。現行実装の保証ではない。
+[レーティングの設計](design/ratings.md)には、実装済みの参加枠・永続ジョブ・Elo更新・公開取得の契約を記述する。
 
 ## 操作仕様と運用手順
 
 設定・起動・検証手順は[リポジトリのREADME](../README.md)、[user-serverのREADME](../apps/user-server/README.md)、[player-serverのREADME](../apps/player-server/README.md)に置く。
 操作仕様は[公開棋譜HTTP API](../crates/player-http/README.md)、[ユーザーHTTP API](../crates/user-http/README.md)、[対局gRPC API](../crates/game-grpc/README.md)を参照する。
 [Realtime Gateway の起動方法と WebSocket 仕様](../apps/realtime-gateway/README.md)には、認証・観戦・再接続と検証手順をまとめる。
+[レートワーカーの運用手順](../apps/rating-worker-server/README.md)には、起動・隔離ジョブの再試行・実対局での確認方法をまとめる。

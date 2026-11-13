@@ -32,9 +32,9 @@ curl 'http://127.0.0.1:8081/game-records/example-game'
 | `PLAYER_BIND_ADDR` | `127.0.0.1:8081` | HTTP socket address |
 | `PLAYER_GAME_DATABASE_URL` | `postgres://shogi_reader:shogi_reader@localhost:5432/shogi` | PostgreSQL URL with SELECT-only credentials |
 
-The reader requires schema version 5 and never initializes or upgrades the
-schema. Its role needs SELECT on game tables, without table ownership or write
-privileges. The [bootstrap SQL](../../scripts/init-postgres.sql) grants access to
+The reader requires schema version 6 and never initializes or upgrades the
+schema. Its role needs SELECT on `schema_version`, `games`, `journal` and
+`rating_states`, without table ownership or write privileges. The [bootstrap SQL](../../scripts/init-postgres.sql) grants access to
 new tables created by the game writer.
 
 ## Run with Docker Compose
@@ -58,3 +58,8 @@ From the repository root, run the reader and HTTP adapter tests.
 
 The [API reference](../../crates/player-http/README.md#openapi) describes the
 OpenAPI endpoint and export command.
+
+`GET /users/{user_id}/ratings` returns both latest committed rating pools without
+authentication. See the [HTTP rating contract](../../crates/player-http/README.md#read-user-ratings).
+The reader has no permission to read `rated_games`, `rating_slots`, `rating_jobs`
+or `rating_applications`.

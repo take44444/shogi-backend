@@ -9,7 +9,7 @@ Data operations, table definitions, and index definitions use SeaQuery builders.
 SeaORM executes generated statements. The outbox uses a dedicated SQLx connection
 and `sea-query-sqlx` to keep values separate from SQL text. PostgreSQL-specific
 operations use handwritten SQL. Test fixtures also use SQL to inject corruption
-and check compatibility with the previous schema.
+and check rejection of previous schemas.
 
 ## Schema startup
 
@@ -19,7 +19,7 @@ validation also requires database `CREATE`: it builds a reference schema inside
 a savepoint and rolls it back after comparison.
 
 Startup takes a PostgreSQL transaction advisory lock. An empty schema receives
-the version 5 ledger, tables, constraints, and indexes atomically. Existing
+the version 6 ledger, tables, constraints, and indexes atomically. Existing
 schemas must have the current ledger and required definitions, including column
 types, NULL constraints, keys, CHECK constraints, and indexes. Extra columns,
 indexes, and unrelated tables are permitted when required definitions remain.
@@ -68,3 +68,16 @@ reads. Durable sequences must fit in a signed 64-bit integer.
 ## Verification
 
 Contract tests use isolated PostgreSQL databases through `pg-test-support`. They cover constraints, concurrent initialization and writers, coherent reads, transaction failures, corrupt history, uncertain commits, failed reconciliation, exact replay, reader permissions, publisher ownership, and service restoration. Run `./scripts/test-postgres.sh cargo test --locked -p game-persistence` from the workspace root.
+
+## Rating transactions
+
+Rated creation reserves both user-and-pool slots and freezes starts atomically.
+Terminal acceptance enqueues the rating job in the receipt and outbox transaction.
+`SeaOrmRatingJobs` claims, applies, defers and recovers jobs with owner, generation
+and database-time fences. The application ledger makes an uncertain successful
+commit a read-only `AlreadyApplied` result on retry.
+
+The initializer grants reader access only to `schema_version`, `games`, `journal`
+and `rating_states` when `shogi_reader` exists. See the
+[rating design](../../docs/design/ratings.md) for ordering, recovery and table
+ownership.
