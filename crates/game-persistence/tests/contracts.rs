@@ -293,6 +293,20 @@ struct FaultStore {
 }
 #[async_trait]
 impl GameRepository for FaultStore {
+    async fn load_game_for_viewer(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<game_application::ViewerGameRecord, Error> {
+        self.inner.load_game_for_viewer(id, viewer).await
+    }
+    async fn view_metadata(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<game_application::ViewMetadata, Error> {
+        self.inner.view_metadata(id, viewer).await
+    }
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
         self.inner.create_game(id, participants).await
     }

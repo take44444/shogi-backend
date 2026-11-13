@@ -52,6 +52,35 @@ impl proto::game_service_server::GameService for GameRpc {
         Ok(Response::new(snapshot.into()))
     }
 
+    async fn get_snapshot_for_viewer(
+        &self,
+        request: Request<proto::ViewerRequest>,
+    ) -> Result<Response<proto::Snapshot>, Status> {
+        let request = request.into_inner();
+        let id = GameId::new(request.game_id).map_err(invalid)?;
+        let viewer = UserId::new(request.viewer_user_id).map_err(invalid)?;
+        let snapshot = self
+            .games
+            .snapshot_for_viewer(&id, &viewer)
+            .await
+            .map_err(application_status)?;
+        Ok(Response::new(snapshot.into()))
+    }
+
+    async fn check_view_access(
+        &self,
+        request: Request<proto::ViewerRequest>,
+    ) -> Result<Response<proto::ViewAccess>, Status> {
+        let request = request.into_inner();
+        let id = GameId::new(request.game_id).map_err(invalid)?;
+        let viewer = UserId::new(request.viewer_user_id).map_err(invalid)?;
+        self.games
+            .check_view_access(&id, &viewer)
+            .await
+            .map_err(application_status)?;
+        Ok(Response::new(proto::ViewAccess {}))
+    }
+
     async fn make_move(
         &self,
         request: Request<proto::MakeMoveRequest>,

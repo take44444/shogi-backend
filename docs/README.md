@@ -13,8 +13,10 @@
 
 [未完成の機能と未検証の範囲](design/unfinished-work.md)に、実装と検証が残る項目をまとめる。
 [イベント配信と永続ジョブの将来設計](design/event-processing-plan.md)は、導入時の方針を記述する。現行実装の保証ではない。
+[Realtime Gateway の設計](design/realtime-gateway-plan.md)は、承認済みの認証付き着手・観戦と差分配信の方針を記録する。定期同期と配信の並列化は含めない。
 
 ## 操作仕様と運用手順
 
 設定・起動・検証手順は[リポジトリのREADME](../README.md)、[user-serverのREADME](../apps/user-server/README.md)、[player-serverのREADME](../apps/player-server/README.md)に置く。
 操作仕様は[公開棋譜HTTP API](../crates/player-http/README.md)、[ユーザーHTTP API](../crates/user-http/README.md)、[対局gRPC API](../crates/game-grpc/README.md)を参照する。
+[Realtime Gateway の起動方法と WebSocket 仕様](../apps/realtime-gateway/README.md)には、認証・観戦・再接続と検証手順をまとめる。

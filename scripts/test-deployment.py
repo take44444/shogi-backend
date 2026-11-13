@@ -30,6 +30,15 @@ def main():
     accounts = urlsplit(services["user-server"]["environment"]["USER_DATABASE_URL"])
     assert (writer.hostname, writer.port, writer.path) == (reader.hostname, reader.port, reader.path) and writer.path != accounts.path, "game and account databases must stay separate"
     assert writer.username != reader.username, "public reader must use separate credentials"
+    gateway = services["realtime-gateway"]
+    assert not any("DATABASE" in name for name in gateway["environment"]), "gateway must not receive database credentials"
+    assert not gateway.get("ports"), "gateway must be reached through the same-origin edge"
+    edge = services["browser-edge"]
+    assert edge["ports"] and all(ipaddress.ip_address(port["host_ip"]).is_loopback for port in edge["ports"]), "development browser edge must be loopback only"
+    assert gateway["environment"]["GATEWAY_PUBLIC_ORIGIN"] == services["realtime-user-server"]["environment"]["USER_PUBLIC_ORIGIN"], "browser auth and gateway origins must match"
+    assert "ENV DATABASE_URL" not in (ROOT / "Dockerfile").read_text(), "shared image must not supply database credentials to gateway"
+    edge_config = (ROOT / "deploy/realtime.Caddyfile").read_text()
+    assert "/ws/games/*" in edge_config and "realtime-gateway:8082" in edge_config and "realtime-user-server:8080" in edge_config, "edge must route game WebSockets and auth on one origin"
 
     def sql(user, database, statement, success=True):
         return run("exec", "-T", "postgres", "psql", "-U", user, "-d", database,

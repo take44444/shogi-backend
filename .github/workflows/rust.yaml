@@ -9,6 +9,15 @@ jobs:
   workspace:
     runs-on: ubuntu-latest
     services:
+      valkey:
+        image: valkey/valkey:8.1-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
       postgres:
         image: postgres:18
         env:
@@ -24,6 +33,7 @@ jobs:
           --health-retries 30
     env:
       TEST_DATABASE_URL: postgres://shogi:shogi@localhost:5432/postgres
+      TEST_VALKEY_URL: redis://127.0.0.1:6379
     steps:
       - uses: actions/checkout@v7
         with:

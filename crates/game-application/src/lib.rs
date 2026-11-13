@@ -45,7 +45,7 @@ pub use events::*;
 mod repository;
 mod types;
 
-use actor::{Actor, Command};
+use actor::{Actor, Command, snapshot_from_record};
 pub use repository::*;
 use std::{
     collections::HashMap,
@@ -117,6 +117,37 @@ impl GameService {
             .await
             .map_err(|_| ApplicationError::Unavailable)?;
         response.await.map_err(|_| ApplicationError::Unavailable)?
+    }
+
+    /// Returns a snapshot from one coherent visibility and history read.
+    /// Inaccessible games have the same result as absent games.
+    pub async fn snapshot_for_viewer(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<Snapshot, ApplicationError> {
+        let view = self.repository.load_game_for_viewer(id, viewer).await?;
+        if !view.access.permits(viewer) {
+            return Err(ApplicationError::NotFound);
+        }
+        if view.record.id != *id {
+            return Err(ApplicationError::Corrupt);
+        }
+        snapshot_from_record(view.record)
+    }
+
+    /// Checks current visibility without loading the game's history.
+    pub async fn check_view_access(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<(), ApplicationError> {
+        let access = self.repository.view_metadata(id, viewer).await?;
+        if access.permits(viewer) {
+            Ok(())
+        } else {
+            Err(ApplicationError::NotFound)
+        }
     }
 
     /// Applies a participant's move, or replays an identical accepted request.

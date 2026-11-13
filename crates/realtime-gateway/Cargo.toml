@@ -1,0 +1,36 @@
+[package]
+name = "realtime-gateway"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"
+game-application = { path = "../game-application" }
+game-grpc = { path = "../game-grpc" }
+game-messaging = { path = "../game-messaging" }
+shogi-domain = { path = "../shogi-domain" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { workspace = true, features = ["time"] }
+tonic.workspace = true
+url = "2"
+
+[dev-dependencies]
+tokio-tungstenite = "0.28"
+async-trait = "0.1"
+game-persistence = { path = "../game-persistence" }
+pg-test-support = { path = "../pg-test-support" }
+redis = { version = "1", default-features = false, features = ["tokio-comp"] }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["sqlx-postgres", "runtime-tokio"] }
+sha2 = "0.10"
+tokio-stream = { version = "0.1.18", features = ["net"] }
+user-application = { path = "../user-application" }
+user-http = { path = "../user-http" }
+user-persistence = { path = "../user-persistence" }
+uuid = { version = "1", features = ["v4"] }
+
+[lints]
+workspace = true
