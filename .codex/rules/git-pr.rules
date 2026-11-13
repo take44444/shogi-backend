@@ -1,0 +1,9 @@
+prefix_rule(pattern = ["git", "switch", "-c"], decision = "allow")
+prefix_rule(pattern = ["git", "worktree", "add"], decision = "allow")
+prefix_rule(pattern = ["git", "add"], decision = "allow")
+prefix_rule(pattern = ["git", "commit"], decision = "allow")
+prefix_rule(pattern = ["git", "push", "--set-upstream", "origin"], decision = "allow")
+
+prefix_rule(pattern = ["gh", "pr", "create"], decision = "allow")
+prefix_rule(pattern = ["gh", "pr", "edit"], decision = "allow")
+prefix_rule(pattern = ["gh", "pr", "view"], decision = "allow")
