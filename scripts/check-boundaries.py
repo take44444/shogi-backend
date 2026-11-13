@@ -20,10 +20,12 @@ PACKAGES = {
     "player-http": ("protocol", "game"),
     "game-grpc": ("protocol", "game"),
     "game-messaging": ("messaging", "game"),
+    "realtime-gateway": ("protocol", "gateway"),
     "user-server": ("server", "user"),
     "game-server": ("server", "game"),
     "player-server": ("server", "game"),
     "outbox-publisher": ("publisher", "game"),
+    "realtime-gateway-server": ("server", "gateway"),
     "pg-test-support": ("fixture", "test"),
 }
 
@@ -58,7 +60,11 @@ DEPENDENCIES = {
     },
     "game-messaging": {
         "game-application", "shogi-domain", "async-trait", "redis", "serde",
-        "serde_json", "tokio",
+        "serde_json", "tokio", "thiserror", "url",
+    },
+    "realtime-gateway": {
+        "axum", "futures-util", "game-application", "game-grpc", "game-messaging",
+        "shogi-domain", "reqwest", "serde", "serde_json", "tokio", "tonic", "url",
     },
     "user-server": {"user-application", "user-persistence", "user-http", "tokio", "axum"},
     "game-server": {"game-application", "game-persistence", "game-grpc", "tokio", "tonic"},
@@ -66,6 +72,7 @@ DEPENDENCIES = {
         "game-record-application", "game-record-persistence", "player-http", "tokio", "axum",
     },
     "outbox-publisher": {"game-application", "game-persistence", "game-messaging", "tokio"},
+    "realtime-gateway-server": {"realtime-gateway", "tokio", "axum"},
     "pg-test-support": {"sqlx", "tokio", "uuid", "url"},
 }
 
@@ -79,6 +86,8 @@ PUBLIC_READ_FORBIDDEN = {
 }
 ACCEPTANCE = {"game-application", "game-persistence", "game-grpc", "game-server"}
 BROKERS = {"game-messaging", "outbox-publisher", "redis", "lapin", "rdkafka", "async-nats"}
+GATEWAY = {"realtime-gateway", "realtime-gateway-server"}
+DATABASE_CAPABILITIES = {"game-persistence", "user-persistence", "game-record-persistence", "sea-orm", "sqlx"}
 
 
 def reachable(graph, start):
@@ -146,6 +155,8 @@ def check(metadata):
                 reason = "public reads must use game-record-persistence without writer, actor, broker or user-auth capabilities"
             elif name in ACCEPTANCE and dependency in BROKERS:
                 reason = "game acceptance must remain independent of the publisher and brokers"
+            elif name in GATEWAY and dependency in DATABASE_CAPABILITIES:
+                reason = "gateway must use the user and game services without database credentials"
             if reason:
                 errors.append(f"{' -> '.join(path)}: {reason}; remove the production dependency")
     return sorted(set(errors))

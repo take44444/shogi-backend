@@ -21,8 +21,10 @@ BASE = {
     "game-persistence": ["game-application"],
     "game-grpc": ["game-application"],
     "game-messaging": ["game-application"],
+    "realtime-gateway": ["game-application", "game-grpc", "game-messaging"],
     "game-server": ["game-application", "game-grpc", "game-persistence"],
     "outbox-publisher": ["game-messaging", "game-persistence"],
+    "realtime-gateway-server": ["realtime-gateway"],
     "player-http": ["game-record-application"],
     "player-server": ["game-record-persistence", "player-http"],
     "pg-test-support": [],
@@ -99,6 +101,14 @@ class BoundaryTests(unittest.TestCase):
     def test_transitive_writer_dependency(self):
         self.workspace.add("game-record-persistence", "game-persistence")
         self.assert_rejected("player-server -> game-record-persistence -> game-persistence", "public reads must use game-record-persistence")
+
+    def test_gateway_rejects_database_credentials_directly_or_transitively(self):
+        self.workspace.add("realtime-gateway", "game-persistence")
+        self.assert_rejected("realtime-gateway -> game-persistence", "gateway must use the user and game services")
+        self.workspace.dependencies["realtime-gateway"]["dependencies"].pop("game-persistence")
+        self.workspace.write()
+        self.workspace.add("game-messaging", "game-persistence")
+        self.assert_rejected("realtime-gateway -> game-messaging -> game-persistence", "gateway must use the user and game services")
 
     def test_renamed_dependency_uses_actual_package(self):
         self.workspace.add("player-http", "innocent", self.workspace.local("game-application", package="game-application"))

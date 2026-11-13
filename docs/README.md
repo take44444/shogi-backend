@@ -18,3 +18,4 @@
 
 設定・起動・検証手順は[リポジトリのREADME](../README.md)、[user-serverのREADME](../apps/user-server/README.md)、[player-serverのREADME](../apps/player-server/README.md)に置く。
 操作仕様は[公開棋譜HTTP API](../crates/player-http/README.md)、[ユーザーHTTP API](../crates/user-http/README.md)、[対局gRPC API](../crates/game-grpc/README.md)を参照する。
+[Realtime Gateway の起動方法と WebSocket 仕様](../apps/realtime-gateway/README.md)には、認証・観戦・再接続と検証手順をまとめる。

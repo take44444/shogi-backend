@@ -1,5 +1,8 @@
 use super::*;
-use crate::{CommittedEvent, DomainEvent, GameService, MAILBOX_CAPACITY, MakeMove, UserId};
+use crate::{
+    CommittedEvent, DomainEvent, GameService, MAILBOX_CAPACITY, MakeMove, UserId, ViewMetadata,
+    ViewerGameRecord, Visibility,
+};
 use async_trait::async_trait;
 use std::sync::Mutex;
 
@@ -33,6 +36,26 @@ fn store() -> Arc<RecordStore> {
 }
 #[async_trait]
 impl GameRepository for RecordStore {
+    async fn load_game_for_viewer(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<ViewerGameRecord, ApplicationError> {
+        let record = self.load_game(id).await?;
+        let access = self.view_metadata(id, viewer).await?;
+        Ok(ViewerGameRecord { access, record })
+    }
+    async fn view_metadata(
+        &self,
+        id: &GameId,
+        _: &UserId,
+    ) -> Result<ViewMetadata, ApplicationError> {
+        let record = self.load_game(id).await?;
+        Ok(ViewMetadata {
+            participants: record.participants,
+            visibility: Visibility::Public,
+        })
+    }
     async fn create_game(&self, _: GameId, _: Participants) -> Result<(), ApplicationError> {
         unreachable!()
     }

@@ -5,12 +5,16 @@ The generated `shogi.v1.GameService` API uses plaintext gRPC. The schema is
 and servers. `GameRpc::new(GameService)` dispatches game operations.
 User management belongs to the separate HTTP service and has no gRPC methods.
 
+`GetSnapshotForViewer(game_id, viewer_user_id)` and `CheckViewAccess(game_id, viewer_user_id)` serve trusted gateway callers. The former reads visibility, participants, and history in one coherent database view before reconstructing a snapshot. The latter checks current visibility and participants without loading history. Public games allow any authenticated viewer; private games allow only participants. Missing and inaccessible games both return `NotFound`. The caller must authenticate the viewer before supplying `viewer_user_id`; the gRPC listener itself remains an unauthenticated internal API.
+
 ## Requests and responses
 
 | Method | Required request fields | Response |
 |---|---|---|
 | `CreateGame` | `game_id`, `black_user_id`, `white_user_id` | `Snapshot` |
 | `GetSnapshot` | `game_id` | `Snapshot` |
+| `GetSnapshotForViewer` | `game_id`, authenticated `viewer_user_id` claim | `Snapshot` or `NotFound` when absent or inaccessible |
+| `CheckViewAccess` | `game_id`, authenticated `viewer_user_id` claim | Empty success or `NotFound` when absent or inaccessible |
 | `MakeMove` | `game_id`, `request_id`, `expected_seq`, `user_id`, `usi` | `Acceptance` |
 | `Resign` | `game_id`, `request_id`, `expected_seq`, `user_id` | `Acceptance` |
 
@@ -36,7 +40,7 @@ Exact retries return the original acceptance, including after restart or finish.
 | Application outcome | gRPC code |
 |---|---|
 | Malformed ID, move, missing sequence, or equal participants | `InvalidArgument` |
-| Unknown game | `NotFound` |
+| Unknown game, or a viewer API called by an unauthorized viewer | `NotFound` |
 | User is not a participant | `PermissionDenied` |
 | Duplicate game, or conflicting accepted request ID | `AlreadyExists` |
 | Stale sequence | `Aborted`, with `actual-seq` metadata |

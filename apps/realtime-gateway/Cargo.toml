@@ -1,0 +1,17 @@
+[package]
+name = "realtime-gateway-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "realtime-gateway-server"
+path = "src/main.rs"
+
+[dependencies]
+realtime-gateway = { path = "../../crates/realtime-gateway" }
+tokio.workspace = true
+axum = "0.8"
+
+[lints]
+workspace = true

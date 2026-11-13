@@ -18,7 +18,8 @@ pub use outbox::{OutboxOpenError, PostgresCursor, PostgresOutbox};
 use async_trait::async_trait;
 use game_application::{
     Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository,
-    MutationRequest, Participants, Receipt, RequestId, StagedGameChange, UserId,
+    MutationRequest, Participants, Receipt, RequestId, StagedGameChange, UserId, ViewMetadata,
+    ViewerGameRecord, Visibility,
 };
 use schema::a;
 use sea_orm::sea_query::{Expr, ExprTrait, JoinType, Order, Query, Value};
@@ -66,6 +67,119 @@ impl SeaOrmStore {
     /// Returns [`Error::Unavailable`] if the database pool fails to close.
     pub async fn close(&self) -> Result<(), Error> {
         self.db.close_by_ref().await.map_err(storage)
+    }
+
+    async fn load_view(
+        &self,
+        id: &GameId,
+        viewer: Option<&UserId>,
+    ) -> Result<ViewerGameRecord, Error> {
+        let mut query = Query::select();
+        for column in [
+            "id",
+            "black",
+            "white",
+            "version",
+            "winner",
+            "reason",
+            "visibility",
+        ] {
+            query.expr_as(
+                Expr::col((a("games"), a(column))),
+                a(&format!("g_{column}")),
+            );
+        }
+        for column in [
+            "seq",
+            "request_id",
+            "user_id",
+            "expected_seq",
+            "action",
+            "usi",
+            "in_check",
+            "winner",
+            "reason",
+        ] {
+            query.expr_as(Expr::col((a("journal"), a(column))), a(column));
+        }
+        query
+            .from(a("games"))
+            .join(
+                JoinType::LeftJoin,
+                a("journal"),
+                Expr::col((a("games"), a("id"))).eq(Expr::col((a("journal"), a("game_id")))),
+            )
+            .and_where(Expr::col((a("games"), a("id"))).eq(encode_id(id.as_str())))
+            .order_by((a("journal"), a("seq")), Order::Asc);
+        let rows = self.db.query_all(&query).await.map_err(storage)?;
+        let first = rows.first().ok_or(Error::NotFound)?;
+        let participants = Participants::new(
+            UserId::new(decode_id(
+                &first.try_get::<String>("", "g_black").map_err(corrupt)?,
+            )?)
+            .map_err(corrupt)?,
+            UserId::new(decode_id(
+                &first.try_get::<String>("", "g_white").map_err(corrupt)?,
+            )?)
+            .map_err(corrupt)?,
+        )
+        .map_err(corrupt)?;
+        let visibility = match first
+            .try_get::<String>("", "g_visibility")
+            .map_err(corrupt)?
+            .as_str()
+        {
+            "public" => Visibility::Public,
+            "private" => Visibility::Private,
+            _ => return Err(Error::Corrupt),
+        };
+        let access = ViewMetadata {
+            participants: participants.clone(),
+            visibility,
+        };
+        if viewer.is_some_and(|viewer| !access.permits(viewer)) {
+            return Err(Error::NotFound);
+        }
+        let mut record = GameRecord {
+            id: GameId::new(decode_id(
+                &first.try_get::<String>("", "g_id").map_err(corrupt)?,
+            )?)
+            .map_err(corrupt)?,
+            participants,
+            version: unsigned(first.try_get("", "g_version").map_err(corrupt)?)?,
+            result: result(first, "g_")?,
+            journal: Vec::new(),
+        };
+        for row in rows {
+            let seq: Option<i64> = row.try_get("", "seq").map_err(corrupt)?;
+            let Some(seq) = seq else { continue };
+            let usi: Option<String> = row.try_get("", "usi").map_err(corrupt)?;
+            let action = match (row.try_get::<i32>("", "action").map_err(corrupt)?, usi) {
+                (1, Some(usi)) => Action::Move(usi.parse().map_err(corrupt)?),
+                (2, None) => Action::Resign,
+                _ => return Err(Error::Corrupt),
+            };
+            record.journal.push(Receipt {
+                request: MutationRequest {
+                    request_id: RequestId::new(decode_id(
+                        &row.try_get::<String>("", "request_id").map_err(corrupt)?,
+                    )?)
+                    .map_err(corrupt)?,
+                    user_id: UserId::new(decode_id(
+                        &row.try_get::<String>("", "user_id").map_err(corrupt)?,
+                    )?)
+                    .map_err(corrupt)?,
+                    expected_seq: unsigned(row.try_get("", "expected_seq").map_err(corrupt)?)?,
+                    action,
+                },
+                acceptance: Acceptance {
+                    seq: unsigned(seq)?,
+                    in_check: row.try_get("", "in_check").map_err(corrupt)?,
+                    result: result(&row, "")?,
+                },
+            });
+        }
+        Ok(ViewerGameRecord { access, record })
     }
 }
 
@@ -156,6 +270,55 @@ fn result(row: &QueryResult, prefix: &str) -> Result<Option<GameResult>, Error> 
 
 #[async_trait]
 impl GameRepository for SeaOrmStore {
+    async fn load_game_for_viewer(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<ViewerGameRecord, Error> {
+        self.load_view(id, Some(viewer)).await
+    }
+
+    async fn view_metadata(&self, id: &GameId, viewer: &UserId) -> Result<ViewMetadata, Error> {
+        let row = self
+            .db
+            .query_one(
+                Query::select()
+                    .columns([a("black"), a("white"), a("visibility")])
+                    .from(a("games"))
+                    .and_where(Expr::col(a("id")).eq(encode_id(id.as_str()))),
+            )
+            .await
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        let participants = Participants::new(
+            UserId::new(decode_id(
+                &row.try_get::<String>("", "black").map_err(corrupt)?,
+            )?)
+            .map_err(corrupt)?,
+            UserId::new(decode_id(
+                &row.try_get::<String>("", "white").map_err(corrupt)?,
+            )?)
+            .map_err(corrupt)?,
+        )
+        .map_err(corrupt)?;
+        let visibility = match row
+            .try_get::<String>("", "visibility")
+            .map_err(corrupt)?
+            .as_str()
+        {
+            "public" => Visibility::Public,
+            "private" => Visibility::Private,
+            _ => return Err(Error::Corrupt),
+        };
+        let access = ViewMetadata {
+            participants,
+            visibility,
+        };
+        if !access.permits(viewer) {
+            return Err(Error::NotFound);
+        }
+        Ok(access)
+    }
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
         let tx = self.db.begin().await.map_err(storage)?;
         let inserted = tx
@@ -211,89 +374,7 @@ impl GameRepository for SeaOrmStore {
     }
 
     async fn load_game(&self, id: &GameId) -> Result<GameRecord, Error> {
-        let mut query = Query::select();
-        for column in ["id", "black", "white", "version", "winner", "reason"] {
-            query.expr_as(
-                Expr::col((a("games"), a(column))),
-                a(&format!("g_{column}")),
-            );
-        }
-        for column in [
-            "seq",
-            "request_id",
-            "user_id",
-            "expected_seq",
-            "action",
-            "usi",
-            "in_check",
-            "winner",
-            "reason",
-        ] {
-            query.expr_as(Expr::col((a("journal"), a(column))), a(column));
-        }
-        query
-            .from(a("games"))
-            .join(
-                JoinType::LeftJoin,
-                a("journal"),
-                Expr::col((a("games"), a("id"))).eq(Expr::col((a("journal"), a("game_id")))),
-            )
-            .and_where(Expr::col((a("games"), a("id"))).eq(encode_id(id.as_str())))
-            .order_by((a("journal"), a("seq")), Order::Asc);
-        let rows = self.db.query_all(&query).await.map_err(storage)?;
-        let first = rows.first().ok_or(Error::NotFound)?;
-        let mut record = GameRecord {
-            id: GameId::new(decode_id(
-                &first.try_get::<String>("", "g_id").map_err(corrupt)?,
-            )?)
-            .map_err(corrupt)?,
-            participants: Participants::new(
-                UserId::new(decode_id(
-                    &first.try_get::<String>("", "g_black").map_err(corrupt)?,
-                )?)
-                .map_err(corrupt)?,
-                UserId::new(decode_id(
-                    &first.try_get::<String>("", "g_white").map_err(corrupt)?,
-                )?)
-                .map_err(corrupt)?,
-            )
-            .map_err(corrupt)?,
-            version: unsigned(first.try_get("", "g_version").map_err(corrupt)?)?,
-            result: result(first, "g_")?,
-            journal: Vec::new(),
-        };
-        for row in rows {
-            let seq: Option<i64> = row.try_get("", "seq").map_err(corrupt)?;
-            let Some(seq) = seq else {
-                continue;
-            };
-            let usi: Option<String> = row.try_get("", "usi").map_err(corrupt)?;
-            let action = match (row.try_get::<i32>("", "action").map_err(corrupt)?, usi) {
-                (1, Some(usi)) => Action::Move(usi.parse().map_err(corrupt)?),
-                (2, None) => Action::Resign,
-                _ => return Err(Error::Corrupt),
-            };
-            record.journal.push(Receipt {
-                request: MutationRequest {
-                    request_id: RequestId::new(decode_id(
-                        &row.try_get::<String>("", "request_id").map_err(corrupt)?,
-                    )?)
-                    .map_err(corrupt)?,
-                    user_id: UserId::new(decode_id(
-                        &row.try_get::<String>("", "user_id").map_err(corrupt)?,
-                    )?)
-                    .map_err(corrupt)?,
-                    expected_seq: unsigned(row.try_get("", "expected_seq").map_err(corrupt)?)?,
-                    action,
-                },
-                acceptance: Acceptance {
-                    seq: unsigned(seq)?,
-                    in_check: row.try_get("", "in_check").map_err(corrupt)?,
-                    result: result(&row, "")?,
-                },
-            });
-        }
-        Ok(record)
+        Ok(self.load_view(id, None).await?.record)
     }
 
     async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {

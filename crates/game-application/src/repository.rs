@@ -6,6 +6,40 @@ use crate::{
     StagedGameChange, UserId,
 };
 
+/// Access metadata read from the same durable view as a viewer snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Visibility {
+    /// Any authenticated user may view the game.
+    Public,
+    /// Only the two participants may view the game.
+    Private,
+}
+
+/// Metadata needed to decide whether a viewer can receive game data.
+#[derive(Clone, Debug)]
+pub struct ViewMetadata {
+    /// Permanent game participants.
+    pub participants: Participants,
+    /// Current visibility.
+    pub visibility: Visibility,
+}
+
+impl ViewMetadata {
+    /// Checks the common game viewing policy.
+    pub fn permits(&self, viewer: &UserId) -> bool {
+        self.visibility == Visibility::Public || self.participants.side(viewer).is_ok()
+    }
+}
+
+/// One coherent view of access metadata and accepted history.
+#[derive(Clone, Debug)]
+pub struct ViewerGameRecord {
+    /// Current access metadata.
+    pub access: ViewMetadata,
+    /// Complete accepted history from the same read.
+    pub record: GameRecord,
+}
+
 /// The typed action stored for exact retry matching and journal replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -111,6 +145,20 @@ pub struct GameRecord {
 /// ```
 #[async_trait]
 pub trait GameRepository: Send + Sync {
+    /// Loads visibility, participants and history from one coherent database view.
+    /// Implementations should hide inaccessible and absent games equally.
+    async fn load_game_for_viewer(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<ViewerGameRecord, ApplicationError>;
+
+    /// Reads current visibility and participants without loading history.
+    async fn view_metadata(
+        &self,
+        id: &GameId,
+        viewer: &UserId,
+    ) -> Result<ViewMetadata, ApplicationError>;
     /// Atomically creates version-zero metadata with two distinct user IDs.
     /// Participant bindings cannot subsequently change.
     ///

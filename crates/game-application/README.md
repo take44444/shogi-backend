@@ -18,6 +18,14 @@ Unknown IDs return `NotFound` without retaining actors. A closed actor reloads
 the durable game. Each game has one actor per service registry. Registry locks
 never span database or channel waits.
 
+`snapshot_for_viewer(id, viewer)` reads visibility, participants, and journal in
+one coherent repository view. It checks the viewing policy and reconstructs the
+position from that history, without using an actor's sequence-only cache.
+`check_view_access(id, viewer)` reads current visibility and participants without
+loading the journal. Public games permit any authenticated viewer; private games
+permit only participants. These methods return `NotFound` for inaccessible and
+missing games. The caller authenticates `viewer` before calling either method.
+
 The mailbox holds up to 64 queued commands per game. A send waits asynchronously
 when the queue is full; the service has no enqueue timeout. A command being
 processed and callers waiting to enqueue do not count toward those 64 slots.

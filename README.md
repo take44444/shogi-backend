@@ -5,6 +5,11 @@ Google login through a separate HTTP user service. PostgreSQL stores accepted
 commands and events. An independent publisher sends transient notifications
 through Valkey Pub/Sub.
 
+The realtime gateway exposes authenticated browser WebSockets for moves,
+resignation, opponent events, and signed-in spectators. See the
+[gateway guide](apps/realtime-gateway/README.md) for its browser contract and
+same-origin setup.
+
 Game gRPC trusts caller-supplied user IDs. Keep it on a trusted internal network.
 The user service does not authenticate game gRPC requests.
 
@@ -90,6 +95,10 @@ docker compose --profile records up --build -d
 
 The optional `auth` profile runs the user service. Configure Google credentials
 as described in the [user-server guide](apps/user-server/README.md#run-with-docker-compose).
+The `realtime` profile adds a same-origin browser edge, gateway, and a User Service
+configured for that edge. Run `docker compose --profile realtime up --build -d`
+and use `http://localhost:8082` for login and game WebSockets. Set Google
+credentials before logging in. The gateway receives no database URL.
 `docker compose down` stops services and retains database data.
 
 ## Prove persistence across container recreation
@@ -203,11 +212,12 @@ dependency declarations. Its tests verify that forbidden configurations fail.
 The interface checker compiles the examples in `tests/contracts/`.
 The deployment check starts disposable PostgreSQL and probes actual permissions.
 
-`test-postgres.sh` starts an isolated PostgreSQL Compose project and removes it
-after the tests. Its default host port is 55433; override it with `POSTGRES_PORT`.
-If `TEST_DATABASE_URL` is set, the script uses that server instead. The URL must
-permit `CREATEDB` and `CREATEROLE`. Each database test creates its own database
-and removes it afterward. Database tests fail if PostgreSQL is unavailable.
+`test-postgres.sh` starts isolated PostgreSQL and Valkey Compose services and
+removes them after the tests. Their default host ports are 55433 and 56333;
+override them with `POSTGRES_PORT` and `VALKEY_PORT`. If `TEST_DATABASE_URL` or
+`TEST_VALKEY_URL` is set, the script uses that service instead and starts only
+the missing one. The database URL must permit `CREATEDB` and `CREATEROLE`.
+Each database test creates its own database and removes it afterward.
 
 To run a package's database tests or check Rust documentation, use:
 

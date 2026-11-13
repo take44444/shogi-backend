@@ -95,6 +95,19 @@ impl State {
         }
     }
 
+    fn snapshot(&self, id: GameId) -> Snapshot {
+        Snapshot {
+            game_id: id,
+            participants: self.participants.clone(),
+            seq: self.seq,
+            position: self.game.position(),
+            turn: self.game.turn(),
+            in_check: self.game.in_check(),
+            result: self.game.result(),
+            legal_moves: self.game.legal_moves(),
+        }
+    }
+
     fn replay(&self, request: &MutationRequest) -> Result<Option<Acceptance>, ApplicationError> {
         self.participants.side(&request.user_id)?;
         self.accepted
@@ -146,16 +159,7 @@ impl Actor {
     async fn snapshot(&mut self) -> Result<Snapshot, ApplicationError> {
         self.refresh().await?;
         let state = self.state.as_ref().ok_or(ApplicationError::Internal)?;
-        Ok(Snapshot {
-            game_id: self.id.clone(),
-            participants: state.participants.clone(),
-            seq: state.seq,
-            position: state.game.position(),
-            turn: state.game.turn(),
-            in_check: state.game.in_check(),
-            result: state.game.result(),
-            legal_moves: state.game.legal_moves(),
-        })
+        Ok(state.snapshot(self.id.clone()))
     }
 
     pub(crate) async fn run(mut self, mut receiver: mpsc::Receiver<Command>) {
@@ -228,6 +232,11 @@ impl Actor {
             }
         }
     }
+}
+
+pub(crate) fn snapshot_from_record(record: GameRecord) -> Result<Snapshot, ApplicationError> {
+    let id = record.id.clone();
+    Ok(State::restore(record)?.snapshot(id))
 }
 
 #[cfg(test)]

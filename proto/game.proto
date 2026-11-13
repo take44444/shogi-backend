@@ -12,11 +12,25 @@ service GameService {
   rpc CreateGame(CreateGameRequest) returns (Snapshot);
   // Returns current participants, board, hands, legal moves, and sequence.
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
+  // Authenticated viewer snapshot. Inaccessible games are indistinguishable from missing games.
+  rpc GetSnapshotForViewer(ViewerRequest) returns (Snapshot);
+  // Checks current visibility and participants without fetching history.
+  rpc CheckViewAccess(ViewerRequest) returns (ViewAccess);
   // Accepts a legal move at the required sequence or replays an identical receipt.
   rpc MakeMove(MakeMoveRequest) returns (Acceptance);
   // Accepts a participant resignation or replays an identical receipt.
   rpc Resign(ResignRequest) returns (Acceptance);
 }
+
+// A trusted viewer claim for game-owned access checks.
+message ViewerRequest {
+  // Requested game ID.
+  string game_id = 1;
+  // Trusted internal caller claim obtained from authentication.
+  string viewer_user_id = 2;
+}
+// Successful current access check.
+message ViewAccess {}
 
 // Creates a standard game with immutable bindings to two distinct user IDs.
 // Duplicate game IDs return AlreadyExists. Creation is not an exact-retry API.
