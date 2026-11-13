@@ -12,8 +12,11 @@
 #![warn(missing_docs)]
 
 mod outbox;
+mod rating;
+mod rating_schema;
 mod schema;
 pub use outbox::{OutboxOpenError, PostgresCursor, PostgresOutbox};
+pub use rating::SeaOrmRatingJobs;
 
 use async_trait::async_trait;
 use game_application::{
@@ -268,8 +271,64 @@ fn result(row: &QueryResult, prefix: &str) -> Result<Option<GameResult>, Error> 
     }
 }
 
+async fn insert_game(
+    tx: &sea_orm::DatabaseTransaction,
+    id: &GameId,
+    participants: &Participants,
+) -> Result<(), Error> {
+    let inserted = tx
+        .execute(
+            Query::insert()
+                .into_table(a("games"))
+                .columns([
+                    a("id"),
+                    a("black"),
+                    a("white"),
+                    a("version"),
+                    a("rule"),
+                    a("visibility"),
+                    a("final_move_ply"),
+                ])
+                .values_panic([
+                    encode_id(id.as_str()).into(),
+                    encode_id(participants.black().as_str()).into(),
+                    encode_id(participants.white().as_str()).into(),
+                    0_i64.into(),
+                    "standard".into(),
+                    "public".into(),
+                    0_i64.into(),
+                ]),
+        )
+        .await;
+    match inserted {
+        Ok(_) => Ok(()),
+        Err(error)
+            if error
+                .sql_err()
+                .is_some_and(|e| matches!(e, sea_orm::SqlErr::UniqueConstraintViolation(_))) =>
+        {
+            Err(Error::AlreadyExists)
+        }
+        Err(error) => Err(storage(error)),
+    }
+}
+
 #[async_trait]
 impl GameRepository for SeaOrmStore {
+    async fn create_rated_game(
+        &self,
+        id: GameId,
+        participants: Participants,
+        pool: rating_domain::Pool,
+    ) -> Result<(), Error> {
+        rating::admit(&self.db, id, participants, pool).await
+    }
+    async fn rated_game(
+        &self,
+        id: &GameId,
+    ) -> Result<Option<game_application::rating::RatedGame>, Error> {
+        rating::identity(&self.db, id).await
+    }
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -321,41 +380,8 @@ impl GameRepository for SeaOrmStore {
     }
     async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
         let tx = self.db.begin().await.map_err(storage)?;
-        let inserted = tx
-            .execute(
-                Query::insert()
-                    .into_table(a("games"))
-                    .columns([
-                        a("id"),
-                        a("black"),
-                        a("white"),
-                        a("version"),
-                        a("rule"),
-                        a("visibility"),
-                        a("final_move_ply"),
-                    ])
-                    .values_panic([
-                        encode_id(id.as_str()).into(),
-                        encode_id(participants.black().as_str()).into(),
-                        encode_id(participants.white().as_str()).into(),
-                        0_i64.into(),
-                        "standard".into(),
-                        "public".into(),
-                        0_i64.into(),
-                    ]),
-            )
-            .await;
-        match inserted {
-            Ok(_) => tx.commit().await.map_err(storage),
-            Err(error)
-                if error.sql_err().is_some_and(|e| {
-                    matches!(e, sea_orm::SqlErr::UniqueConstraintViolation(_))
-                }) =>
-            {
-                Err(Error::AlreadyExists)
-            }
-            Err(error) => Err(storage(error)),
-        }
+        insert_game(&tx, &id, &participants).await?;
+        tx.commit().await.map_err(storage)
     }
 
     async fn version(&self, id: &GameId) -> Result<u64, Error> {
@@ -478,6 +504,9 @@ impl GameRepository for SeaOrmStore {
             .map_err(storage)?;
             for event in change.events() {
                 outbox::enqueue(&tx, event).await?;
+            }
+            if receipt.acceptance.result.is_some() {
+                rating::enqueue(&tx, id).await?;
             }
             Ok(())
         }

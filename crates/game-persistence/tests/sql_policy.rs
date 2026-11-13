@@ -91,6 +91,11 @@ fn excluded(attrs: &[syn::Attribute]) -> bool {
     })
 }
 fn postgres_sql(sql: &str) -> bool {
+    if sql
+        == "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'shogi_reader') THEN GRANT SELECT ON public.schema_version, public.games, public.journal, public.rating_states TO shogi_reader; END IF; END $$"
+    {
+        return true;
+    }
     let normalized = sql.split_whitespace().collect::<Vec<_>>().join(" ");
     if matches!(
         normalized.as_str(),
@@ -360,7 +365,13 @@ impl<'ast> Visit<'ast> for Policy {
                 }
             }
             if function.starts_with("cust")
-                && call.args.first().and_then(literal).as_deref() != Some("id COLLATE \"C\"")
+                && !matches!(
+                    call.args.first().and_then(literal).as_deref(),
+                    Some(
+                        "id COLLATE \"C\""
+                            | "floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint"
+                    )
+                )
             {
                 self.fail(&function);
             }
@@ -439,6 +450,9 @@ fn production_sql_uses_builders_or_reviewed_postgres_operations() {
 fn policy_rejects_application_sql_and_interpolation() {
     for source in [
         r#"fn f() { sqlx::query("SELECT * FROM games"); }"#,
+        r#"fn f() { Expr::cust("floor(extract(epoch FROM now()) * 1000)::bigint"); }"#,
+        r#"fn f() { db.execute_unprepared("GRANT SELECT ON ALL TABLES IN SCHEMA public TO shogi_reader"); }"#,
+        r#"fn f() { db.execute_unprepared("DO $$ BEGIN GRANT SELECT ON rating_jobs TO shogi_reader; END $$"); }"#,
         r#"fn f() { sqlx::query("SELECT * FROM accounts WHERE id = $1").bind(id); }"#,
         r#"fn f() { sqlx::query("INSERT INTO accounts VALUES ($1)").bind(id); }"#,
         r#"fn f() { db.execute_unprepared(&format!("SELECT * FROM games WHERE id = '{id}'")); }"#,
@@ -459,6 +473,8 @@ fn policy_rejects_application_sql_and_interpolation() {
 #[test]
 fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
     for source in [
+        r#"fn f() { Expr::cust("floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint"); }"#,
+        r#"fn f() { db.execute_unprepared("DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'shogi_reader') THEN GRANT SELECT ON public.schema_version, public.games, public.journal, public.rating_states TO shogi_reader; END IF; END $$"); }"#,
         r#"fn f() { let (sql, values) = query.build_sqlx(PostgresQueryBuilder); sqlx::query_with(AssertSqlSafe(sql), values); }"#,
         r#"fn f() { sqlx::query("SELECT table_type FROM information_schema.tables WHERE table_name = $1").bind(table); }"#,
         r#"fn f() { sqlx::query_scalar("SELECT pg_try_advisory_lock(123)"); Expr::cust("id COLLATE \"C\""); }"#,

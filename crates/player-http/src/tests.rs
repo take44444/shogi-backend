@@ -70,7 +70,10 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
             .await
             .unwrap(),
     );
-    let app = router(GameRecords::new(reader.clone()));
+    let app = router(
+        GameRecords::new(reader.clone()),
+        UserRatings::new(reader.clone()),
+    );
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -152,7 +155,7 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
 #[tokio::test]
 async fn query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage() {
     let repository = Arc::new(Failing(game_record_application::Error::Corrupt));
-    let app = router(GameRecords::new(repository));
+    let app = router(GameRecords::new(repository), unused_ratings());
     for path in [
         "/game-records",
         "/game-records?from=0&to=0",
@@ -214,7 +217,10 @@ async fn bounded_detail_and_storage_errors_are_generic() {
             "unavailable",
         ),
     ] {
-        let app = router(GameRecords::new(Arc::new(Failing(failure))));
+        let app = router(
+            GameRecords::new(Arc::new(Failing(failure))),
+            unused_ratings(),
+        );
         assert_eq!(
             get(app, "/game-records/game").await,
             (status, serde_json::json!({"error":code}))

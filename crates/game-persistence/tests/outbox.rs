@@ -136,6 +136,21 @@ async fn unsupported_frozen_encoding_fails_closed() {
 struct Uncertain(Arc<SeaOrmStore>);
 #[async_trait]
 impl GameRepository for Uncertain {
+    async fn create_rated_game(
+        &self,
+        id: GameId,
+        participants: Participants,
+        pool: game_application::rating::Pool,
+    ) -> Result<(), Error> {
+        self.0.create_rated_game(id, participants, pool).await
+    }
+    async fn rated_game(
+        &self,
+        id: &GameId,
+    ) -> Result<Option<game_application::rating::RatedGame>, Error> {
+        self.0.rated_game(id).await
+    }
+
     async fn load_game_for_viewer(
         &self,
         id: &GameId,

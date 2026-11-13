@@ -1,6 +1,6 @@
 # player-http
 
-`router(GameRecords)` exposes anonymous HTTP access to completed public game
+`router(GameRecords, UserRatings)` exposes anonymous HTTP access to completed public game
 records. The adapter parses queries into application types and returns JSON.
 It uses no account credentials or user database connection.
 
@@ -103,3 +103,21 @@ Run adapter tests against disposable PostgreSQL from the repository root.
 Tests cover JSON fields, invalid queries, missing and hidden records, resource
 limits, and the generated OpenAPI contract. [Rust CI](../../.github/workflows/rust.yaml)
 runs these tests with the workspace tests.
+
+## Read user ratings
+
+`GET /users/{user_id}/ratings` requires no authentication. The response always
+contains `ten_minute_30` and `byoyomi_30`. Each pool contains `rating`, an integer
+or null, and `completed_rated_games`, a nonnegative integer.
+
+```json
+{"ten_minute_30":{"rating":1516,"completed_rated_games":1},"byoyomi_30":{"rating":null,"completed_rated_games":0}}
+```
+
+Null and zero mean no applied rated games. A syntactically valid unknown user
+has the same response. The endpoint does not confirm account existence or that
+pending games have been applied. It reads the latest committed state.
+
+Invalid IDs return 400. Storage failures and exhausted request capacity return
+503. Responses include `Cache-Control: no-store`. The route and nullable rating
+schema appear in `/openapi.json` and the offline `player-openapi` example.

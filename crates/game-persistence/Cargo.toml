@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+rating-domain = { path = "../rating-domain" }
 game-record-application = { path = "../game-record-application" }
 game-application = { path = "../game-application" }
 shogi-domain = { path = "../shogi-domain" }

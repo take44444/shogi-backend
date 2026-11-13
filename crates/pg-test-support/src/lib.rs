@@ -37,7 +37,7 @@ impl TestDatabase {
         &self.url
     }
 
-    /// Creates a database role limited to SELECT on current and future public tables.
+    /// Creates a database role limited to the explicitly public read tables.
     pub async fn reader_url(&self) -> String {
         let mut admin = PgConnection::connect(&self.admin_url).await.unwrap();
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
@@ -48,7 +48,7 @@ impl TestDatabase {
         .await
         .unwrap();
         let mut connection = PgConnection::connect(&self.url).await.unwrap();
-        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("GRANT USAGE ON SCHEMA public TO {}; GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {}", self.reader, self.reader, self.reader))).execute(&mut connection).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("GRANT USAGE ON SCHEMA public TO {}; GRANT SELECT ON public.schema_version, public.games, public.journal, public.rating_states TO {}; ALTER ROLE {} SET default_transaction_read_only = on; ALTER ROLE {} SET statement_timeout = '2s'; ALTER ROLE {} SET lock_timeout = '2s'", self.reader, self.reader, self.reader, self.reader, self.reader))).execute(&mut connection).await.unwrap();
         let mut url = url::Url::parse(&self.url).unwrap();
         url.set_username(&self.reader).unwrap();
         url.set_password(Some(&self.reader)).unwrap();

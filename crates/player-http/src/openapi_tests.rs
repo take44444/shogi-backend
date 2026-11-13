@@ -49,9 +49,19 @@ fn paths_queries_and_error_contract_are_derived_from_routes() {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        ["/game-records", "/game-records/{id}", "/openapi.json"]
+        [
+            "/game-records",
+            "/game-records/{id}",
+            "/openapi.json",
+            "/users/{user_id}/ratings"
+        ]
     );
-    for path in ["/game-records", "/game-records/{id}", "/openapi.json"] {
+    for path in [
+        "/game-records",
+        "/game-records/{id}",
+        "/openapi.json",
+        "/users/{user_id}/ratings",
+    ] {
         assert_eq!(
             d["paths"][path]
                 .as_object()
@@ -218,7 +228,7 @@ impl game_record_application::RecordRepository for UnusedRecords {
 }
 #[tokio::test]
 async fn runtime_document_equals_offline_document_without_storage_access() {
-    let response = router(GameRecords::new(Arc::new(UnusedRecords)))
+    let response = router(GameRecords::new(Arc::new(UnusedRecords)), unused_ratings())
         .oneshot(
             Request::builder()
                 .uri("/openapi.json")

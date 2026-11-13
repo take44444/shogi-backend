@@ -46,7 +46,7 @@ DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' cargo run --locked -p
 cargo run --locked -p game-grpc --example play -- http://127.0.0.1:50052 my-game
 ```
 
-Startup initializes or validates schema version 5 before listening. The database
+Startup initializes or validates schema version 6 before listening. The database
 and role must already exist. Schema validation requires database `CREATE`
 permission even on subsequent startups. See the
 [storage reference](crates/game-persistence/README.md#schema-startup) for required
@@ -239,3 +239,17 @@ work, and future plans. Crate references describe the
 [application contract](crates/game-application/README.md),
 [storage](crates/game-persistence/README.md), and
 [gRPC API](crates/game-grpc/README.md).
+
+## Rated games
+
+`CreateGame` remains casual. Trusted game callers use `CreateRatedGame` with
+`TEN_MINUTE_30` for 600 seconds plus 30-second byoyomi, or `BYOYOMI_30` for zero
+main time plus 30-second byoyomi. These choices do not run clocks.
+
+The rating worker starts with the default Compose services. The public player
+server returns the latest committed values at `GET /users/{user_id}/ratings`.
+See [rating behavior](docs/design/ratings.md) and [running the rating worker](apps/rating-worker-server/README.md).
+
+Schema version 6 supports fresh databases only. Startup rejects previous schemas
+without migration or data deletion. Keep any existing database and provision a
+separate empty database for this version.

@@ -22,7 +22,9 @@ pub(crate) fn application_status(error: ApplicationError) -> Status {
         ApplicationError::Internal
         | ApplicationError::Domain(CommandError::RulesFailure)
         | ApplicationError::SequenceExhausted => Status::internal(message),
-        ApplicationError::Domain(_) => Status::failed_precondition(message),
+        ApplicationError::RatingPoolBusy | ApplicationError::Domain(_) => {
+            Status::failed_precondition(message)
+        }
     }
 }
 

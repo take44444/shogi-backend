@@ -38,7 +38,7 @@ async fn sixteen_active_requests_admit_no_seventeenth_and_release_capacity() {
         entered,
         release: Semaphore::new(0),
     });
-    let app = router(GameRecords::new(repository.clone()));
+    let app = router(GameRecords::new(repository.clone()), unused_ratings());
     let mut requests = Vec::new();
     for _ in 0..16 {
         let app = app.clone();

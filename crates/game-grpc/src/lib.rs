@@ -16,12 +16,12 @@
 //!
 //! | Outcome | gRPC code |
 //! | --- | --- |
-//! | Malformed ID, move, missing sequence, or equal participants | `InvalidArgument` |
+//! | Malformed ID, move, missing sequence, invalid rating pool, or equal participants | `InvalidArgument` |
 //! | Unknown game | `NotFound` |
 //! | Nonparticipant | `PermissionDenied` |
 //! | Duplicate game, or changed accepted request | `AlreadyExists` |
 //! | Stale sequence | `Aborted`, with `actual-seq` metadata |
-//! | Wrong turn, illegal move, or finished game | `FailedPrecondition` |
+//! | Wrong turn, illegal move, finished game, or occupied rating pool | `FailedPrecondition` |
 //! | Storage failure or uncertain commit | `Unavailable` |
 //! | Corrupt history or incompatible schema | `DataLoss` |
 //! | Internal invariant violation, rules failure, or sequence exhaustion | `Internal` |

@@ -8,6 +8,7 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
+use game_record_application::ratings::{RatingState, UserRatingSnapshot, UserRatings};
 use game_record_application::{
     Detail, Error, Filters, FinishReason, GameId, GameRecords, Metadata, Page, Player,
     PublicAction, Rule, Search, UserId,
@@ -21,6 +22,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 #[derive(Clone)]
 struct App {
     records: GameRecords,
+    ratings: UserRatings,
     capacity: Arc<Semaphore>,
 }
 /// Construct the document without a database, configuration, or service startup.
@@ -35,11 +37,13 @@ fn api_router() -> OpenApiRouter<App> {
     OpenApiRouter::with_openapi(document)
         .routes(routes!(search))
         .routes(routes!(detail))
+        .routes(routes!(ratings))
         .routes(routes!(openapi_json))
 }
-pub fn router(records: GameRecords) -> Router {
+pub fn router(records: GameRecords, ratings: UserRatings) -> Router {
     api_router().split_for_parts().0.with_state(App {
         records,
+        ratings,
         capacity: Arc::new(Semaphore::new(16)),
     })
 }
@@ -165,6 +169,57 @@ async fn detail(State(app): State<App>, path: Result<Path<String>, PathRejection
     }
     .await;
     respond(result)
+}
+/// Read both committed pools. Unknown users have null ratings and zero games.
+/// The response does not assert account existence or completion of pending work.
+#[utoipa::path(get, path = "/users/{user_id}/ratings", params(
+    ("user_id" = String, Path, description = "User ID, 1..128 UTF-8 bytes with no Unicode whitespace")
+), responses(
+    (status = 200, description = "Latest committed ratings, possibly behind pending games", body = RatingsDto),
+    (status = 400, description = "Invalid user ID", body = ErrorBody),
+    (status = 503, description = "Rating storage or request capacity unavailable", body = ErrorBody)
+))]
+async fn ratings(State(app): State<App>, path: Result<Path<String>, PathRejection>) -> Response {
+    let result = async {
+        let user = UserId::new(path.map_err(|_| Error::InvalidQuery)?.0)
+            .map_err(|_| Error::InvalidQuery)?;
+        let _permit = app.capacity.try_acquire().map_err(|_| Error::Unavailable)?;
+        app.ratings
+            .get(&user)
+            .await
+            .map(RatingsDto::from)
+            .map_err(|_| Error::Unavailable)
+    }
+    .await;
+    respond(result)
+}
+#[derive(Serialize, ToSchema)]
+struct PoolRatingDto {
+    #[schema(required = true)]
+    rating: Option<i64>,
+    #[schema(format = "uint64", minimum = 0, maximum = 9223372036854775807_u64)]
+    completed_rated_games: u64,
+}
+impl From<RatingState> for PoolRatingDto {
+    fn from(state: RatingState) -> Self {
+        Self {
+            rating: state.rating(),
+            completed_rated_games: state.completed(),
+        }
+    }
+}
+#[derive(Serialize, ToSchema)]
+struct RatingsDto {
+    ten_minute_30: PoolRatingDto,
+    byoyomi_30: PoolRatingDto,
+}
+impl From<UserRatingSnapshot> for RatingsDto {
+    fn from(snapshot: UserRatingSnapshot) -> Self {
+        Self {
+            ten_minute_30: snapshot.ten_minute_30.into(),
+            byoyomi_30: snapshot.byoyomi_30.into(),
+        }
+    }
 }
 fn respond<T: Serialize>(result: Result<T, Error>) -> Response {
     let mut response = match result {
@@ -312,3 +367,18 @@ mod openapi_tests;
 
 #[cfg(test)]
 mod contract_tests;
+
+#[cfg(test)]
+fn unused_ratings() -> UserRatings {
+    struct Unused;
+    #[async_trait::async_trait]
+    impl game_record_application::ratings::RatingRepository for Unused {
+        async fn ratings(&self, _: &UserId) -> Result<UserRatingSnapshot, Error> {
+            panic!("route must not query ratings")
+        }
+    }
+    UserRatings::new(Arc::new(Unused))
+}
+
+#[cfg(test)]
+mod rating_tests;

@@ -1,4 +1,4 @@
-use game_record_application::GameRecords;
+use game_record_application::{GameRecords, ratings::UserRatings};
 use game_record_persistence::PostgresGameRecords;
 use std::{net::SocketAddr, sync::Arc};
 
@@ -10,7 +10,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "127.0.0.1:8081".into())
         .parse()?;
     let repository = Arc::new(PostgresGameRecords::connect(&url).await?);
-    let app = player_http::router(GameRecords::new(repository.clone()));
+    let app = player_http::router(
+        GameRecords::new(repository.clone()),
+        UserRatings::new(repository.clone()),
+    );
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("player-server listening on {}", listener.local_addr()?);
     axum::serve(listener, app)

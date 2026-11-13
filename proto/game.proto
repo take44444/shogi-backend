@@ -10,6 +10,10 @@ package shogi.v1;
 service GameService {
   // Binds two distinct user IDs and creates a sequence-zero game.
   rpc CreateGame(CreateGameRequest) returns (Snapshot);
+  // Reserves both players in the selected rating pool. Creation is not idempotent.
+  rpc CreateRatedGame(CreateRatedGameRequest) returns (Snapshot);
+  // Durable creation identity for reconciling an uncertain rated creation response.
+  rpc GetRatedGame(GetSnapshotRequest) returns (RatedGameIdentity);
   // Returns current participants, board, hands, legal moves, and sequence.
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
   // Authenticated viewer snapshot. Inaccessible games are indistinguishable from missing games.
@@ -210,4 +214,47 @@ enum FinishReason {
   FINISH_REASON_CHECKMATE = 1;
   // A participant resigned; the opponent wins.
   FINISH_REASON_RESIGNATION = 2;
+}
+
+// Required rated pool. These values do not enable clocks or timeout adjudication.
+enum RatingPool {
+  // Required wire default, rejected at admission.
+  RATING_POOL_UNSPECIFIED = 0;
+  // 600 seconds plus 30-second byoyomi.
+  RATING_POOL_TEN_MINUTE_30 = 1;
+  // Zero main time plus 30-second byoyomi.
+  RATING_POOL_BYOYOMI_30 = 2;
+}
+// Creates a rated game with immutable participant and pool bindings.
+message CreateRatedGameRequest {
+  // Immutable game ID.
+  string game_id = 1;
+  // User bound to Black.
+  string black_user_id = 2;
+  // User bound to White.
+  string white_user_id = 3;
+  // Unspecified and unknown enum values are InvalidArgument.
+  RatingPool pool = 4;
+}
+// Committed state frozen at admission.
+message RatingStart {
+  // Missing means unrated, with effective Elo 1500.
+  optional int64 rating = 1;
+  // Completed rated games at admission.
+  uint64 completed_rated_games = 2;
+}
+// NotFound means no rated identity, including a casual game with this ID.
+message RatedGameIdentity {
+  // Immutable game ID.
+  string game_id = 1;
+  // User bound to Black.
+  string black_user_id = 2;
+  // User bound to White.
+  string white_user_id = 3;
+  // Selected independent pool.
+  RatingPool pool = 4;
+  // Black state at admission.
+  RatingStart black_start = 5;
+  // White state at admission.
+  RatingStart white_start = 6;
 }
