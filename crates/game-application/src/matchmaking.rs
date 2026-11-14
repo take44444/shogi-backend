@@ -34,7 +34,7 @@ impl std::fmt::Display for TicketId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeartbeatSequence(i64);
 impl HeartbeatSequence {
-    /// Rejects zero, negative and exhausted client sequences.
+    /// Accepts positive sequences through `i64::MAX`.
     pub fn new(value: i64) -> Option<Self> {
         (value > 0).then_some(Self(value))
     }
