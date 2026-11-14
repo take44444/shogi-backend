@@ -17,7 +17,6 @@ Ticket states are `Waiting`, `Playing`, `Finished`, `Cancelled`, `Expired`, and
 results. Reusing a ticket never creates another participation. Waiting expires
 30 seconds after admission or the last strictly newer heartbeat. The pure
 selection policy uses bilateral rating windows and skips unmatched head tickets.
-See [matchmaking](../../docs/design/matchmaking.md) for the complete contract.
 
 `snapshot` returns the participants, sequence, owned position, legal moves,
 turn, check, and result. An uncached game loads from durable storage.
