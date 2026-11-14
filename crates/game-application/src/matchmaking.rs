@@ -216,7 +216,9 @@ pub fn select_pair(tickets: &[Ticket], now: i64) -> Option<(&Ticket, &Ticket)> {
                     && difference <= window(b.enqueued_at, now))
                 .then_some((difference, b.enqueued_at, other.id, *other))
             })
-            .min_by_key(|(difference, time, id, _)| (*difference, *time, *id));
+            .min_by_key(|(difference, time, id, other)| {
+                (*difference, *time, *id, other.user.as_str())
+            });
         if let Some((_, _, _, other)) = opponent {
             return Some((anchor, other));
         }
@@ -276,5 +278,19 @@ mod tests {
         assert!(HeartbeatSequence::new(0).is_none());
         assert!(HeartbeatSequence::new(-1).is_none());
         assert_eq!(HeartbeatSequence::new(i64::MAX).unwrap().get(), i64::MAX);
+    }
+
+    #[test]
+    fn owner_scoped_equal_uuids_have_a_stable_opponent() {
+        let anchor = ticket(1, 1500, 0);
+        let first = ticket(2, 1520, 1);
+        let mut second = first.clone();
+        second.user = UserId::new("u3").unwrap();
+        for tickets in [
+            [anchor.clone(), first.clone(), second.clone()],
+            [second.clone(), anchor.clone(), first.clone()],
+        ] {
+            assert_eq!(select_pair(&tickets, 1).unwrap().1.user, first.user);
+        }
     }
 }

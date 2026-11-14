@@ -93,12 +93,12 @@ pub(crate) async fn identity(
     })
     .transpose()
 }
-fn sorted_users(players: &Participants) -> [&UserId; 2] {
+pub(crate) fn sorted_users(players: &Participants) -> [&UserId; 2] {
     let mut users = [players.black(), players.white()];
     users.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     users
 }
-async fn locked_states(
+pub(crate) async fn locked_states(
     tx: &DatabaseTransaction,
     players: &Participants,
     pool: Pool,
@@ -184,7 +184,17 @@ pub(crate) async fn admit(
             return Err(Error::RatingPoolBusy);
         }
     }
-    crate::insert_game(&tx, &id, &players).await?;
+    insert_rated(&tx, &id, &players, pool, starts).await?;
+    tx.commit().await.map_err(storage)
+}
+pub(crate) async fn insert_rated(
+    tx: &DatabaseTransaction,
+    id: &GameId,
+    players: &Participants,
+    pool: Pool,
+    starts: [RatingState; 2],
+) -> Result<(), Error> {
+    crate::insert_game(tx, id, players).await?;
     tx.execute(
         Query::insert()
             .into_table(a("rated_games"))
@@ -207,7 +217,7 @@ pub(crate) async fn admit(
     )
     .await
     .map_err(storage)?;
-    for user in sorted_users(&players) {
+    for user in sorted_users(players) {
         tx.execute(
             Query::insert()
                 .into_table(a("rating_slots"))
@@ -221,7 +231,7 @@ pub(crate) async fn admit(
         .await
         .map_err(storage)?;
     }
-    tx.commit().await.map_err(storage)
+    Ok(())
 }
 pub(crate) async fn enqueue(tx: &DatabaseTransaction, id: &GameId) -> Result<(), Error> {
     if identity(tx, id).await?.is_none() {

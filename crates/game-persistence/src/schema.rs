@@ -50,6 +50,7 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
             "rating_slots",
             "rating_jobs",
             "rating_applications",
+            "matchmaking_tickets",
         ]
         .iter()
         .all(|name| names.iter().any(|table| table == name))
@@ -106,7 +107,7 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
             || rows[0]
                 .try_get::<i64>("", "version")
                 .map_err(|_| SchemaError::Corrupt)?
-                != 6
+                != 7
         {
             return Err(SchemaError::Corrupt);
         }
@@ -137,6 +138,7 @@ async fn create_schema(tx: &DatabaseTransaction) -> Result<(), SchemaError> {
     for table in crate::rating_schema::tables() {
         tx.execute(&table).await?;
     }
+    crate::matchmaking_schema::create(tx).await?;
     for (name, column) in [
         ("rating_jobs_pending", "available_at"),
         ("rating_jobs_expired", "lease_until"),
@@ -155,7 +157,7 @@ async fn create_schema(tx: &DatabaseTransaction) -> Result<(), SchemaError> {
         Query::insert()
             .into_table(a("schema_version"))
             .columns([a("id"), a("version")])
-            .values_panic([0_i64.into(), 6_i64.into()]),
+            .values_panic([0_i64.into(), 7_i64.into()]),
     )
     .await?;
     tx.execute(
@@ -195,7 +197,7 @@ async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>
                           c.relpersistence, c.relrowsecurity, c.relforcerowsecurity) AS definition
             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = current_schema()
-                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications')
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications', 'matchmaking_tickets')
             UNION ALL
             SELECT format('column|%s|%s|%s|%s|%s|%s|%s|%s', c.relname,
                           a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
@@ -206,7 +208,7 @@ async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>
             LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
             LEFT JOIN pg_collation coll ON coll.oid = a.attcollation
             WHERE n.nspname = current_schema() AND a.attnum > 0 AND NOT a.attisdropped
-                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications')
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications', 'matchmaking_tickets')
             UNION ALL
             SELECT format('constraint|%s|%s|%s|%s|%s', c.relname,
                           replace(pg_get_constraintdef(k.oid), quote_ident(current_schema()) || '.', ''),
@@ -214,7 +216,7 @@ async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>
             FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = current_schema()
-                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications')
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications', 'matchmaking_tickets')
             UNION ALL
             SELECT format('index|%s|%s|%s|%s|%s', c.relname, i.indisunique,
                           substr(pg_get_indexdef(i.indexrelid), length(format('CREATE %sINDEX %I ON %I.%I ',
@@ -225,7 +227,7 @@ async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>
             JOIN pg_class idx ON idx.oid = i.indexrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = current_schema()
-                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications')
+                AND c.relname IN ('schema_version', 'games', 'journal', 'outbox_events', 'rating_states', 'rated_games', 'rating_slots', 'rating_jobs', 'rating_applications', 'matchmaking_tickets')
         ) definitions
         "#,
     ))

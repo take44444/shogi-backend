@@ -11,6 +11,8 @@
 //! game rather than restoring an untrusted position string.
 #![warn(missing_docs)]
 
+mod matchmaking;
+mod matchmaking_schema;
 mod outbox;
 mod rating;
 mod rating_schema;
@@ -410,6 +412,9 @@ impl GameRepository for SeaOrmStore {
         let seq = signed(receipt.acceptance.seq)?;
         let tx = self.db.begin().await.map_err(storage)?;
         let operation = async {
+            if receipt.acceptance.result.is_some() {
+                matchmaking::admission_lock(&tx).await?;
+            }
             let (winner, reason) = result_values(receipt.acceptance.result);
             let finished_at = receipt
                 .acceptance
@@ -506,6 +511,7 @@ impl GameRepository for SeaOrmStore {
                 outbox::enqueue(&tx, event).await?;
             }
             if receipt.acceptance.result.is_some() {
+                matchmaking::finish(&tx, id, &black, &white).await?;
                 rating::enqueue(&tx, id).await?;
             }
             Ok(())
