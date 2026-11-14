@@ -26,22 +26,6 @@
 //! | Corrupt history or incompatible schema | `DataLoss` |
 //! | Internal invariant violation, rules failure, or sequence exhaustion | `Internal` |
 //!
-//! This client example compiles without connecting during documentation tests.
-//! It assumes a running server and a fresh game ID. Game creation is not idempotent.
-//!
-//! ```no_run
-//! use game_grpc::proto::{CreateGameRequest, game_service_client::GameServiceClient};
-//!
-//! # #[tokio::main]
-//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut client = GameServiceClient::connect("http://127.0.0.1:50051").await?;
-//! let game = client.create_game(CreateGameRequest {
-//!     game_id: "new-game".into(), black_user_id: "black".into(), white_user_id: "white".into(),
-//! }).await?;
-//! assert_eq!(game.into_inner().seq, 0);
-//! # Ok(())
-//! # }
-//! ```
 #![warn(missing_docs)]
 
 mod conversion;

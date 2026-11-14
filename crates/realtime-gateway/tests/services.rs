@@ -82,26 +82,36 @@ struct HeldSnapshotRpc {
 
 #[tonic::async_trait]
 impl GameRpcService for HeldSnapshotRpc {
-    async fn create_rated_game(
+    async fn join_matchmaking(
         &self,
-        request: tonic::Request<proto::CreateRatedGameRequest>,
-    ) -> Result<tonic::Response<proto::Snapshot>, tonic::Status> {
-        self.inner.create_rated_game(request).await
+        request: tonic::Request<proto::JoinMatchmakingRequest>,
+    ) -> Result<tonic::Response<proto::JoinMatchmakingResponse>, tonic::Status> {
+        self.inner.join_matchmaking(request).await
     }
-    async fn get_rated_game(
+    async fn get_matchmaking(
         &self,
-        request: tonic::Request<proto::GetSnapshotRequest>,
-    ) -> Result<tonic::Response<proto::RatedGameIdentity>, tonic::Status> {
-        self.inner.get_rated_game(request).await
+        request: tonic::Request<proto::MatchmakingOwner>,
+    ) -> Result<tonic::Response<proto::MatchmakingCurrent>, tonic::Status> {
+        self.inner.get_matchmaking(request).await
     }
-
-    async fn create_game(
+    async fn get_matchmaking_ticket(
         &self,
-        request: tonic::Request<proto::CreateGameRequest>,
-    ) -> Result<tonic::Response<proto::Snapshot>, tonic::Status> {
-        self.inner.create_game(request).await
+        request: tonic::Request<proto::MatchmakingRequest>,
+    ) -> Result<tonic::Response<proto::MatchmakingTicket>, tonic::Status> {
+        self.inner.get_matchmaking_ticket(request).await
     }
-
+    async fn heartbeat_matchmaking(
+        &self,
+        request: tonic::Request<proto::HeartbeatMatchmakingRequest>,
+    ) -> Result<tonic::Response<proto::MatchmakingTicket>, tonic::Status> {
+        self.inner.heartbeat_matchmaking(request).await
+    }
+    async fn cancel_matchmaking(
+        &self,
+        request: tonic::Request<proto::MatchmakingRequest>,
+    ) -> Result<tonic::Response<proto::MatchmakingTicket>, tonic::Status> {
+        self.inner.cancel_matchmaking(request).await
+    }
     async fn get_snapshot(
         &self,
         request: tonic::Request<proto::GetSnapshotRequest>,
@@ -199,7 +209,7 @@ impl Services {
         let game_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let game_url = format!("http://{}", game_listener.local_addr().unwrap());
         let service = GameServiceServer::new(HeldSnapshotRpc {
-            inner: GameRpc::new(GameService::new(games.clone())),
+            inner: GameRpc::new(GameService::new(games.clone()), games.clone()),
             hold: Mutex::new(hold),
         });
         let game_task = tokio::spawn(async move {
@@ -209,16 +219,19 @@ impl Services {
                 .await
                 .unwrap();
         });
-        let mut client = GameServiceClient::connect(game_url.clone()).await.unwrap();
+        let client = GameServiceClient::connect(game_url.clone()).await.unwrap();
         let game = uuid::Uuid::new_v4().to_string();
-        client
-            .create_game(proto::CreateGameRequest {
-                game_id: game.clone(),
-                black_user_id: black.id.clone(),
-                white_user_id: white.id.clone(),
-            })
-            .await
-            .unwrap();
+        pg_test_support::seed_game(
+            game_database.url(),
+            &GameId::new(game.clone()).unwrap(),
+            &game_application::Participants::new(
+                UserId::new(black.id.clone()).unwrap(),
+                UserId::new(white.id.clone()).unwrap(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
         let publisher = OutboxPublisher::new(
             PostgresOutbox::connect(game_database.url()).await.unwrap(),
             ValkeyEventPublisher::connect(&valkey_url).await.unwrap(),
@@ -963,5 +976,330 @@ async fn snapshot_size_limit_closes_without_sending_a_partial_position() {
     .await;
     let mut socket = services.connect(&services.viewer).await;
     closed(&mut socket).await;
+    services.stop().await;
+}
+
+#[tokio::test]
+async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access() {
+    use game_application::{matchmaking::MatchmakingRepository, rating::Pool};
+    let services = Services::start().await;
+    let http = reqwest::Client::new();
+    let ticket = uuid::Uuid::new_v4().to_string();
+    let endpoint = format!("{}/matchmaking/tickets/{ticket}", services.origin);
+    assert_eq!(
+        http.get(format!("{}/matchmaking/me", services.origin))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        http.put(&endpoint)
+            .header("cookie", services.viewer.cookie())
+            .header("origin", "http://attacker.invalid")
+            .json(&json!({"pool":"ten_minute_30"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        http.put(&endpoint)
+            .header("cookie", services.viewer.cookie())
+            .header("origin", &services.origin)
+            .header("host", "attacker.invalid")
+            .json(&json!({"pool":"ten_minute_30"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::FORBIDDEN
+    );
+    let response = http
+        .put(&endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"ten_minute_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let first: Value = response.json().await.unwrap();
+    let conflict = http
+        .put(&endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"byoyomi_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(conflict.status(), reqwest::StatusCode::CONFLICT);
+    assert_eq!(
+        conflict.json::<Value>().await.unwrap()["code"],
+        "pool_conflict"
+    );
+    let retry = http
+        .put(&endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"ten_minute_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(retry.status(), reqwest::StatusCode::OK);
+    assert_eq!(retry.json::<Value>().await.unwrap(), first);
+    assert_eq!(
+        http.get(&endpoint)
+            .header("cookie", services.black.cookie())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+    let refused_endpoint = format!(
+        "{}/matchmaking/tickets/{}",
+        services.origin,
+        uuid::Uuid::new_v4()
+    );
+    let refused = http
+        .put(&refused_endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"byoyomi_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::CONFLICT);
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["code"], "already_waiting");
+    let lookup = http
+        .get(&refused_endpoint)
+        .header("cookie", services.viewer.cookie())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(lookup.status(), reqwest::StatusCode::OK);
+    assert_eq!(lookup.json::<Value>().await.unwrap(), refused);
+    assert_eq!(
+        http.post(format!("{endpoint}/heartbeat"))
+            .header("cookie", services.viewer.cookie())
+            .header("origin", &services.origin)
+            .json(&json!({"sequence":0}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    let heartbeat = http
+        .post(format!("{endpoint}/heartbeat"))
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"sequence":1}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let duplicate = http
+        .post(format!("{endpoint}/heartbeat"))
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"sequence":1}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(heartbeat, duplicate);
+    let cancelled = http
+        .delete(&endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        cancelled.json::<Value>().await.unwrap()["state"],
+        "cancelled"
+    );
+    let retry = http
+        .put(&refused_endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"byoyomi_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(retry.status(), reqwest::StatusCode::CONFLICT);
+    let early_endpoint = format!(
+        "{}/matchmaking/tickets/{}",
+        services.origin,
+        uuid::Uuid::new_v4()
+    );
+    http.delete(&early_endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let early = http
+        .put(&early_endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"byoyomi_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(early.status(), reqwest::StatusCode::OK);
+    assert_eq!(early.json::<Value>().await.unwrap()["state"], "cancelled");
+    let opponent = login(&services.accounts, "opponent").await;
+    let mut endpoints = Vec::new();
+    for browser in [&services.viewer, &opponent] {
+        let endpoint = format!(
+            "{}/matchmaking/tickets/{}",
+            services.origin,
+            uuid::Uuid::new_v4()
+        );
+        assert_eq!(
+            http.put(&endpoint)
+                .header("cookie", browser.cookie())
+                .header("origin", &services.origin)
+                .json(&json!({"pool":"byoyomi_30"}))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::CREATED
+        );
+        endpoints.push(endpoint);
+    }
+    let game = services.games.tick(Pool::Byoyomi30).await.unwrap().unwrap();
+    let current = http
+        .get(format!("{}/matchmaking/me", services.origin))
+        .header("cookie", services.viewer.cookie())
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(current["state"], "playing");
+    assert_eq!(current["ticket"]["game_id"], game.as_str());
+    let cancel = http
+        .delete(&endpoints[0])
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancel.status(), reqwest::StatusCode::CONFLICT);
+    let result: Value = cancel.json().await.unwrap();
+    assert_eq!(result["code"], "already_matched");
+    assert_eq!(result["game_id"], game.as_str());
+    services.stop().await;
+}
+
+#[test]
+fn matchmaking_openapi_covers_all_owner_scoped_routes() {
+    let spec = serde_json::to_value(realtime_gateway::openapi()).unwrap();
+    assert!(spec["paths"]["/matchmaking/me"]["get"].is_object());
+    for method in ["get", "put", "delete"] {
+        assert!(spec["paths"]["/matchmaking/tickets/{ticket_id}"][method].is_object());
+    }
+    assert!(spec["paths"]["/matchmaking/tickets/{ticket_id}/heartbeat"]["post"].is_object());
+    assert_eq!(
+        spec["components"]["securitySchemes"]["session"]["name"],
+        "__Host-user_session"
+    );
+    assert_eq!(
+        spec["components"]["securitySchemes"]["development_session"]["name"],
+        "user_session"
+    );
+    assert_eq!(
+        spec["security"],
+        json!([{"session":[]},{"development_session":[]}])
+    );
+}
+
+#[tokio::test]
+async fn matchmaking_checks_cookie_origin_and_input_before_admission() {
+    let services = Services::start().await;
+    let http = reqwest::Client::new();
+    let endpoint = format!(
+        "{}/matchmaking/tickets/{}",
+        services.origin,
+        uuid::Uuid::new_v4()
+    );
+    for request in [
+        http.put(&endpoint)
+            .header("cookie", services.viewer.cookie())
+            .json(&json!({"pool":"ten_minute_30"})),
+        http.delete(&endpoint)
+            .header("cookie", services.viewer.cookie()),
+        http.post(format!("{endpoint}/heartbeat"))
+            .header("cookie", services.viewer.cookie())
+            .json(&json!({"sequence":1})),
+    ] {
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    assert_eq!(
+        http.get(&endpoint)
+            .header(
+                "cookie",
+                format!("{}; {}", services.viewer.cookie(), services.viewer.cookie())
+            )
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    for body in [
+        json!({"pool":"unknown"}),
+        json!({"pool":"ten_minute_30","user_id":services.black.id}),
+    ] {
+        assert_eq!(
+            http.put(&endpoint)
+                .header("cookie", services.viewer.cookie())
+                .header("origin", &services.origin)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        http.get(&endpoint)
+            .header("cookie", services.viewer.cookie())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+    let current = http
+        .get(format!("{}/matchmaking/me", services.origin))
+        .header("cookie", services.viewer.cookie())
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(current, json!({"state":"idle","ticket":null}));
     services.stop().await;
 }

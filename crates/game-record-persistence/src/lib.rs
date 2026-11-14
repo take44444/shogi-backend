@@ -47,7 +47,7 @@ pub struct PostgresGameRecords {
     pool: PgPool,
 }
 impl PostgresGameRecords {
-    /// Connects to an existing schema-v6 database without initializing or mutating it.
+    /// Connects to an existing schema-v7 database without initializing or mutating it.
     /// Use a SELECT-only database role to enforce permissions independently of this adapter.
     /// Each connection uses read-only transactions and a two-second statement timeout.
     ///
@@ -105,7 +105,7 @@ async fn validate_schema(connection: &mut PoolConnection<Postgres>) -> Result<()
         .map_err(|_| Error::Corrupt)?;
     if rows.len() != 1
         || rows[0].try_get::<i64, _>("id").map_err(corrupt)? != 0
-        || rows[0].try_get::<i64, _>("version").map_err(corrupt)? != 6
+        || rows[0].try_get::<i64, _>("version").map_err(corrupt)? != 7
     {
         return Err(Error::Corrupt);
     }
@@ -462,7 +462,7 @@ mod tests {
     async fn initialize(url: &str) {
         let pool = PgPool::connect(url).await.unwrap();
         sqlx::raw_sql(include_str!(
-            "../../game-persistence/tests/fixtures/schema-v6.sql"
+            "../../game-persistence/tests/fixtures/schema-v7.sql"
         ))
         .execute(&pool)
         .await

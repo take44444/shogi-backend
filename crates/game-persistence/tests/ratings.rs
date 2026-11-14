@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use game_application::matchmaking::{MatchmakingRepository, RefusalReason, TicketId, TicketState};
 use game_application::rating::{
     ApplyOutcome, ClaimedRatingJob, JobFailure, Pool, RatingChange, RatingJobRepository,
     RatingState, RatingWorker, RatingWorkerError, RecoveryOutcome, TickOutcome, WorkerId,
@@ -43,10 +44,14 @@ impl Fixture {
         }
     }
     async fn create(&self, id: &str, pool: Pool) {
-        self.store
-            .create_rated_game(game(id), players("black", "white"), pool)
-            .await
-            .unwrap();
+        pg_test_support::seed_rated(
+            self.database.url(),
+            &game(id),
+            &players("black", "white"),
+            pool,
+        )
+        .await
+        .unwrap();
     }
     async fn finish(&self, id: &str) {
         GameService::new(self.store.clone())
@@ -105,55 +110,30 @@ fn change(claim: &ClaimedRatingJob) -> RatingChange {
 }
 
 #[tokio::test]
-async fn concurrent_admission_serializes_both_users_but_pools_are_independent() {
+async fn participation_is_global_and_refused_retries_remain_refused() {
     let f = Fixture::new().await;
-    let gate = Arc::new(tokio::sync::Barrier::new(3));
-    let mut tasks = Vec::new();
-    for (id, white) in [("first", "white"), ("second", "other")] {
-        let store = f.store.clone();
-        let gate = gate.clone();
-        tasks.push(tokio::spawn(async move {
-            gate.wait().await;
-            store
-                .create_rated_game(game(id), players("black", white), Pool::TenMinute30)
-                .await
-        }));
-    }
-    gate.wait().await;
-    let mut outcomes = Vec::new();
-    for task in tasks {
-        outcomes.push(task.await.unwrap())
-    }
-    assert_eq!(outcomes.iter().filter(|r| r.is_ok()).count(), 1);
-    assert_eq!(
-        outcomes
-            .iter()
-            .filter(|r| **r == Err(ApplicationError::RatingPoolBusy))
-            .count(),
-        1
-    );
-    assert_eq!(f.count("games").await, 1);
-    assert_eq!(f.count("rating_slots").await, 2);
-    assert_eq!(f.count("rating_states").await, 2);
-    f.create("other-pool", Pool::Byoyomi30).await;
-    let identity = f
-        .store
-        .rated_game(&game("other-pool"))
+    let first = TicketId::new();
+    f.store
+        .join(user("black"), first, Pool::TenMinute30)
         .await
-        .unwrap()
         .unwrap();
-    assert_eq!(identity.black_start, RatingState::Unrated);
-    assert_eq!(identity.pool, Pool::Byoyomi30);
-    assert_eq!(f.count("rating_slots").await, 4);
+    let second = TicketId::new();
+    let refused = f
+        .store
+        .join(user("black"), second, Pool::Byoyomi30)
+        .await
+        .unwrap();
+    assert_eq!(
+        refused.ticket.state,
+        TicketState::Refused(RefusalReason::AlreadyWaiting)
+    );
+    f.store.cancel(&user("black"), first).await.unwrap();
     assert_eq!(
         f.store
-            .create_rated_game(
-                game("other-pool"),
-                players("black", "white"),
-                Pool::Byoyomi30
-            )
-            .await,
-        Err(ApplicationError::AlreadyExists)
+            .join(user("black"), second, Pool::Byoyomi30)
+            .await
+            .unwrap(),
+        refused
     );
 }
 
@@ -188,13 +168,17 @@ async fn terminal_receipt_outbox_and_rating_job_commit_or_rollback_together() {
     for table in ["journal", "outbox_events", "rating_jobs"] {
         assert_eq!(f.count(table).await, 1)
     }
-    games
-        .create(game("casual"), players("black", "white"))
+    pg_test_support::GameFixture::new(f.store.clone(), f.database.url())
+        .seed(game("casual"), players("black", "white"))
         .await
         .unwrap();
     f.finish("casual").await;
     assert_eq!(f.count("rating_jobs").await, 1);
-    assert!(f.store.rated_game(&game("casual")).await.unwrap().is_none());
+    assert!(
+        pg_test_support::rated_identity(f.database.url(), &game("casual"))
+            .await
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -210,7 +194,9 @@ async fn completed_replay_is_read_only_and_never_releases_the_next_games_slots()
         ApplyOutcome::Applied
     );
     f.create("two", Pool::TenMinute30).await;
-    let next = f.store.rated_game(&game("two")).await.unwrap().unwrap();
+    let next = pg_test_support::rated_identity(f.database.url(), &game("two"))
+        .await
+        .unwrap();
     assert_eq!(next.black_start.rating(), Some(1516));
     assert_eq!(next.white_start.rating(), Some(1484));
     assert_eq!(
@@ -240,13 +226,13 @@ async fn completed_replay_is_read_only_and_never_releases_the_next_games_slots()
         RatingState::Unrated
     );
     assert_eq!(
-        f.store
-            .create_rated_game(
-                game("blocked"),
-                players("black", "third"),
-                Pool::TenMinute30
-            )
-            .await,
+        pg_test_support::seed_rated(
+            f.database.url(),
+            &game("blocked"),
+            &players("black", "third"),
+            Pool::TenMinute30
+        )
+        .await,
         Err(ApplicationError::RatingPoolBusy)
     );
 }
@@ -504,6 +490,7 @@ async fn actual_reader_role_can_read_only_the_public_rating_table() {
         "rating_slots",
         "rating_jobs",
         "rating_applications",
+        "matchmaking_tickets",
     ] {
         let error = connection
             .query_all_raw(Statement::from_string(
@@ -531,8 +518,8 @@ async fn actual_reader_role_can_read_only_the_public_rating_table() {
 async fn both_pools_update_independently_from_their_frozen_start_states() {
     let f = Fixture::new().await;
     f.create("main-time", Pool::TenMinute30).await;
-    f.create("byoyomi", Pool::Byoyomi30).await;
     f.finish("main-time").await;
+    f.create("byoyomi", Pool::Byoyomi30).await;
     GameService::new(f.store.clone())
         .resign(
             &game("byoyomi"),
@@ -724,17 +711,29 @@ async fn admission_waits_for_application_and_freezes_the_new_committed_states() 
     let store = f.store.clone();
     let admission = tokio::spawn(async move {
         store
-            .create_rated_game(game("next"), players("black", "white"), Pool::TenMinute30)
+            .join(user("black"), TicketId::new(), Pool::TenMinute30)
             .await
     });
     wait_for_blocked_transactions(&f, 2).await;
     held.commit().await.unwrap();
     assert_eq!(applying.await.unwrap().unwrap(), ApplyOutcome::Applied);
-    admission.await.unwrap().unwrap();
-    let identity = f.store.rated_game(&game("next")).await.unwrap().unwrap();
-    assert_eq!(identity.black_start.rating(), Some(1516));
-    assert_eq!(identity.white_start.rating(), Some(1484));
-    assert_eq!(identity.black_start.completed(), 1);
-    assert_eq!(identity.white_start.completed(), 1);
+    assert!(admission.await.unwrap().unwrap().created);
+    f.store
+        .join(user("white"), TicketId::new(), Pool::TenMinute30)
+        .await
+        .unwrap();
+    let next = f.store.tick(Pool::TenMinute30).await.unwrap().unwrap();
+    let identity = pg_test_support::rated_identity(f.database.url(), &next)
+        .await
+        .unwrap();
+    let (black, white) = if identity.participants.black() == &user("black") {
+        (identity.black_start, identity.white_start)
+    } else {
+        (identity.white_start, identity.black_start)
+    };
+    assert_eq!(black.rating(), Some(1516));
+    assert_eq!(white.rating(), Some(1484));
+    assert_eq!(black.completed(), 1);
+    assert_eq!(white.completed(), 1);
     assert_eq!(f.count("rating_slots").await, 2);
 }

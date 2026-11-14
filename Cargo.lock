@@ -926,6 +926,7 @@ dependencies = [
  "shogi-domain",
  "tokio",
  "user-id",
+ "uuid",
 ]
 
 [[package]]
@@ -1015,6 +1016,8 @@ dependencies = [
  "game-application",
  "game-grpc",
  "game-persistence",
+ "pg-test-support",
+ "sea-orm",
  "tokio",
  "tonic",
 ]
@@ -1895,6 +1898,7 @@ dependencies = [
 name = "pg-test-support"
 version = "0.1.0"
 dependencies = [
+ "game-application",
  "sqlx",
  "tokio",
  "url",
@@ -2426,6 +2430,7 @@ dependencies = [
  "user-application",
  "user-http",
  "user-persistence",
+ "utoipa",
  "uuid",
 ]
 

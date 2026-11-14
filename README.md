@@ -32,10 +32,10 @@ terminal, run the example client.
 cargo run --locked -p game-grpc --example play
 ```
 
-The client creates a game, plays `7g7f 3c3d 8h2b+ 3a2b B*4e`, and resigns White.
+The client joins two tickets, waits for a match, plays `7g7f 3c3d 8h2b+ 3a2b B*4e`, and resigns White.
 It checks capture, promotion, drops, snapshots, and exact retries. The final line
-reports `black wins at sequence 6`. Each run generates a new game ID unless you
-supply one.
+reports `black wins at sequence 6`. The server generates the game ID and sides. An optional argument selects a fresh
+user prefix.
 
 The server defaults to `127.0.0.1:50051` and
 `DATABASE_URL=postgres://shogi:shogi@localhost:5432/shogi`. A positional address
@@ -46,7 +46,7 @@ DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' cargo run --locked -p
 cargo run --locked -p game-grpc --example play -- http://127.0.0.1:50052 my-game
 ```
 
-Startup initializes or validates schema version 6 before listening. The database
+Startup initializes or validates schema version 7 before listening. The database
 and role must already exist. Schema validation requires database `CREATE`
 permission even on subsequent startups. See the
 [storage reference](crates/game-persistence/README.md#schema-startup) for required
@@ -65,7 +65,7 @@ expressed in microseconds, and use the ID of a completed game.
 
 ```sh
 curl 'http://127.0.0.1:8081/game-records?from=1793577600000000&to=1793664000000000&limit=30'
-curl 'http://127.0.0.1:8081/game-records/my-game'
+curl 'http://127.0.0.1:8081/game-records/COMMITTED_GAME_UUID'
 ```
 
 The service uses separate SELECT-only credentials and needs no user service.
@@ -103,7 +103,7 @@ credentials before logging in. The gateway receives no database URL.
 
 ## Prove persistence across container recreation
 
-Start Compose as described above. Use a fresh game ID and proof directory.
+Start Compose as described above. Use a fresh user prefix and proof directory.
 Before each client invocation, wait for
 `game-server listening on 0.0.0.0:50051` in `docker compose logs game-server`.
 These commands assume the default gRPC port.
@@ -240,16 +240,29 @@ work, and future plans. Crate references describe the
 [storage](crates/game-persistence/README.md), and
 [gRPC API](crates/game-grpc/README.md).
 
-## Rated games
+## Matchmaking and rated games
 
-`CreateGame` remains casual. Trusted game callers use `CreateRatedGame` with
-`TEN_MINUTE_30` for 600 seconds plus 30-second byoyomi, or `BYOYOMI_30` for zero
-main time plus 30-second byoyomi. These choices do not run clocks.
+Authenticated browsers join through `PUT /matchmaking/tickets/{uuid}` with
+`{"pool":"ten_minute_30"}` or `{"pool":"byoyomi_30"}`. The gateway authenticates
+the session cookie and requires the configured Origin and Host for mutations.
+`GET /matchmaking/me` recovers an active ticket after reload. The server chooses
+a nearby opponent and random sides, then returns the game ID for the existing
+WebSocket endpoint. Send a strictly increasing heartbeat sequence every ten
+seconds while waiting. Waiting expires after thirty seconds without a new
+sequence. Neither time control runs clocks or adjudicates timeouts.
+
+The existing game server tries both pools every second. A user has one waiting
+or playing ticket across both pools. Terminal completion frees that global
+participation atomically. Same-pool joins wait for rating application; another
+pool can accept the user immediately. Ticket IDs and refusals survive restarts.
+See [the browser API](apps/realtime-gateway/README.md#matchmaking-http-contract)
+and [the transaction contract](docs/design/matchmaking.md).
 
 The rating worker starts with the default Compose services. The public player
-server returns the latest committed values at `GET /users/{user_id}/ratings`.
-See [rating behavior](docs/design/ratings.md) and [running the rating worker](apps/rating-worker-server/README.md).
+server returns committed values at `GET /users/{user_id}/ratings`.
+See [rating behavior](docs/design/ratings.md) and
+[running the rating worker](apps/rating-worker-server/README.md).
 
-Schema version 6 supports fresh databases only. Startup rejects previous schemas
+Schema version 7 supports fresh databases only. Startup rejects previous schemas
 without migration or data deletion. Keep any existing database and provision a
 separate empty database for this version.

@@ -37,7 +37,7 @@ DEPENDENCIES = {
     "rating-domain": {"shogi-domain"},
     "rating-worker-server": {"game-application", "game-persistence", "tokio"},
     "user-application": {"user-id", "async-trait", "thiserror"},
-    "game-application": {"user-id", "rating-domain", "shogi-domain", "tokio", "async-trait"},
+    "game-application": {"uuid", "user-id", "rating-domain", "shogi-domain", "tokio", "async-trait"},
     "game-record-application": {
         "user-id", "rating-domain", "shogi-domain", "async-trait", "base64", "serde_json", "sha2",
     },
@@ -68,7 +68,7 @@ DEPENDENCIES = {
     },
     "realtime-gateway": {
         "axum", "futures-util", "game-application", "game-grpc", "game-messaging",
-        "shogi-domain", "reqwest", "serde", "serde_json", "tokio", "tonic", "url",
+        "shogi-domain", "reqwest", "serde", "serde_json", "tokio", "tonic", "url", "utoipa",
     },
     "user-server": {"user-application", "user-persistence", "user-http", "tokio", "axum"},
     "game-server": {"game-application", "game-persistence", "game-grpc", "tokio", "tonic"},
@@ -77,7 +77,7 @@ DEPENDENCIES = {
     },
     "outbox-publisher": {"game-application", "game-persistence", "game-messaging", "tokio"},
     "realtime-gateway-server": {"realtime-gateway", "tokio", "axum"},
-    "pg-test-support": {"sqlx", "tokio", "uuid", "url"},
+    "pg-test-support": {"game-application", "sqlx", "tokio", "uuid", "url"},
 }
 
 PUBLIC_READERS = {

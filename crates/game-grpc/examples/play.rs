@@ -1,3 +1,4 @@
+mod support;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 
 #[tokio::main]
@@ -18,14 +19,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = GameServiceClient::connect(endpoint).await?;
     let black = format!("{game_id}-black");
     let white = format!("{game_id}-white");
-    let mut snapshot = client
-        .create_game(proto::CreateGameRequest {
-            game_id: game_id.clone(),
-            black_user_id: black.clone(),
-            white_user_id: white.clone(),
-        })
-        .await?
-        .into_inner();
+    let mut snapshot = support::pair(&mut client, [&black, &white]).await?;
+    let game_id = snapshot.game_id.clone();
+    let black = snapshot.black_user_id.clone();
+    let white = snapshot.white_user_id.clone();
     println!("created {} at sequence {}", snapshot.game_id, snapshot.seq);
     assert_eq!(snapshot.seq, 0);
     assert_eq!(snapshot.board.len(), 40);

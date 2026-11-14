@@ -12,10 +12,61 @@ use tonic::{
     transport::{Channel, Server},
 };
 
-type Client = GameServiceClient<Channel>;
+struct Client {
+    inner: GameServiceClient<Channel>,
+    url: String,
+}
+impl std::ops::Deref for Client {
+    type Target = GameServiceClient<Channel>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+impl std::ops::DerefMut for Client {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+struct SeedGame {
+    game_id: String,
+    black_user_id: String,
+    white_user_id: String,
+}
+impl Client {
+    async fn seed_game(
+        &mut self,
+        request: SeedGame,
+    ) -> Result<tonic::Response<proto::Snapshot>, tonic::Status> {
+        let id = game_application::GameId::new(request.game_id)
+            .map_err(|_| tonic::Status::invalid_argument("id"))?;
+        let players = game_application::Participants::new(
+            game_application::UserId::new(request.black_user_id)
+                .map_err(|_| tonic::Status::invalid_argument("user"))?,
+            game_application::UserId::new(request.white_user_id)
+                .map_err(|_| tonic::Status::invalid_argument("user"))?,
+        )
+        .map_err(|_| tonic::Status::invalid_argument("players"))?;
+        pg_test_support::seed_game(&self.url, &id, &players)
+            .await
+            .map_err(|e| {
+                if e == game_application::ApplicationError::AlreadyExists {
+                    tonic::Status::already_exists("fixture")
+                } else {
+                    tonic::Status::unavailable("fixture")
+                }
+            })?;
+        self.inner
+            .get_snapshot(proto::GetSnapshotRequest {
+                game_id: id.as_str().into(),
+            })
+            .await
+    }
+}
 
 struct TestServer {
     endpoint: String,
+    url: String,
+    store: Arc<SeaOrmStore>,
     _database: Option<pg_test_support::TestDatabase>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<Result<(), tonic::transport::Error>>>,
@@ -25,25 +76,28 @@ impl TestServer {
     async fn start() -> Self {
         let database = pg_test_support::TestDatabase::new().await;
         let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
-        let games = GameService::new(store);
-        let mut server = Self::start_service(games).await;
+        let games = GameService::new(store.clone());
+        let mut server = Self::start_service(games, store, database.url()).await;
         server._database = Some(database);
         server
     }
 
-    async fn start_service(games: GameService) -> Self {
+    async fn start_service(games: GameService, store: Arc<SeaOrmStore>, url: &str) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (stop, stopped) = oneshot::channel();
+        let rpc = GameRpc::new(games, store.clone());
         let task = tokio::spawn(
             Server::builder()
-                .add_service(GameServiceServer::new(GameRpc::new(games)))
+                .add_service(GameServiceServer::new(rpc))
                 .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
                     let _ = stopped.await;
                 }),
         );
         Self {
             endpoint,
+            store,
+            url: url.into(),
             _database: None,
             stop: Some(stop),
             task: Some(task),
@@ -51,7 +105,12 @@ impl TestServer {
     }
 
     async fn client(&self) -> Client {
-        Client::connect(self.endpoint.clone()).await.unwrap()
+        Client {
+            inner: GameServiceClient::connect(self.endpoint.clone())
+                .await
+                .unwrap(),
+            url: self.url.clone(),
+        }
     }
 
     async fn shutdown(mut self) {
@@ -106,7 +165,7 @@ fn resign(game: &str, request: &str, seq: u64, player: proto::Player) -> proto::
 }
 async fn create(client: &mut Client, game: &str) -> proto::Snapshot {
     client
-        .create_game(proto::CreateGameRequest {
+        .seed_game(SeedGame {
             game_id: game.into(),
             black_user_id: "black".into(),
             white_user_id: "white".into(),
@@ -235,18 +294,6 @@ async fn malformed_wire_values_are_invalid_arguments_without_changes() {
     for id in ["".to_owned(), "white space".into(), "x".repeat(129)] {
         assert_eq!(
             client
-                .create_game(proto::CreateGameRequest {
-                    game_id: id.clone(),
-                    black_user_id: "black".into(),
-                    white_user_id: "white".into()
-                })
-                .await
-                .unwrap_err()
-                .code(),
-            Code::InvalidArgument
-        );
-        assert_eq!(
-            client
                 .get_snapshot(proto::GetSnapshotRequest { game_id: id })
                 .await
                 .unwrap_err()
@@ -338,7 +385,7 @@ async fn statuses_sequence_metadata_and_rejected_request_correction() {
     let initial = create(&mut client, "errors").await;
     assert_eq!(
         client
-            .create_game(proto::CreateGameRequest {
+            .seed_game(SeedGame {
                 game_id: "errors".into(),
                 black_user_id: "black".into(),
                 white_user_id: "white".into()
@@ -471,7 +518,15 @@ async fn independent_tcp_clients_serialize_competing_commands_and_retry_identica
     let (left, right) = tokio::join!(first.make_move(retry.clone()), second.make_move(retry));
     assert_eq!(left.unwrap().into_inner(), right.unwrap().into_inner());
     assert_eq!(snapshot(&mut first, "concurrent").await.seq, 2);
-    let other = create(&mut second, "other").await;
+    let other = second
+        .seed_game(SeedGame {
+            game_id: "other".into(),
+            black_user_id: "other-black".into(),
+            white_user_id: "other-white".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
     assert_eq!(other.seq, 0);
     assert_eq!(other.board.len(), 40);
     drop(first);
@@ -483,25 +538,8 @@ async fn independent_tcp_clients_serialize_competing_commands_and_retry_identica
 async fn id_bindings_and_permission_statuses_are_enforced_at_the_wire() {
     let server = TestServer::start().await;
     let mut client = server.client().await;
-    for (white, expected) in [
-        ("black", Code::InvalidArgument),
-        ("", Code::InvalidArgument),
-    ] {
-        assert_eq!(
-            client
-                .create_game(proto::CreateGameRequest {
-                    game_id: "binding".into(),
-                    black_user_id: "black".into(),
-                    white_user_id: white.into(),
-                })
-                .await
-                .unwrap_err()
-                .code(),
-            expected
-        );
-    }
     let independent = client
-        .create_game(proto::CreateGameRequest {
+        .seed_game(SeedGame {
             game_id: "independent".into(),
             black_user_id: "new-black".into(),
             white_user_id: "new-white".into(),
@@ -537,7 +575,8 @@ async fn generated_tcp_client_restores_database_across_two_server_restarts() {
     let database = pg_test_support::TestDatabase::new().await;
     let url = database.url().to_string();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(GameService::new(store.clone())).await;
+    let server =
+        TestServer::start_service(GameService::new(store.clone()), store.clone(), &url).await;
     let mut client = server.client().await;
     create(&mut client, "restart").await;
     let first = command("restart", "first", 0, proto::Player::Black, "7g7f");
@@ -547,7 +586,8 @@ async fn generated_tcp_client_restores_database_across_two_server_restarts() {
     server.shutdown().await;
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(GameService::new(store.clone())).await;
+    let server =
+        TestServer::start_service(GameService::new(store.clone()), store.clone(), &url).await;
     let mut client = server.client().await;
     assert_eq!(snapshot(&mut client, "restart").await, ongoing);
     assert_eq!(
@@ -565,7 +605,7 @@ async fn generated_tcp_client_restores_database_across_two_server_restarts() {
     server.shutdown().await;
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let server = TestServer::start_service(GameService::new(store)).await;
+    let server = TestServer::start_service(GameService::new(store.clone()), store, &url).await;
     let mut client = server.client().await;
     assert_eq!(snapshot(&mut client, "restart").await, finished);
     assert_eq!(
@@ -578,84 +618,104 @@ async fn generated_tcp_client_restores_database_across_two_server_restarts() {
 }
 
 #[tokio::test]
-async fn rated_rpc_requires_a_pool_preserves_casual_creation_and_exposes_durable_identity() {
+async fn matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results() {
     let server = TestServer::start().await;
     let mut client = server.client().await;
-    let request = |id: &str, pool: i32| proto::CreateRatedGameRequest {
-        game_id: id.into(),
-        black_user_id: "black".into(),
-        white_user_id: "white".into(),
-        pool,
+    let id = game_application::matchmaking::TicketId::new().to_string();
+    let request = proto::JoinMatchmakingRequest {
+        user_id: "one".into(),
+        ticket_id: id.clone(),
+        pool: proto::RatingPool::TenMinute30 as i32,
     };
     for pool in [0, 99] {
+        let mut invalid = request.clone();
+        invalid.pool = pool;
+        assert_eq!(
+            client.join_matchmaking(invalid).await.unwrap_err().code(),
+            Code::InvalidArgument
+        );
+    }
+    let accepted = client
+        .join_matchmaking(request.clone())
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(accepted.created);
+    let retry = client
+        .join_matchmaking(request.clone())
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!retry.created);
+    assert_eq!(retry.ticket, accepted.ticket);
+    let lookup = proto::MatchmakingRequest {
+        user_id: "one".into(),
+        ticket_id: id.clone(),
+    };
+    for sequence in [0, -1] {
         assert_eq!(
             client
-                .create_rated_game(request("invalid", pool))
+                .heartbeat_matchmaking(proto::HeartbeatMatchmakingRequest {
+                    user_id: "one".into(),
+                    ticket_id: id.clone(),
+                    sequence
+                })
                 .await
                 .unwrap_err()
                 .code(),
             Code::InvalidArgument
         );
     }
-    client
-        .create_rated_game(request("rated", proto::RatingPool::TenMinute30 as i32))
-        .await
-        .unwrap();
-    let identity = client
-        .get_rated_game(proto::GetSnapshotRequest {
-            game_id: "rated".into(),
-        })
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(identity.game_id, "rated");
-    assert_eq!(identity.black_user_id, "black");
-    assert_eq!(identity.white_user_id, "white");
-    assert_eq!(identity.pool, proto::RatingPool::TenMinute30 as i32);
-    assert_eq!(
-        identity.black_start.unwrap(),
-        proto::RatingStart {
-            rating: None,
-            completed_rated_games: 0
-        }
-    );
-    assert_eq!(
-        identity.white_start.unwrap(),
-        proto::RatingStart {
-            rating: None,
-            completed_rated_games: 0
-        }
-    );
     assert_eq!(
         client
-            .create_rated_game(request("overlap", proto::RatingPool::TenMinute30 as i32))
-            .await
-            .unwrap_err()
-            .code(),
-        Code::FailedPrecondition
-    );
-    assert_eq!(
-        client
-            .create_rated_game(request("rated", proto::RatingPool::TenMinute30 as i32))
-            .await
-            .unwrap_err()
-            .code(),
-        Code::AlreadyExists
-    );
-    client
-        .create_rated_game(request("other-pool", proto::RatingPool::Byoyomi30 as i32))
-        .await
-        .unwrap();
-    create(&mut client, "casual").await;
-    assert_eq!(
-        client
-            .get_rated_game(proto::GetSnapshotRequest {
-                game_id: "casual".into()
+            .get_matchmaking_ticket(proto::MatchmakingRequest {
+                user_id: "other".into(),
+                ticket_id: id.clone()
             })
             .await
             .unwrap_err()
             .code(),
         Code::NotFound
+    );
+    let other = game_application::matchmaking::TicketId::new().to_string();
+    client
+        .join_matchmaking(proto::JoinMatchmakingRequest {
+            user_id: "two".into(),
+            ticket_id: other,
+            pool: request.pool,
+        })
+        .await
+        .unwrap();
+    let game = game_application::matchmaking::MatchmakingRepository::tick(
+        server.store.as_ref(),
+        game_application::rating::Pool::TenMinute30,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let ticket = client
+        .get_matchmaking_ticket(lookup.clone())
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(ticket.state, "playing");
+    assert_eq!(ticket.game_id.as_deref(), Some(game.as_str()));
+    assert_eq!(
+        client
+            .join_matchmaking(request)
+            .await
+            .unwrap()
+            .into_inner()
+            .ticket,
+        Some(ticket.clone())
+    );
+    assert_eq!(
+        client
+            .cancel_matchmaking(lookup)
+            .await
+            .unwrap()
+            .into_inner(),
+        ticket
     );
     server.shutdown().await;
 }

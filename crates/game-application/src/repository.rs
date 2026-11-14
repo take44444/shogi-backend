@@ -145,19 +145,6 @@ pub struct GameRecord {
 /// ```
 #[async_trait]
 pub trait GameRepository: Send + Sync {
-    /// Atomically creates the game, frozen starts and both participation slots.
-    async fn create_rated_game(
-        &self,
-        id: GameId,
-        participants: Participants,
-        pool: crate::rating::Pool,
-    ) -> Result<(), ApplicationError>;
-    /// Reads durable rated identity for reconciliation. Casual games return None.
-    async fn rated_game(
-        &self,
-        id: &GameId,
-    ) -> Result<Option<crate::rating::RatedGame>, ApplicationError>;
-
     /// Loads visibility, participants and history from one coherent database view.
     /// Implementations should hide inaccessible and absent games equally.
     async fn load_game_for_viewer(
@@ -172,18 +159,6 @@ pub trait GameRepository: Send + Sync {
         id: &GameId,
         viewer: &UserId,
     ) -> Result<ViewMetadata, ApplicationError>;
-    /// Atomically creates version-zero metadata with two distinct user IDs.
-    /// Participant bindings cannot subsequently change.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate game, or
-    /// [`ApplicationError::Unavailable`] for a storage failure.
-    async fn create_game(
-        &self,
-        id: GameId,
-        participants: Participants,
-    ) -> Result<(), ApplicationError>;
     /// Loads metadata and the complete journal from one coherent database view.
     /// The application checks binding, legality, request uniqueness, every receipt,
     /// and final metadata during restoration.

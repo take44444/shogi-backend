@@ -9,7 +9,10 @@
 
 Realtime Gateway は認証済み WebSocket で着手・投了・更新受信を扱い、公開対局のログイン済み観戦者を許可する。
 Cookie のセッションを User Service の `/me` で確認し、認証済み UserId で内部 Game API を呼ぶ。
-Shard、Lease・Fencing、Game Router、定期的な進行中の局面照合、匿名観戦、Presence・マッチングは未実装である。
+Shard、Lease・Fencing、Game Router、定期的な進行中の局面照合、匿名観戦、Presenceは未実装である。
+
+マッチメイキングは既存writer内の定期処理で実装した。状態回復、全ルール共通の同時参加制限、保存済みレートによる選択を扱う。
+待機件数が多い場合の検索コスト、共通ロックの競合、終端チケット履歴の容量は未検証である。
 
 ## ユーザー管理
 

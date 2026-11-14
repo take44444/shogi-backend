@@ -15,6 +15,10 @@ CASES = {
     "distinct_counts": "E0308",
     "no_writer": "E0432",
     "no_accounts": "E0599",
+    "no_direct_admission": "E0599",
+    "no_service_rated_admission": "E0599",
+    "no_repository_admission": "E0599",
+    "no_repository_rated_admission": "E0599",
     "frozen_events": "E0616",
 }
 

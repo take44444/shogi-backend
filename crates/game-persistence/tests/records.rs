@@ -1,6 +1,5 @@
 use game_application::{
-    GameId as WriteId, GameRepository, GameService, MakeMove, Participants, RequestId, Resign,
-    UserId,
+    GameId as WriteId, GameRepository, MakeMove, Participants, RequestId, Resign, UserId,
 };
 use game_persistence::SeaOrmStore;
 use game_record_application::{
@@ -16,7 +15,7 @@ use std::sync::Arc;
 struct Fixture {
     _database: pg_test_support::TestDatabase,
     reader_url: String,
-    games: GameService,
+    games: pg_test_support::GameFixture,
     raw: DatabaseConnection,
 }
 impl Fixture {
@@ -24,7 +23,7 @@ impl Fixture {
         let database = pg_test_support::TestDatabase::new().await;
         let url = database.url().to_string();
         let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-        let games = GameService::new(store);
+        let games = pg_test_support::GameFixture::new(store, database.url());
         let raw = Database::connect(&url).await.unwrap();
         Self {
             reader_url: database.reader_url().await,
@@ -44,7 +43,7 @@ impl Fixture {
     ) {
         let id = WriteId::new(id).unwrap();
         self.games
-            .create(
+            .seed(
                 id.clone(),
                 Participants::new(UserId::new(black).unwrap(), UserId::new(white).unwrap())
                     .unwrap(),
@@ -124,9 +123,13 @@ async fn public_completed_metadata_only_filters_and_stable_keysets() {
         .await
         .unwrap();
     f.games
-        .create(
+        .seed(
             WriteId::new("ongoing").unwrap(),
-            Participants::new(UserId::new("alice").unwrap(), UserId::new("bob").unwrap()).unwrap(),
+            Participants::new(
+                UserId::new("ongoing-black").unwrap(),
+                UserId::new("ongoing-white").unwrap(),
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -308,7 +311,7 @@ async fn writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_ti
         before
     );
     f.games
-        .create(
+        .seed(
             WriteId::new("failed").unwrap(),
             Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
                 .unwrap(),
@@ -445,9 +448,15 @@ async fn reopening_preserves_current_records_history_and_outbox() {
         .await
         .unwrap();
     let db = Database::connect(&url).await.unwrap();
-    db.execute_unprepared("INSERT INTO games VALUES
+    pg_test_support::seed_game(
+        &url,
+        &WriteId::new("current-ongoing").unwrap(),
+        &Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap()).unwrap(),
+    )
+    .await
+    .unwrap();
+    db.execute_unprepared("UPDATE games SET version=1,final_move_ply=1 WHERE id='current-ongoing'; INSERT INTO games VALUES
         ('current-finished','black','white',2,1,2,'standard','public',20,1),
-        ('current-ongoing','black','white',1,NULL,NULL,'standard','public',NULL,1),
         ('current-private','black','white',2,1,2,'standard','private',30,1);
         INSERT INTO journal (game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason)
             SELECT id,1,'move','black',0,1,'7g7f',false,NULL,NULL FROM games;
@@ -486,7 +495,7 @@ async fn reopening_preserves_current_records_history_and_outbox() {
         store.close().await.unwrap();
     }
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    GameService::new(store.clone())
+    pg_test_support::GameFixture::new(store.clone(), database.url())
         .resign(
             &WriteId::new("current-ongoing").unwrap(),
             Resign {
@@ -583,14 +592,14 @@ fn storage_id(value: &str) -> String {
 async fn current_schema_remains_readable_and_writable_with_query_builders() {
     let database = pg_test_support::TestDatabase::new().await;
     let raw = Database::connect(database.url()).await.unwrap();
-    raw.execute_unprepared(include_str!("fixtures/schema-v6.sql"))
+    raw.execute_unprepared(include_str!("fixtures/schema-v7.sql"))
         .await
         .unwrap();
     let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
-    let games = GameService::new(store.clone());
+    let games = pg_test_support::GameFixture::new(store.clone(), database.url());
     let id = WriteId::new("existing-schema").unwrap();
     games
-        .create(
+        .seed(
             id.clone(),
             Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
                 .unwrap(),
@@ -626,7 +635,7 @@ async fn fresh_builder_schema_matches_the_current_schema_fixture() {
     let previous = pg_test_support::TestDatabase::new().await;
     let previous_db = Database::connect(previous.url()).await.unwrap();
     previous_db
-        .execute_unprepared(include_str!("fixtures/schema-v6.sql"))
+        .execute_unprepared(include_str!("fixtures/schema-v7.sql"))
         .await
         .unwrap();
     let current = pg_test_support::TestDatabase::new().await;
@@ -705,7 +714,7 @@ async fn finish_time_is_writer_utc_and_retries_preserve_it() {
     let f = Fixture::new().await;
     let key = WriteId::new("timed").unwrap();
     f.games
-        .create(
+        .seed(
             key.clone(),
             Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
                 .unwrap(),

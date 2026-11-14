@@ -4,13 +4,20 @@
 The application and domain contain no SQL or ORM types. Production composition
 injects `Arc<game_persistence::SeaOrmStore>`. There is no default in-memory store.
 
-## Game creation and snapshots
+## Matchmaking and snapshots
 
-`GameService::create(GameId, Participants::new(black, white)?)` binds two distinct user IDs
-permanently to the game's sides. Equal IDs return `InvalidParticipants`.
-A duplicate game returns `AlreadyExists`. The shared `user-id` crate owns `UserId`.
-The game service trusts caller-supplied IDs and never queries an account database.
-User management and authentication belong to a separate HTTP service.
+`matchmaking::MatchmakingRepository` owns join, current participation, ticket
+lookup, ordered heartbeat, cancellation, and one-pair matching transactions.
+The client supplies an owner-scoped UUID and a pool. The server chooses the
+opponent, game ID, and permanent sides. Every game is rated. A user may wait or
+play in only one pool at a time. Account authentication belongs to the gateway.
+
+Ticket states are `Waiting`, `Playing`, `Finished`, `Cancelled`, `Expired`, and
+`Refused`. Refusals and cancellations received before join are durable retry
+results. Reusing a ticket never creates another participation. Waiting expires
+30 seconds after admission or the last strictly newer heartbeat. The pure
+selection policy uses bilateral rating windows and skips unmatched head tickets.
+See [matchmaking](../../docs/design/matchmaking.md) for the complete contract.
 
 `snapshot` returns the participants, sequence, owned position, legal moves,
 turn, check, and result. An uncached game loads from durable storage.

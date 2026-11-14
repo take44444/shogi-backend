@@ -4,7 +4,7 @@ Start PostgreSQL, the game server and the independent worker with `docker compos
 Add `--profile records` to start the anonymous player HTTP server.
 
 For local binaries, set `DATABASE_URL` to the same Game DB used by `game-server`.
-Run `cargo run -p rating-worker-server`. The worker validates schema version 6
+Run `cargo run -p rating-worker-server`. The worker validates schema version 7
 before polling and stops on Ctrl-C.
 
 The worker uses these environment variables.
@@ -43,9 +43,10 @@ database. Use a new prefix for each run.
 
 ```sh
 cargo run -p game-grpc --example rating_proof -- http://127.0.0.1:50051 rating-demo
-curl http://127.0.0.1:8081/users/rating-demo-black/ratings
+curl http://127.0.0.1:8081/users/rating-demo-one/ratings
 ```
 
-The example creates a rated game and resigns White. Once the worker applies it,
+The example joins two tickets, waits for matchmaking, prints the committed game
+and random side bindings, and resigns White. Once the worker applies it,
 Black has 1516 and White has 1484 in `ten_minute_30`, each with one completed
 rated game. Their other pool remains null with zero games.

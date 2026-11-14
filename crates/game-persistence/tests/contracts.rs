@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use game_application::{
-    Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, GameService,
-    MakeMove, MutationRequest, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
+    Acceptance, Action, ApplicationError as Error, GameId, GameRecord, GameRepository, MakeMove,
+    MutationRequest, Participants, Receipt, RequestId, Resign, StagedGameChange, UserId,
 };
 use game_persistence::SeaOrmStore;
 use pg_test_support::TestDatabase;
@@ -36,10 +36,10 @@ fn resign() -> Resign {
         user_id: user("black"),
     }
 }
-async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService) {
+async fn setup(url: &str) -> (Arc<SeaOrmStore>, pg_test_support::GameFixture) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
-    let service = GameService::new(store.clone());
-    service.create(id(), participants()).await.unwrap();
+    let service = pg_test_support::GameFixture::new(store.clone(), url);
+    service.seed(id(), participants()).await.unwrap();
     (store, service)
 }
 
@@ -60,15 +60,15 @@ async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable()
         let database = TestDatabase::new().await;
         let url = database.url().to_string();
         let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-        let service = GameService::new(store);
+        let service = pg_test_support::GameFixture::new(store, &url);
         assert_eq!(
             Participants::new(user("black"), user("black")),
             Err(Error::InvalidParticipants)
         );
-        let before = service.create(id(), participants()).await.unwrap();
+        let before = service.seed(id(), participants()).await.unwrap();
         assert_eq!(
             service
-                .create(
+                .seed(
                     id(),
                     Participants::new(user("white"), user("black")).unwrap()
                 )
@@ -118,7 +118,7 @@ async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_
     drop(service);
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
-    let service = GameService::new(store.clone());
+    let service = pg_test_support::GameFixture::new(store.clone(), &url);
     assert_eq!(service.snapshot(&id()).await.unwrap(), ongoing);
     assert_eq!(service.make_move(&id(), first.clone()).await, Ok(receipt));
     let finish = service.resign(&id(), resign()).await.unwrap();
@@ -126,7 +126,10 @@ async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_
     let finished = service.snapshot(&id()).await.unwrap();
     drop(service);
     store.close().await.unwrap();
-    let service = GameService::new(Arc::new(SeaOrmStore::connect(&url).await.unwrap()));
+    let service = pg_test_support::GameFixture::new(
+        Arc::new(SeaOrmStore::connect(&url).await.unwrap()),
+        &url,
+    );
     assert_eq!(service.snapshot(&id()).await.unwrap(), finished);
     assert_eq!(service.make_move(&id(), first).await, Ok(receipt));
     assert_eq!(service.resign(&id(), resign()).await, Ok(finish));
@@ -143,7 +146,10 @@ async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
     let database = TestDatabase::new().await;
     let url = database.url().to_string();
     let (store, a) = setup(&url).await;
-    let b = GameService::new(Arc::new(SeaOrmStore::connect(&url).await.unwrap()));
+    let b = pg_test_support::GameFixture::new(
+        Arc::new(SeaOrmStore::connect(&url).await.unwrap()),
+        &url,
+    );
     assert_eq!(b.snapshot(&id()).await.unwrap().seq, 0);
     let game = id();
     let (left, right) = tokio::join!(
@@ -281,7 +287,10 @@ async fn corrupt_history_and_metadata_fail_closed() {
                 .unwrap();
         }
         raw.execute_unprepared(sql).await.unwrap();
-        let restored = GameService::new(Arc::new(SeaOrmStore::connect(&url).await.unwrap()));
+        let restored = pg_test_support::GameFixture::new(
+            Arc::new(SeaOrmStore::connect(&url).await.unwrap()),
+            &url,
+        );
         assert_eq!(restored.snapshot(&id()).await, Err(Error::Corrupt), "{sql}");
     }
 }
@@ -293,21 +302,6 @@ struct FaultStore {
 }
 #[async_trait]
 impl GameRepository for FaultStore {
-    async fn create_rated_game(
-        &self,
-        id: GameId,
-        participants: Participants,
-        pool: game_application::rating::Pool,
-    ) -> Result<(), Error> {
-        self.inner.create_rated_game(id, participants, pool).await
-    }
-    async fn rated_game(
-        &self,
-        id: &GameId,
-    ) -> Result<Option<game_application::rating::RatedGame>, Error> {
-        self.inner.rated_game(id).await
-    }
-
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -322,9 +316,7 @@ impl GameRepository for FaultStore {
     ) -> Result<game_application::ViewMetadata, Error> {
         self.inner.view_metadata(id, viewer).await
     }
-    async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
-        self.inner.create_game(id, participants).await
-    }
+
     async fn load_game(&self, id: &GameId) -> Result<GameRecord, Error> {
         if self.unreadable.load(Ordering::SeqCst) {
             Err(Error::Unavailable)
@@ -378,7 +370,7 @@ async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery()
             mode: AtomicU8::new(mode),
             unreadable: AtomicBool::new(false),
         });
-        let service = GameService::new(fault.clone());
+        let service = pg_test_support::GameFixture::new(fault.clone(), database.url());
         let command = movement("request", 0, "black", "7g7f");
         let response = service.make_move(&id(), command.clone()).await;
         match mode {
@@ -571,7 +563,7 @@ async fn joined_history_load_remains_coherent_during_concurrent_commits() {
                 .last()
                 .and_then(|receipt| receipt.acceptance.result)
         );
-        let service = GameService::new(reader.clone());
+        let service = pg_test_support::GameFixture::new(reader.clone(), &url);
         service.snapshot(&id()).await.unwrap();
     }
     writing.await.unwrap();
@@ -632,7 +624,7 @@ async fn failed_bootstrap_rolls_back_the_entire_schema() {
         .unwrap();
     assert_eq!(
         integer_query(&raw, "SELECT version AS value FROM schema_version").await,
-        6
+        7
     );
 }
 
@@ -729,16 +721,20 @@ async fn unrelated_tables_require_a_current_application_schema() {
 async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
     let database = TestDatabase::new().await;
     let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
-    let games = GameService::new(store.clone());
+    let games = pg_test_support::GameFixture::new(store.clone(), database.url());
     let black = user("black\0\\name");
     let white = user("white\\0name");
     let game = GameId::new("game\0\\name").unwrap();
     let literal = GameId::new("game\\0\\name").unwrap();
     for id in [&game, &literal] {
         games
-            .create(
+            .seed(
                 id.clone(),
-                Participants::new(black.clone(), white.clone()).unwrap(),
+                if *id == game {
+                    Participants::new(black.clone(), white.clone()).unwrap()
+                } else {
+                    Participants::new(user("literal-black"), user("literal-white")).unwrap()
+                },
             )
             .await
             .unwrap();
@@ -752,7 +748,7 @@ async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
     let accepted = games.make_move(&game, command.clone()).await.unwrap();
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
-    let restored = GameService::new(store.clone());
+    let restored = pg_test_support::GameFixture::new(store.clone(), database.url());
     assert_eq!(
         restored.make_move(&game, command.clone()).await.unwrap(),
         accepted

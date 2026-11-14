@@ -1,3 +1,6 @@
+mod games;
+pub use games::{GameFixture, rated_identity, seed_game, seed_rated};
+
 use sqlx::{Connection, PgConnection};
 
 /// A disposable database owned by one test. Requires a role with CREATEDB and CREATEROLE.

@@ -35,4 +35,4 @@ jobs:
       - name: Install OpenAPI validator
         run: python3 -m pip install openapi-spec-validator==0.9.0
       - name: Validate generated OpenAPI documents
-        run: python3 -m openapi_spec_validator target/openapi/player.json target/openapi/user.json
+        run: python3 -m openapi_spec_validator target/openapi/player.json target/openapi/user.json target/openapi/matchmaking.json

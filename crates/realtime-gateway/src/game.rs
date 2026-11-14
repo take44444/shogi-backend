@@ -16,7 +16,7 @@ impl Games {
             .connect_lazy();
         Ok(Self { channel })
     }
-    fn client(&self) -> GameServiceClient<Channel> {
+    pub(crate) fn client(&self) -> GameServiceClient<Channel> {
         GameServiceClient::new(self.channel.clone())
     }
     pub(crate) async fn snapshot(

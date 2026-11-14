@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use game_application::{
-    ApplicationError as Error, DomainEvent, GameId, GameRecord, GameRepository, GameService,
-    MakeMove, OutboxRepository, Participants, RequestId, Resign, StagedGameChange, UserId,
+    ApplicationError as Error, DomainEvent, GameId, GameRecord, GameRepository, MakeMove,
+    OutboxRepository, Participants, RequestId, Resign, StagedGameChange, UserId,
 };
 use game_persistence::{PostgresOutbox, SeaOrmStore};
 use pg_test_support::TestDatabase;
@@ -22,11 +22,17 @@ fn command() -> MakeMove {
         movement: "7g7f".parse().unwrap(),
     }
 }
-async fn setup(url: &str) -> (Arc<SeaOrmStore>, GameService, DatabaseConnection) {
+async fn setup(
+    url: &str,
+) -> (
+    Arc<SeaOrmStore>,
+    pg_test_support::GameFixture,
+    DatabaseConnection,
+) {
     let store = Arc::new(SeaOrmStore::connect(url).await.unwrap());
-    let service = GameService::new(store.clone());
+    let service = pg_test_support::GameFixture::new(store.clone(), url);
     service
-        .create(
+        .seed(
             id(),
             Participants::new(user("black"), user("white")).unwrap(),
         )
@@ -67,7 +73,7 @@ async fn retry_rejection_restoration_and_frozen_payload() {
     assert_eq!(count(&raw, "outbox_events").await, 0);
     let accepted = service.make_move(&id(), command()).await.unwrap();
     assert_eq!(service.make_move(&id(), command()).await.unwrap(), accepted);
-    let restored = GameService::new(store.clone());
+    let restored = pg_test_support::GameFixture::new(store.clone(), database.url());
     assert_eq!(restored.snapshot(&id()).await.unwrap().seq, 1);
     assert_eq!(
         restored.make_move(&id(), command()).await.unwrap(),
@@ -136,21 +142,6 @@ async fn unsupported_frozen_encoding_fails_closed() {
 struct Uncertain(Arc<SeaOrmStore>);
 #[async_trait]
 impl GameRepository for Uncertain {
-    async fn create_rated_game(
-        &self,
-        id: GameId,
-        participants: Participants,
-        pool: game_application::rating::Pool,
-    ) -> Result<(), Error> {
-        self.0.create_rated_game(id, participants, pool).await
-    }
-    async fn rated_game(
-        &self,
-        id: &GameId,
-    ) -> Result<Option<game_application::rating::RatedGame>, Error> {
-        self.0.rated_game(id).await
-    }
-
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -165,9 +156,7 @@ impl GameRepository for Uncertain {
     ) -> Result<game_application::ViewMetadata, Error> {
         self.0.view_metadata(id, viewer).await
     }
-    async fn create_game(&self, id: GameId, p: Participants) -> Result<(), Error> {
-        self.0.create_game(id, p).await
-    }
+
     async fn load_game(&self, id: &GameId) -> Result<GameRecord, Error> {
         self.0.load_game(id).await
     }
@@ -184,7 +173,7 @@ async fn uncertain_commit_and_retry_enqueue_once() {
     let database = TestDatabase::new().await;
     let url = database.url();
     let (store, _, raw) = setup(url).await;
-    let service = GameService::new(Arc::new(Uncertain(store)));
+    let service = pg_test_support::GameFixture::new(Arc::new(Uncertain(store)), database.url());
     let accepted = service.make_move(&id(), command()).await.unwrap();
     assert_eq!(service.make_move(&id(), command()).await.unwrap(), accepted);
     assert_eq!(count(&raw, "outbox_events").await, 1);
@@ -292,12 +281,12 @@ async fn lost_publisher_session_fails_closed_and_pending_work_can_be_reopened() 
 async fn frozen_events_preserve_identifiers_with_nul_and_backslashes() {
     let database = TestDatabase::new().await;
     let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
-    let service = GameService::new(store);
+    let service = pg_test_support::GameFixture::new(store, database.url());
     let game = GameId::new("game\0\\name").unwrap();
     let black = user("black\0\\name");
     let request = RequestId::new("request\0\\name").unwrap();
     service
-        .create(
+        .seed(
             game.clone(),
             Participants::new(black.clone(), user("white")).unwrap(),
         )
