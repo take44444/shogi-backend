@@ -255,13 +255,11 @@ The existing game server tries both pools every second. A user has one waiting
 or playing ticket across both pools. Terminal completion frees that global
 participation atomically. Same-pool joins wait for rating application; another
 pool can accept the user immediately. Ticket IDs and refusals survive restarts.
-See [the browser API](apps/realtime-gateway/README.md#matchmaking-http-contract)
-and [the transaction contract](docs/design/matchmaking.md).
+See [the browser API](apps/realtime-gateway/README.md#matchmaking-http-contract).
 
 The rating worker starts with the default Compose services. The public player
 server returns committed values at `GET /users/{user_id}/ratings`.
-See [rating behavior](docs/design/ratings.md) and
-[running the rating worker](apps/rating-worker-server/README.md).
+See [running the rating worker](apps/rating-worker-server/README.md).
 
 Schema version 7 supports fresh databases only. Startup rejects previous schemas
 without migration or data deletion. Keep any existing database and provision a

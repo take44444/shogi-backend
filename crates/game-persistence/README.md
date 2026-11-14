@@ -79,9 +79,7 @@ and database-time fences. The application ledger makes an uncertain successful
 commit a read-only `AlreadyApplied` result on retry.
 
 The initializer grants reader access only to `schema_version`, `games`, `journal`
-and `rating_states` when `shogi_reader` exists. See the
-[rating design](../../docs/design/ratings.md) for ordering, recovery and table
-ownership.
+and `rating_states` when `shogi_reader` exists.
 
 ## Matchmaking transactions
 
