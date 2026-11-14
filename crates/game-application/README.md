@@ -1,132 +1,122 @@
-# game-application
+# game-application の参照仕様
 
-`GameService::new(Arc<dyn GameRepository>)` owns game use cases and actors.
-The application and domain contain no SQL or ORM types. Production composition
-injects `Arc<game_persistence::SeaOrmStore>`. There is no default in-memory store.
+`GameService::new(Arc<dyn GameRepository>)` は対局のユースケースとアクターを管理する。
+アプリケーション層とドメイン層は SQL や ORM の型を含まない。
+本番構成では `Arc<game_persistence::SeaOrmStore>` を注入する。
+既定のインメモリーストアはない。
 
-## Matchmaking and snapshots
+## マッチメイキングとスナップショット
 
-`matchmaking::MatchmakingRepository` owns join, current participation, ticket
-lookup, ordered heartbeat, cancellation, and one-pair matching transactions.
-The client supplies an owner-scoped UUID and a pool. The server chooses the
-opponent, game ID, and permanent sides. Every game is rated. A user may wait or
-play in only one pool at a time. Account authentication belongs to the gateway.
+`matchmaking::MatchmakingRepository` は、参加、現在の参加状態、チケット取得、
+順序付きハートビート、キャンセル、1 組の対戦決定に関するトランザクションを担当する。
+クライアントは所有者ごとの UUID とプールを指定する。
+サーバーは対戦相手、対局 ID、以後変更しない先後を決定する。すべての対局はレート対象となる。
+ユーザーは同時に 1 つのプールでしか待機または対局できない。アカウント認証はゲートウェイが担当する。
 
-Ticket states are `Waiting`, `Playing`, `Finished`, `Cancelled`, `Expired`, and
-`Refused`. Refusals and cancellations received before join are durable retry
-results. Reusing a ticket never creates another participation. Waiting expires
-30 seconds after admission or the last strictly newer heartbeat. The pure
-selection policy uses bilateral rating windows and skips unmatched head tickets.
+チケットの状態は `Waiting`、`Playing`、`Finished`、`Cancelled`、`Expired`、`Refused` となる。
+拒否と、参加前に届いたキャンセルは、再試行時に返す結果として永続化する。
+同じチケットを再利用しても新たな参加は作成しない。
+待機は、参加受理または前回より大きい番号のハートビートを受信してから 30 秒で期限切れになる。
+選択処理は副作用を持たず、双方の許容レート差を使い、対戦相手がいない先頭チケットを飛ばす。
 
-`snapshot` returns the participants, sequence, owned position, legal moves,
-turn, check, and result. An uncached game loads from durable storage.
-Unknown IDs return `NotFound` without retaining actors. A closed actor reloads
-the durable game. Each game has one actor per service registry. Registry locks
-never span database or channel waits.
+`snapshot` は参加者、シーケンス番号、所有権を持つ局面データ、合法手、手番、王手状態、結果を返す。
+キャッシュにない対局は永続ストレージから読み込む。
+未知の ID はアクターを保持せずに `NotFound` を返す。
+アクターが終了していれば、永続化した対局を読み直す。
+サービスのレジストリーごとに、各対局のアクターは 1 つとなる。
+データベースやチャネルを待つ間はレジストリーのロックを保持しない。
 
-`snapshot_for_viewer(id, viewer)` reads visibility, participants, and journal in
-one coherent repository view. It checks the viewing policy and reconstructs the
-position from that history, without using an actor's sequence-only cache.
-`check_view_access(id, viewer)` reads current visibility and participants without
-loading the journal. Public games permit any authenticated viewer; private games
-permit only participants. These methods return `NotFound` for inaccessible and
-missing games. The caller authenticates `viewer` before calling either method.
+`snapshot_for_viewer(id, viewer)` は、公開状態、参加者、操作履歴を、整合した単一のリポジトリ読み取りで取得する。
+閲覧ポリシーを検証し、その履歴から局面を復元する。シーケンス番号だけで管理するアクターのキャッシュは使わない。
+`check_view_access(id, viewer)` は操作履歴を読み込まずに、現在の公開状態と参加者を取得する。
+公開対局は認証済みユーザーが閲覧でき、非公開対局は参加者だけが閲覧できる。
+両メソッドは、閲覧できない対局と存在しない対局に `NotFound` を返す。
+呼び出し元は、どちらのメソッドでも呼び出し前に `viewer` を認証する必要がある。
 
-The mailbox holds up to 64 queued commands per game. A send waits asynchronously
-when the queue is full; the service has no enqueue timeout. A command being
-processed and callers waiting to enqueue do not count toward those 64 slots.
+メールボックスは対局ごとに最大 64 件の操作をキューに保持する。
+キューが満杯の場合、送信は非同期に待機する。キュー投入のタイムアウトはない。
+処理中の操作と投入待ちの呼び出しは、この 64 件に含まない。
 
-## Commands and retries
+## 操作と再試行
 
-`make_move(MakeMove)` and `resign(Resign)` take a `user_id`, request ID, and
-required typed `expected_seq: u64`. The service derives the side from the binding.
-A nonparticipant returns `NonParticipant` before receipt lookup.
-Either participant may resign off turn. The [domain reference](../shogi-domain/README.md)
-describes move legality and terminal results.
+`make_move(MakeMove)` と `resign(Resign)` は `user_id`、リクエスト ID、必須の型付き `expected_seq: u64` を受け取る。
+サービスは参加者の対応情報から先後を決定する。
+参加者でなければ、受理記録を検索する前に `NonParticipant` を返す。
+どちらの参加者も手番に関係なく投了できる。
+着手の合法性と終局結果は[ドメインの参照仕様](../shogi-domain/README.md)に記述する。
 
-Sequence starts at zero and advances once per accepted command, including
-resignation. The portable durable limit is `i64::MAX`; exhaustion precedes
-candidate mutation. Only accepted commands reserve request IDs. Exact retries
-match command kind, user ID, expected sequence, and typed move. They return the
-original `Acceptance`, even after later commands or game completion. Changed
-contents return `RequestConflict`. Rejected request IDs remain reusable.
-Replay precedes stale-sequence and finished-game checks.
+シーケンス番号は 0 から始まり、投了を含む受理済み操作ごとに 1 進む。
+永続化時の共通上限は `i64::MAX` となる。上限到達の検査は候補局面の変更前に行う。
+受理した操作だけがリクエスト ID を予約する。
+同一内容の再試行は、操作種別、ユーザー ID、期待シーケンス番号、型付き着手が一致する場合に成立する。
+後続の操作や終局後でも元の `Acceptance` を返す。
+内容が変われば `RequestConflict` を返す。拒否したリクエスト ID は再利用できる。
+保存済み結果の返却は、シーケンス番号の不一致や終局済みの検査より先に行う。
 
-The `i64::MAX` bound is a storage sequence limit, not a promise that the rules
-engine can execute that many moves. Engine capacity failures return
-`Domain(RulesFailure)`. The 4096-operation public-history limit does not restrict
-game commands.
+`i64::MAX` は保存時のシーケンス番号上限であり、ルールエンジンがその回数の着手を実行できる保証ではない。
+エンジンの容量制限による失敗は `Domain(RulesFailure)` を返す。
+公開棋譜の 4096 操作上限は、対局操作を制限しない。
 
-## Durable state and recovery
+## 永続状態と復旧
 
-Before each snapshot or mutation, the actor checks the durable version and
-reloads if it differs or its state was invalidated. A failed storage read returns
-an error even when a cached snapshot exists. Restoration replays a coherent,
-ordered journal from `Game::new()` and validates contiguous sequence numbers,
-request uniqueness, participant binding, legality, every receipt, and final
-metadata. Invalid history returns `Corrupt`.
+スナップショット取得と更新の前に、アクターは永続化したバージョンを確認する。
+バージョンが異なる場合や状態が無効化されている場合は読み直す。
+保存層からの読み取りが失敗すると、キャッシュ済みスナップショットがあってもエラーを返す。
+復元処理は、整合した順序付き操作履歴を `Game::new()` から再実行する。
+シーケンス番号の連続性、リクエストの一意性、参加者の対応、合法性、各受理記録、最終メタデータを検証する。
+履歴が不正な場合は `Corrupt` を返す。
 
-A command stages a cloned `Game` and one accepted receipt. The actor constructs
-`StagedGameChange::new(game_id, receipt)` to generate and freeze its canonical
-domain events before calling `GameRepository::commit_change(&change)`. The repository
-atomically compares the version, advances metadata, and writes the supplied receipt
-and events to the outbox. It does not generate events.
-The actor publishes the candidate only after a confirmed commit. A failed commit
-reloads durable history. A matching receipt returns its durable acceptance;
-changed contents return `RequestConflict`. A competing version returns
-`SequenceMismatch`. An uncertain result with no receipt returns `Unavailable`,
-invalidates local state, and does not claim rollback. A failed reconciliation
-also leaves state invalid. A later successful refresh permits recovery.
+操作は、複製した `Game` と受理記録 1 件を候補として準備する。
+アクターは `StagedGameChange::new(game_id, receipt)` で正規のドメインイベントを生成して確定し、
+`GameRepository::commit_change(&change)` を呼び出す。
+リポジトリは、バージョンの比較、メタデータの更新、指定された受理記録とイベントの Outbox への保存を原子的に実行する。
+リポジトリはイベントを生成しない。
+アクターはコミットを確認した後だけ、候補を現在の状態として公開する。
+コミットが失敗すると永続履歴を読み直す。
+一致する受理記録があれば保存済みの受理結果を返し、内容が異なれば `RequestConflict` を返す。
+競合するバージョンには `SequenceMismatch` を返す。
+結果が不明で受理記録もなければ `Unavailable` を返し、ローカル状態を無効化する。ロールバック済みとはみなさない。
+再照合の失敗後も状態は無効のままとなる。後の再読み込みが成功すれば復旧できる。
 
-Cancellation after enqueue does not cancel the actor's transaction. A lost
-response or `Unavailable` may mean the command committed. Retry identical
-contents with the same request ID. Do not assign a new ID to an uncertain retry.
-Dropping the last service closes its senders. Actors drain queued commands and
-exit. Finished games remain queryable and replayable across process restarts.
+キュー投入後のキャンセルは、アクターのトランザクションを取り消さない。
+レスポンスの消失や `Unavailable` の場合でも、操作がコミット済みの可能性がある。
+同一内容での再試行には元のリクエスト ID を使う。新しい ID では元の受理結果を回復できない。
+最後のサービスを破棄すると送信側を閉じ、アクターはキュー内の操作を処理して終了する。
+終了済み対局は、プロセスの再起動後も取得でき、保存済みの受理結果を返せる。
 
-## Event publication
+## イベント配信
 
-`StagedGameChange` privately binds the game ID, receipt, and generated
-`CommittedEvent` values. Its constructor checks sequence bounds, continuity, and
-action/result consistency. Its accessors expose shared references only.
-Each move produces `MoveCommitted` with its move, check status, and optional
-terminal result. Resignation produces `GameFinished`. A mating move produces
-both events, in that order. The identity is `(game_id, seq, event kind)`, so
-these two events remain distinct at the same command sequence. The envelope
-also retains the accepted request ID and issuing user ID. Game creation,
-rejected commands, exact retries, and history restoration produce no new events.
+`StagedGameChange` は、対局 ID、受理記録、生成した `CommittedEvent` の対応を非公開フィールドで保持する。
+コンストラクターはシーケンス番号の範囲と連続性、操作と結果の整合性を検証する。
+アクセサーは共有参照だけを公開する。
+各着手は、着手内容、王手状態、任意の終局結果を持つ `MoveCommitted` を生成する。
+投了は `GameFinished` を生成する。詰みの着手は両イベントをこの順で生成する。
+イベントは `game_id`、`seq`、イベント種別の組で識別し、同じ操作番号の両イベントを区別する。
+通知には受理したリクエスト ID と操作を送ったユーザー ID も保持する。
+対局作成、拒否した操作、同一内容の再試行、履歴からの復元では、新しいイベントを生成しない。
 
-`OutboxRepository` exposes exclusive, ordered pending-event access separately
-from `GameRepository`. `OutboxPublisher::publish_next` reads one event, calls
-`NotificationPublisher`, and marks only that row after the broker accepts the
-transient notification. This success does not guarantee subscriber delivery,
-durable storage, or consumer completion. A broker may accept a notification with
-no subscribers. Storage and transport errors stop the step. A failed notification
-attempt leaves its row pending. If the mark's outcome is uncertain, a later read
-checks the stored state and returns the earliest pending row.
+`OutboxRepository` は `GameRepository` とは別に、未配信イベントへの排他的かつ順序付きのアクセスを提供する。
+`OutboxPublisher::publish_next` はイベントを 1 件読み、`NotificationPublisher` を呼び出す。
+ブローカーが一時通知を受け入れた後で、その行だけを配信済みにする。
+この成功は購読者への到達、永続保存、処理側の完了を保証しない。
+購読者がいなくても、ブローカーは通知を受け入れることがある。
+保存層と通信のエラーはその処理を停止する。通知の試行が失敗すると、行は未配信のまま残る。
+配信済み更新の結果が不明な場合は、後の読み取りで保存状態を確認し、最も古い未配信行を返す。
 
-A successful send followed by an uncertain mark can cause a duplicate with the
-same identity. Consumers must deduplicate the full event identity and recover
-missing sequences from a snapshot. The `published` flag does not represent a
-rating update or AI job's completion. Future durable jobs need separate storage
-and consumer completion state. See the [future event-processing plan](../../docs/design/event-processing-plan.md).
-The game actor never invokes a transport. Broker availability does not gate
-command acceptance.
+送信成功後の配信済み更新が不明になると、同じ識別子の通知が重複することがある。
+処理側は完全なイベント識別子で重複を除き、欠落したシーケンスをスナップショットから回復する必要がある。
+`published` フラグはレート更新の完了を示さない。
+レートジョブは専用の永続ストレージと適用台帳を使う。
+現在のレートワーカー以外への拡張案は[イベント処理の将来設計](../../docs/design/event-processing-plan.md)に記述する。
+対局アクターは通信処理を呼び出さない。対局サービスはブローカーの稼働状態に依存せず操作を受理する。
 
-## Identifiers
+## 識別子
 
-`GameId`, `RequestId`, and `UserId` require 1 through 128 bytes without whitespace.
-User IDs are internal caller claims, not authentication credentials.
+`GameId`、`RequestId`、`UserId` は、空白を含まない 1 から 128 バイトまでの値を要求する。
+ユーザー ID は内部呼び出し元からの申告値であり、認証情報ではない。
 
-## Verification
+## テスト範囲
 
-Run application tests from the repository root.
-
-```sh
-cargo test --locked -p game-application
-python3 scripts/check-contract-interfaces.py
-```
-
-The unit tests use repository fixtures. PostgreSQL integration tests live in
-`game-persistence`. The interface check verifies public API access restrictions
-with the Rust compiler.
+単体テストはテスト用リポジトリを使う。PostgreSQL の結合テストは `game-persistence` に置く。
+インターフェースの検査は Rust コンパイラーで公開 API のアクセス制限を検証する。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

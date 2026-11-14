@@ -1,99 +1,140 @@
-# game-persistence
+# game-persistence の参照仕様
 
-`SeaOrmStore::connect(&str).await` connects to PostgreSQL and initializes or
-validates the game schema. `SeaOrmStore` implements `MatchmakingRepository` for admission and `GameRepository` for game
-state, accepted requests, and the durable event outbox. Account storage belongs
-to the separate user service.
+`SeaOrmStore::connect(&str).await` は PostgreSQL に接続し、対局スキーマを初期化または検証する。
+`SeaOrmStore` は、参加受理の `MatchmakingRepository` と、
+対局状態、受理済みリクエスト、永続イベント Outbox の `GameRepository` を実装する。
+アカウントの保存は独立したユーザーサービスが担当する。
 
-Data operations, table definitions, and index definitions use SeaQuery builders.
-SeaORM executes generated statements. The outbox uses a dedicated SQLx connection
-and `sea-query-sqlx` to keep values separate from SQL text. PostgreSQL-specific
-operations use handwritten SQL. Test fixtures also use SQL to inject corruption
-and check rejection of previous schemas.
+データ操作、テーブル定義、インデックス定義には SeaQuery ビルダーを使い、SeaORM が生成した SQL 文を実行する。
+Outbox は専用の SQLx 接続と `sea-query-sqlx` を使い、値と SQL 文字列を分離する。
+PostgreSQL 固有の操作には手書き SQL を使う。
+テスト用データも SQL で破損状態を作成し、旧スキーマの拒否を確認する。
 
-## Schema startup
+## 起動時のスキーマ処理
 
-The database and role must already exist. The role needs database `CREATE`
-permission and permission to create objects in the target schema. Existing-schema
-validation also requires database `CREATE`: it builds a reference schema inside
-a savepoint and rolls it back after comparison.
+データベースとロールは事前に存在する必要がある。
+ロールにはデータベースの `CREATE` 権限と、対象スキーマ内でオブジェクトを作成する権限が必要になる。
+既存スキーマの検証は、セーブポイント内に比較用スキーマを作成し、比較後にロールバックする。
+そのため、データベースの `CREATE` 権限は起動のたびに必要になる。
 
-Startup takes a PostgreSQL transaction advisory lock. An empty schema receives
-the version 7 ledger, tables, constraints, and indexes atomically. Existing
-schemas must have the current ledger and required definitions, including column
-types, NULL constraints, keys, CHECK constraints, and indexes. Extra columns,
-indexes, and unrelated tables are permitted when required definitions remain.
+起動処理は PostgreSQL のトランザクションアドバイザリーロックを取得する。
+空のスキーマにはバージョン 7 の台帳、テーブル、制約、インデックスを原子的に作成する。
+既存スキーマには、現在の台帳と、列の型、NULL 制約、キー、CHECK 制約、インデックスを含む必須定義が必要になる。
+必須定義を維持していれば、追加の列、インデックス、無関係なテーブルは許容する。
 
-An incompatible schema returns `Corrupt`; database failures return `Unavailable`.
-Startup does not upgrade, rebuild, repair, or delete existing data. The reference
-schema uses the same creation function as initialization to keep the expected
-definitions in one place.
+非互換スキーマは `Corrupt`、データベース障害は `Unavailable` を返す。
+起動処理は既存データの更新、再構築、修復、削除を行わない。
+比較用スキーマは初期化と同じ作成関数を使い、期待する定義を一か所で管理する。
 
-## Game storage
+## 対局の保存
 
-`games` stores immutable participant IDs, the current version, and the final result. `journal` stores each accepted request's user, expected sequence, typed action encoded as canonical USI or resignation, and receipt. Foreign keys bind each journal entry to its game and each outbox row to its journal entry. A distinct-participant check rejects equal bindings. Composite uniqueness protects game sequence and game request ID. Result-pair checks reject either missing half of a terminal result. Identifiers use an order-preserving escape for NUL and the escape byte because PostgreSQL TEXT excludes NUL. The adapter decodes them before returning application values. All durable sequence conversions check the signed 64-bit range.
+`games` は変更不可の参加者 ID、現在のバージョン、最終結果を保存する。
+`journal` は受理済みリクエストごとのユーザー、期待シーケンス番号、
+正規の USI または投了として符号化した型付き操作、受理記録を保存する。
+外部キーは、各操作履歴を対局に、各 Outbox 行を操作履歴に結び付ける。
+参加者の相違を確認する制約は、同じユーザー同士の対局を拒否する。
+複合一意制約は、対局内のシーケンス番号とリクエスト ID の重複を防ぐ。
+結果の組を検証する制約は、終局結果の片方だけが欠けた状態を拒否する。
+PostgreSQL の TEXT は NUL を含められないため、識別子の NUL とエスケープ用バイトには順序を保持するエスケープを使う。
+アダプターはアプリケーションの値を返す前に復号する。
+永続化するシーケンス番号の変換は、すべて符号付き 64 ビット整数の範囲を検証する。
 
-Game creation and `commit_change` use PostgreSQL transactions. `commit_change(&StagedGameChange)` updates the game only at the expected version and inserts the supplied receipt and already generated events in the same transaction. The application constructs the change and freezes event content before commit. The adapter does not generate events. It verifies participant membership before committing. A failed statement rolls back the transaction. The application reconciles every commit failure through a fresh durable load.
+対局作成と `commit_change` は PostgreSQL のトランザクションを使う。
+`commit_change(&StagedGameChange)` は期待バージョンと一致する場合だけ対局を更新し、
+指定された受理記録と生成済みイベントを同じトランザクションで挿入する。
+アプリケーションが変更内容を構築し、コミット前にイベント内容を確定する。アダプターはイベントを生成しない。
+`commit_change` はコミット前に参加者であることを検証する。
+SQL 文が失敗するとトランザクションをロールバックする。
+アプリケーションはコミット失敗のたびに、永続データを新たに読み込んで結果を再照合する。
 
-`load_game` reads metadata and the ordered journal with one left join. A load cannot combine metadata and history from different database snapshots. The application validates replay. The adapter never restores a game from an untrusted position string. Direct manual database edits are outside the mutation API.
+`load_game` は 1 回の左外部結合でメタデータと順序付き操作履歴を取得する。
+異なるデータベーススナップショットのメタデータと履歴を組み合わせることはない。
+履歴の再実行はアプリケーションが検証する。
+アダプターは信頼できない局面文字列から対局を復元しない。
+データベースの直接編集は更新 API の対象外となる。
 
-## Outbox ownership
+## Outbox の所有権
 
-`outbox_events` freezes each event's typed payload and encoding version at commit time. Pending events are not regenerated from journal records during delivery. Uniqueness on `(game_id, seq, event_kind)` protects event identity, and a foreign key binds the event to its journal entry. The `published` flag records acceptance of a transient notification by the broker. It does not record subscriber delivery or durable job completion. Published rows remain stored. A pending index orders dispatch by insertion ID. That ID is a storage cursor, separate from the public event identity.
+`outbox_events` はコミット時に、各イベントの型付きデータと符号化バージョンを確定する。
+配信時に操作履歴から未配信イベントを再生成しない。
+`(game_id, seq, event_kind)` の一意制約がイベントの同一性を保ち、外部キーがイベントを操作履歴に結び付ける。
+`published` フラグは、ブローカーによる一時通知の受け入れを記録する。
+購読者への到達や永続ジョブの完了は記録しない。配信済みの行も保存したままとなる。
+未配信行用のインデックスは挿入 ID で配信順を決める。
+この ID は保存層のカーソルであり、公開イベントの識別子とは別である。
 
-`PostgresOutbox::connect` acquires a session advisory lock on a dedicated PostgreSQL connection. A competing publisher for the same game database fails startup. All queue reads and acknowledgements use the connection that owns the lock. Losing that connection makes later queue operations fail. The worker exits when it observes the failure. The lock permits ordinary game transactions, and dispatch holds no transaction open while waiting for Valkey. Closing the connection releases ownership.
+`PostgresOutbox::connect` は専用の PostgreSQL 接続でセッションアドバイザリーロックを取得する。
+同じ対局データベースに対する別の配信プロセスは起動に失敗する。
+キューの読み取りと配信済み更新は、すべてロックを所有する接続を使う。
+その接続を失うと、以後のキュー操作は失敗する。ワーカーは失敗を検出すると終了する。
+このロックは通常の対局トランザクションを妨げず、Valkey を待つ間にトランザクションを開いたままにすることもない。
+接続を閉じると所有権を解放する。
 
-The application stops its Tokio runtime before releasing the queue connection. This stops local background communication but cannot cancel a `PUBLISH` already sent to Valkey. After a PostgreSQL session loss, an in-flight command may still execute remotely while its row remains pending. A replacement publisher may retry it, so the advisory lock does not provide a strict fence against delayed duplicates or arrival order changes across hosts.
+配信プロセスは、キュー接続を解放する前に Tokio ランタイムを停止する。
+ローカルのバックグラウンド通信は止まるが、Valkey に送信済みの `PUBLISH` は取り消せない。
+PostgreSQL セッションの切断後も、行が未配信のままで、送信中のコマンドがリモートで実行されることがある。
+代わりの配信プロセスが通知を再試行する可能性もある。
+アドバイザリーロックでは、遅れて届く重複通知や、ホスト間での到着順の変化を防げない。
 
-The publisher reads one pending row and marks that exact row after a successful transport handoff. Marking is idempotent. A failed or uncertain handoff or mark leaves recovery to the next read. This single publisher preserves the order of new event attempts, but uncertain sends can produce late duplicates. A blocked head event blocks later events. The adapter does not implement parallel delivery workers or publisher leases.
+配信プロセスは未配信行を 1 件読み、Valkey が通知を受け入れた後でその行を配信済みにする。
+配信済み更新は冪等である。
+配信や更新が失敗した場合、または結果が不明な場合は、次の読み取りで復旧する。
+単一の配信プロセスが新しいイベントの送信試行順を維持するが、結果不明の送信は遅れて重複することがある。
+先頭イベントが停止すると、後続イベントも停止する。
+このアダプターは並列配信ワーカーや配信プロセスのリースを実装しない。
 
-## Completed-game metadata
+## 終了済み対局のメタデータ
 
-The read-only adapter lives in [game-record-persistence](../game-record-persistence/src/lib.rs). Its production dependency graph excludes this writer crate and the Game Actor. Deployments use the separate reader role from [the bootstrap SQL](../../scripts/init-postgres.sql).
+読み取り専用アダプターは [game-record-persistence](../game-record-persistence/src/lib.rs) に置く。
+本番の依存関係は、この書き込みクレートと対局アクターを含まない。
+配置時には[初期設定 SQL](../../scripts/init-postgres.sql) で作成する専用の読み取りロールを使う。
 
-Version 5 requires non-null `rule`, `visibility`, and `final_move_ply`. Only an
-ongoing game may have a null `finished_at`; a completed game requires a timestamp
-and complete result. New games use `standard`, `public`, and zero moves.
-Accepted moves increment the move count. Resignation advances the operation
-sequence without incrementing moves.
+スキーマバージョン 7 は、`rule`、`visibility`、`final_move_ply` に非 null 値を要求する。
+`finished_at` が null でよいのは進行中の対局だけである。
+終了済み対局には時刻と完全な結果が必要になる。
+新しい対局は `standard`、`public`、着手数 0 で始まる。
+受理した着手は着手数を増やす。投了は操作シーケンス番号だけを進め、着手数は増やさない。
 
-A terminal commit samples UTC microseconds from the writer's wall clock inside
-the transaction that updates the game, journal, and outbox. The timestamp marks
-commit preparation, not the database commit instant. An exact retry returns its
-original acceptance without changing metadata.
+終局のコミットでは、対局、操作履歴、Outbox を更新するトランザクション内で、
+書き込みプロセスの時計から UTC マイクロ秒を採取する。
+この時刻はコミット準備時刻であり、データベースのコミット完了時刻ではない。
+同一内容の再試行は、メタデータを変更せず元の受理結果を返す。
 
-The writer has no 4096-operation limit. That limit belongs to public detail
-reads. Durable sequences must fit in a signed 64-bit integer.
+書き込み側には 4096 操作の上限はない。この上限は公開棋譜の詳細取得に適用する。
+永続化するシーケンス番号は符号付き 64 ビット整数に収まる必要がある。
 
-## Verification
+## レート更新のトランザクション
 
-Contract tests use isolated PostgreSQL databases through `pg-test-support`. They cover constraints, concurrent initialization and writers, coherent reads, transaction failures, corrupt history, uncertain commits, failed reconciliation, exact replay, reader permissions, publisher ownership, and service restoration. Run `./scripts/test-postgres.sh cargo test --locked -p game-persistence` from the workspace root.
+マッチメイキングは、対局作成、双方の開始時レート状態の確定、選択したプールでの各ユーザーのレート枠の予約、
+両チケットの待機中から対局中への変更を原子的に行う。
+終局操作の受理は、受理記録と Outbox を保存するトランザクション内でレートジョブを登録する。
+`SeaOrmRatingJobs` はジョブの取得、適用、延期、復旧を行う。
+取得した処理権は、所有者、世代、データベース時刻によるリースを持つ。
+適用と延期の操作はその処理権を検証する。
+適用台帳により、成功したか不明なコミットを再試行しても、読み取りだけで `AlreadyApplied` を返せる。
 
-## Rating transactions
+初期化処理は、`shogi_reader` がある場合に限り、`schema_version`、`games`、`journal`、`rating_states` の読み取り権限を付与する。
 
-Matchmaking atomically creates a game, freezes both rating states, reserves both
-user-and-pool slots and transitions both waiting tickets to playing.
-Terminal acceptance enqueues the rating job in the receipt and outbox transaction.
-`SeaOrmRatingJobs` claims, applies, defers and recovers jobs with owner, generation
-and database-time fences. The application ledger makes an uncertain successful
-commit a read-only `AlreadyApplied` result on retry.
+## マッチメイキングのトランザクション
 
-The initializer grants reader access only to `schema_version`, `games`, `journal`
-and `rating_states` when `shogi_reader` exists.
+`matchmaking_tickets` は待機中、対局中、終了済み、キャンセル済み、期限切れ、拒否の要求を保存する。
+有効な `user_id` に対する部分一意インデックスは、両プールを通じて適用する。
+所有者とチケット UUID の組が再試行キーとなる。終端の履歴も保持する。
+読み取りロールはこのテーブルの SELECT 権限を持たない。
 
-## Matchmaking transactions
+参加、読み取り時の期限切れ処理、キャンセル、ハートビート、定期的な期限切れ処理、対戦決定、終局操作の受理は、
+行ロックより先に共通のトランザクションアドバイザリーロックを取得する。
+チケット行は `(user_id,ticket_id)` 順、レート状態行は `UserId` 順にロックする。
+ロック待ちの後に `clock_timestamp()` を読み直し、期限切れと対戦決定に使う。
+レートワーカーは独立したジョブとレート状態のロック順を維持する。
 
-`matchmaking_tickets` stores waiting, playing, finished, cancelled, expired and
-refused requests. Its partial unique index on active `user_id` applies across
-both pools. The owner and ticket UUID form the retry key. Terminal histories
-are retained. The reader role has no SELECT grant on this table.
+終局操作の受理には、対応する対局中チケットが双方に必要となる。
+結果を保存するトランザクション内で、両チケットを終了済みに変更する。
+レート枠の予約は既存のワーカーに残す。本番用の保存 API は直接の対局作成メソッドを公開しない。
 
-Join, read-time expiry, cancel, heartbeat, periodic expiry, pairing and terminal
-acceptance acquire the common transaction advisory lock before any row lock.
-Ticket rows lock by `(user_id,ticket_id)`, and rating state rows by UserId.
-Fresh `clock_timestamp()` reads after lock waits determine expiry and matching.
-Rating workers retain their independent job and rating-state lock order.
+## テスト範囲
 
-Terminal acceptance requires both matching playing tickets and changes them to
-finished in the result transaction. It leaves rating reservations to the existing
-worker. Production persistence exposes no direct game creation method.
+契約テストは `pg-test-support` を通じて分離した PostgreSQL データベースを使う。
+スキーマ制約、同時初期化と同時書き込み、整合した読み取り、トランザクション失敗、履歴破損、結果不明のコミット、
+再照合の失敗、保存済み結果の返却、読み取り権限、配信プロセスの所有権、サービスの復元を対象とする。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

@@ -1,56 +1,45 @@
-# game-record-application
+# game-record-application の参照仕様
 
-`GameRecords` searches completed public records and reads one public history
-through `RecordRepository`. The crate depends on shared user IDs and shogi value
-types. It has no database, HTTP, game actor, account lookup, or write port.
+`GameRecords` は `RecordRepository` を通じて、終了済みの公開棋譜を検索し、対局ごとの公開履歴を取得する。
+このクレートは共有ユーザー ID と将棋の値型に依存する。
+データベース、HTTP、対局アクター、アカウント検索、書き込みポートは持たない。
 
-## Search and pagination
+## 検索とページ分割
 
-`Search::new` validates a required `[from,to)` interval of UTC integer microseconds,
-a maximum 366-day span, page limits from 1 to 100, nonnegative signed-64-bit move
-bounds, and an ordered inclusive ply range. `Filters` combines participant,
-standard rule, winner color, finish reason, period, and final move ply.
-A participant matches either color. Ply counts moves and excludes resignation.
+`Search::new` は、必須の UTC マイクロ秒整数の期間 `[from,to)`、最大 366 日の期間幅、
+1 から 100 までのページ件数、非負の符号付き 64 ビット着手数、上下限が正しい両端を含む着手数範囲を検証する。
+`Filters` は、参加者、標準ルール、勝者の先後、終局理由、期間、最終着手数を組み合わせる。
+参加者は先手と後手のどちらでも一致する。着手数は投了を数えない。
 
-Search ordering is descending `(finished_at, binary game ID)`. `Search::cursor`
-encodes a versioned seek key and a digest of the normalized filters. A page limit
-may change between pages. Other filter changes reject the cursor. Cursors are
-untrusted client input and have no MAC or signature. The digest binds ordinary
-continuations to their query but is not authentication or tamper protection.
-Repositories reapply publication rules and every filter before each page limit.
-Search results are not fixed across requests. Each page reads current data.
+検索結果は `finished_at` の降順、次に対局 ID のバイナリー値の降順で並ぶ。
+`Search::cursor` は、バージョン付きの継続位置と、正規化したフィルターのダイジェストを符号化する。
+ページごとに件数は変更できるが、その他のフィルターが変わるとカーソルを拒否する。
+カーソルは信頼しないクライアント入力であり、MAC や署名を持たない。
+ダイジェストは通常の継続取得を元のクエリに対応付けるが、認証や改ざん防止にはならない。
+リポジトリは各ページの件数上限を適用する前に、公開条件と全フィルターを再適用する。
+検索結果はリクエスト間で固定されず、各ページで現在のデータを読む。
 
-## Metadata and public history
+## メタデータと公開履歴
 
-`OperationSequence` counts accepted commands, including resignation. `MovePly`
-counts moves only. They are distinct types and accept nonnegative values up to
-`i64::MAX`. `PreparedFinishTime` accepts nonnegative UTC microsecond values; the
-type does not establish which clock produced a timestamp.
+`OperationSequence` は投了を含む受理済み操作を数え、`MovePly` は着手だけを数える。
+両者は別の型で、0 から `i64::MAX` までの値を受け付ける。
+`PreparedFinishTime` は非負の UTC マイクロ秒を受け付けるが、どの時計が生成した時刻かは型では保証しない。
 
-`Metadata::new` requires distinct players and a nonzero final operation count.
-A checkmate has equal move and operation counts. A resignation has one more
-operation than moves. The constructor checks these relationships without
-replaying the game.
+`Metadata::new` は異なる参加者と、0 ではない最終操作数を要求する。
+詰みでは着手数と操作数が一致する。投了では操作数が着手数より 1 多くなる。
+コンストラクターは、対局を再実行せずにこれらの関係を検証する。
 
-`Metadata` has no history. `Detail` contains metadata and public operations only.
-Receipts, retry IDs, expected sequence, and outbox events have no public type here.
-Repository implementations must read detail from one consistent database
-snapshot and reject histories over `MAX_HISTORY` rather than truncate them.
-`MAX_HISTORY` is 4096 operations; it does not limit game commands or metadata
-search. `GameRecords` delegates these reads to `RecordRepository`.
-The production adapter is
-[`game-record-persistence::PostgresGameRecords`](../game-record-persistence/src/lib.rs).
+`Metadata` は履歴を持たない。`Detail` はメタデータと公開操作だけを含む。
+受理記録、再試行 ID、期待シーケンス番号、Outbox イベントに対応する公開型はない。
+リポジトリ実装は、整合した単一のデータベーススナップショットから詳細を読み、
+`MAX_HISTORY` を超える履歴を切り詰めずに拒否する必要がある。
+`MAX_HISTORY` は 4096 操作であり、対局操作やメタデータ検索を制限しない。
+`GameRecords` は読み取りを `RecordRepository` に委譲する。
+本番用アダプターは [`game-record-persistence::PostgresGameRecords`](../game-record-persistence/src/lib.rs) となる。
 
-## Verification
+## テスト範囲
 
-Run from the repository root.
-
-```sh
-cargo test --locked -p game-record-application
-python3 scripts/check-contract-interfaces.py
-```
-
-Unit tests cover numeric bounds, metadata consistency, and search and cursor
-validation. The interface check rejects interchanging move and operation counts
-or modifying private metadata fields. Database history limits are tested in
-`game-persistence`.
+単体テストは数値の範囲、メタデータの整合性、検索とカーソルの検証を対象とする。
+インターフェースの検査は、着手数と操作数の取り違えや非公開メタデータの変更を拒否する。
+データベース履歴の上限は `game-persistence` で検証する。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

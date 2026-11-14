@@ -1,14 +1,11 @@
-# user-id
+# user-id の参照仕様
 
-`UserId` is an internal identifier shared by game and account code. Possessing
-an ID does not authenticate its caller.
+`UserId` は対局コードとアカウントコードで共有する内部識別子である。
+ID を持っているだけでは呼び出し元を認証したことにはならない。
 
-`UserId::new` accepts 1 through 128 UTF-8 bytes with no Unicode whitespace. The
-limit counts bytes, not characters. It preserves the original string, which
-`as_str` borrows. Invalid input returns `InvalidId`.
+`UserId::new` は Unicode の空白を含まない、1 から 128 UTF-8 バイトまでの値を受け付ける。
+上限は文字数ではなくバイト数で数える。元の文字列を保持し、`as_str` で参照できる。
+入力が不正な場合は `InvalidId` を返す。
 
-Run validation tests from the repository root.
-
-```sh
-cargo test --locked -p user-id
-```
+検証テストはバイト数の上限と空白を対象とする。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

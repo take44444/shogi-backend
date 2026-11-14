@@ -1,123 +1,107 @@
-# player-http
+# player-http の参照仕様
 
-`router(GameRecords, UserRatings)` exposes anonymous HTTP access to completed public game
-records. The adapter parses queries into application types and returns JSON.
-It uses no account credentials or user database connection.
+`router(GameRecords, UserRatings)` は、終了済みの公開棋譜と確定済みレートを認証不要の HTTP API で提供する。
+アダプターはクエリをアプリケーションの型に変換し、JSON を返す。
+アカウントの認証情報やユーザーデータベースへの接続は使わない。
 
-See the [player-server guide](../../apps/player-server/README.md) for startup,
-environment variables, and database permissions.
+起動、環境変数、データベース権限は [player-server の手順](../../apps/player-server/README.md)に記述する。
 
-## Search completed games
+## 終了済み対局の検索
 
-`GET /game-records` requires both `from` and `to`. The interval uses UTC integer
-microseconds, includes `from`, excludes `to`, and spans at most 366 days.
-All filters combine with AND. Unknown or repeated query fields return 400.
+`GET /game-records` は `from` と `to` の両方を要求する。
+期間は UTC マイクロ秒の整数で指定し、`from` を含み `to` を含まない。期間の上限は 366 日となる。
+すべてのフィルターは AND で結合する。未知のクエリフィールドや重複したフィールドは 400 を返す。
 
-| Parameter | Values and meaning |
+| パラメーター | 値と意味 |
 |---|---|
-| `participant` | Valid user ID, matched against either color |
+| `participant` | 有効なユーザー ID。先手と後手のいずれかに一致する。 |
 | `rule` | `standard` |
-| `winner` | `black` or `white`, independent of the participant filter |
-| `reason` | `checkmate` or `resignation` |
-| `from`, `to` | Required nonnegative UTC microseconds with `from < to` |
-| `min_ply`, `max_ply` | Optional inclusive final move counts from 0 to `i64::MAX`, excluding resignation |
-| `limit` | 1 through 100, default 30 |
-| `cursor` | Opaque next cursor returned by the preceding page |
+| `winner` | `black` または `white`。参加者フィルターとは独立する。 |
+| `reason` | `checkmate` または `resignation` |
+| `from`, `to` | 必須の非負 UTC マイクロ秒。`from < to` が必要。 |
+| `min_ply`, `max_ply` | 任意の最終着手数。両端を含み、0 から `i64::MAX` まで。投了は数えない。 |
+| `limit` | 1 から 100 まで。既定値は 30。 |
+| `cursor` | 前ページで返された、内部形式を解釈せずに使う継続カーソル |
 
-This example covers 2026-11-02 UTC. Replace the interval for another date.
+次のリクエストは UTC の 2026-11-02 を対象とする。
 
 ```sh
 curl 'http://127.0.0.1:8081/game-records?from=1793577600000000&to=1793664000000000&participant=alice&rule=standard&winner=black&reason=resignation&min_ply=0&max_ply=200&limit=30'
-curl 'http://127.0.0.1:8081/game-records/example-game'
 ```
 
-The list response contains metadata without history or totals. Metadata fields
-are `id`, `black`, `white`, `rule`, `result`, `finished_at`, `final_seq`, and
-`final_move_ply`. `result` contains `winner` and `reason`. `finished_at` is the
-writer's commit-preparation UTC timestamp. `final_seq` counts accepted moves and
-resignation. `final_move_ply` counts moves only.
+一覧のレスポンスはメタデータを含み、履歴や総件数を含まない。
+メタデータのフィールドは `id`、`black`、`white`、`rule`、`result`、`finished_at`、`final_seq`、`final_move_ply` となる。
+`result` は `winner` と `reason` を含む。
+`finished_at` は書き込み側がコミット準備時に採取した UTC 時刻となる。
+`final_seq` は受理した着手と投了を数え、`final_move_ply` は着手だけを数える。
 
-Results sort by descending completion time, then descending binary game ID.
-Pass `next_cursor` unchanged while retaining the filters. The page limit can
-change. Each page rechecks public visibility and filters. New completions may
-appear before an earlier page. Results are not fixed across requests. Cursor
-fields remain untrusted and are not signed credentials.
+結果は終局時刻の降順、次に対局 ID のバイナリー値の降順で並ぶ。
+継続取得は、同じフィルターと返された `next_cursor` を使う。ページ件数は変更できる。
+各ページで公開状態とフィルターを再確認するため、新しい終局対局が前ページより前に追加されることがある。
+リクエスト間で結果は固定されない。
+カーソルのフィールドは信頼しない入力として扱い、署名付きの認証情報とはみなさない。
 
-## Read one game's history
+## 対局履歴の取得
 
-`GET /game-records/{id}` returns one metadata object and an ordered `history`.
+`GET /game-records/{id}` は、メタデータ 1 件と順序付きの `history` を返す。
 
-A move is `{ "seq": 1, "player": "black", "action": "move", "usi": "7g7f" }`.
-Resignation is `{ "seq": 2, "player": "white", "action": "resign" }`.
-The history comes from the same database snapshot as metadata. It has at most
-4096 accepted operations, with contiguous sequences and consistent terminal
-results and move count. This is a detail-read limit, not a limit on game commands.
-The reader validates syntax and structural consistency without replaying move
-legality.
+着手の形式は `{ "seq": 1, "player": "black", "action": "move", "usi": "7g7f" }` となる。
+投了の形式は `{ "seq": 2, "player": "white", "action": "resign" }` となる。
+履歴とメタデータは同じデータベーススナップショットから取得する。
+履歴は受理済み操作を最大 4096 件含み、シーケンス番号が連続し、終局結果と着手数が一致する。
+これは詳細取得の上限であり、対局操作の上限ではない。
+読み取り側は構文と構造の整合性を検証するが、着手の合法性は再実行して検証しない。
 
-## Errors and resource limits
+## ユーザー別レートの取得
 
-Only completed public games are readable. Hidden, ongoing, and nonexistent
-games return the same 404 response.
-
-| HTTP status | Error code | Meaning |
-|---|---|---|
-| 400 | `invalid_query` | Invalid or missing filter, ID, range, limit, or cursor |
-| 404 | `not_found` | No completed public record available |
-| 422 | `history_too_long` | More than 4096 operations or a response over 1 MiB |
-| 500 | `invalid_record` | Corrupt stored record, without partial history |
-| 503 | `unavailable` | Storage failure, statement deadline, pool timeout, or full request capacity |
-
-Error responses use `{ "error": "code" }`. Handled responses have
-`Cache-Control: no-store`. The HTTP adapter permits 16 active queries, and the
-PostgreSQL reader has four connections. Pool acquisition and PostgreSQL statement
-execution each have a two-second bound. Connections default to read-only
-transactions. Database role grants prevent table writes even if a session changes
-that default. Game record responses exclude request IDs, receipts, expected
-sequences, and outbox data.
-
-## OpenAPI
-
-`GET /openapi.json` serves the OpenAPI 3.1 document. `player_http::openapi()`
-constructs the same document without a database or service configuration.
-Export it from the repository root.
-
-```sh
-cargo run --locked -p player-http --example player-openapi
-```
-
-Handler annotations and serialized DTOs define the schema. `api_router()` uses
-`OpenApiRouter` to register both runtime routes and documented paths. Register
-new handlers with `routes!` and keep `#[utoipa::path]` beside each handler.
-The [root guide](../../README.md#generate-api-documentation) covers exporting
-both services' documents.
-
-## Verification
-
-Run adapter tests against disposable PostgreSQL from the repository root.
-
-```sh
-./scripts/test-postgres.sh cargo test --locked -p player-http
-```
-
-Tests cover JSON fields, invalid queries, missing and hidden records, resource
-limits, and the generated OpenAPI contract. [Rust CI](../../.github/workflows/rust.yaml)
-runs these tests with the workspace tests.
-
-## Read user ratings
-
-`GET /users/{user_id}/ratings` requires no authentication. The response always
-contains `ten_minute_30` and `byoyomi_30`. Each pool contains `rating`, an integer
-or null, and `completed_rated_games`, a nonnegative integer.
+`GET /users/{user_id}/ratings` は認証を必要としない。
+レスポンスは常に `ten_minute_30` と `byoyomi_30` を含む。
+各プールは、整数または null の `rating` と、非負整数の `completed_rated_games` を含む。
 
 ```json
 {"ten_minute_30":{"rating":1516,"completed_rated_games":1},"byoyomi_30":{"rating":null,"completed_rated_games":0}}
 ```
 
-Null and zero mean no applied rated games. A syntactically valid unknown user
-has the same response. The endpoint does not confirm account existence or that
-pending games have been applied. It reads the latest committed state.
+null と 0 は、レート適用済みの対局がないことを示す。
+構文上有効な未知のユーザー ID にも同じレスポンスを返す。
+このエンドポイントは、アカウントの存在や未処理対局の適用完了を保証しない。最新の確定済み状態を読む。
 
-Invalid IDs return 400. Storage failures and exhausted request capacity return
-503. Responses include `Cache-Control: no-store`. The route and nullable rating
-schema appear in `/openapi.json` and the offline `player-openapi` example.
+不正な ID は 400、保存層の障害やリクエスト処理枠の不足は 503 を返す。
+レスポンスは `Cache-Control: no-store` を含む。
+ルートと null を許容するレートのスキーマは、`/openapi.json` とオフラインの `player-openapi` サンプルに含まれる。
+
+## エラーと資源上限
+
+取得できるのは終了済みの公開対局だけである。
+非公開、進行中、存在しない対局は同じ 404 レスポンスを返す。
+
+| HTTP ステータス | エラーコード | 意味 |
+|---|---|---|
+| 400 | `invalid_query` | フィルター、ID、範囲、件数、カーソルの不正または必須値の欠落 |
+| 404 | `not_found` | 取得可能な終了済み公開棋譜がない |
+| 422 | `history_too_long` | 操作が 4096 件を超える、またはレスポンスが 1 MiB を超える |
+| 500 | `invalid_record` | 保存済み棋譜の破損。部分的な履歴は返さない。 |
+| 503 | `unavailable` | 保存層の障害、SQL 文の実行期限超過、接続プールのタイムアウト、処理枠の不足 |
+
+エラーレスポンスは `{ "error": "code" }` 形式となる。
+ハンドラーが処理したレスポンスには `Cache-Control: no-store` を付ける。
+HTTP アダプターの同時クエリ数は 16、PostgreSQL 読み取り側の接続数は 4 となる。
+接続プールからの取得と SQL 文の実行には、それぞれ 2 秒の上限がある。
+接続は既定で読み取り専用トランザクションを使う。
+セッションでその既定値を変更しても、データベースロールの権限でテーブルへの書き込みを防ぐ。
+棋譜レスポンスはリクエスト ID、受理記録、期待シーケンス番号、Outbox データを含まない。
+
+## OpenAPI
+
+`GET /openapi.json` は OpenAPI 3.1 の仕様を返す。
+`player_http::openapi()` は、データベースやサービス設定なしで同じ仕様を構築する。
+
+ハンドラーの注釈とシリアライズ対象の DTO がスキーマを定義する。
+`api_router()` は `OpenApiRouter` を使い、実行時のルートと文書化するパスの両方を登録する。
+各ハンドラーは `routes!` と、その隣に置いた `#[utoipa::path]` 注釈を使う。
+HTTP 仕様の出力は [API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に記述する。
+
+## テスト範囲
+
+テストは JSON フィールド、不正なクエリ、存在しない棋譜と非公開棋譜、資源上限、生成した OpenAPI の契約を対象とする。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

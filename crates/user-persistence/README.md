@@ -1,33 +1,36 @@
-# user-persistence
+# user-persistence の参照仕様
 
-`PostgresAccounts` implements `AccountRepository` through SeaORM. It owns account
-storage in a separate PostgreSQL database: profiles, external identities, login
-attempts, sessions, and a schema version ledger. It has no game dependency.
+`PostgresAccounts` は SeaORM を通じて `AccountRepository` を実装する。
+専用の PostgreSQL データベースで、プロフィール、外部 ID、ログイン試行、セッション、スキーマバージョン台帳を保存する。
+対局コードには依存しない。
 
-## Schema startup
+## 起動時のスキーマ処理
 
-Startup initializes an empty schema or validates the existing versioned schema.
-The database and role must already exist. The role needs database `CREATE`
-permission and permission to create objects in `public`. Existing-schema
-validation creates a reference schema inside a transaction and drops it before
-commit. Database `CREATE` permission is therefore required on every startup.
-Superuser and `CREATEROLE` privileges are not required by this adapter.
+起動処理は空のスキーマを初期化するか、既存のバージョン付きスキーマを検証する。
+データベースとロールは事前に存在する必要がある。
+ロールにはデータベースの `CREATE` 権限と、`public` 内にオブジェクトを作成する権限が必要になる。
+既存スキーマの検証は、トランザクション内で比較用スキーマを作成し、コミット前に削除する。
+そのため、データベースの `CREATE` 権限は起動のたびに必要になる。
+このアダプターにスーパーユーザー権限や `CREATEROLE` 権限は必要ない。
 
-Data operations, table definitions, and index definitions use SeaQuery builders.
-PostgreSQL advisory locks, catalog inspection, and reference-schema management
-use handwritten SQL.
+データ操作、テーブル定義、インデックス定義には SeaQuery ビルダーを使う。
+PostgreSQL のアドバイザリーロック、カタログの検査、比較用スキーマの管理には手書き SQL を使う。
 
-## Login and sessions
+## ログインとセッション
 
-One transaction resolves the unique Google issuer and subject, creates an internal UUID when needed, and stores the new session. The unique identity constraint and transaction synchronization make concurrent first logins converge on one account. Sessions have an absolute expiry and store only the token hash. Logout deletes the session row.
+1 つのトランザクションで、Google の発行者とサブジェクトからアカウントを特定し、新しいセッションを保存する。
+新しい外部 ID には内部 UUID を生成する。
+外部 ID の一意制約とトランザクションの同期により、同時に初回ログインしても同じアカウントを使う。
+セッションは絶対有効期限を持ち、トークンのハッシュだけを保存する。
+ログアウトはセッション行を削除する。
 
-Login attempts retain the nonce and PKCE verifier for ten minutes. A single `DELETE ... RETURNING` consumes an unexpired attempt only when its state hash and browser cookie hash match. Expired attempts and sessions are pruned when a login starts. Protect the database and its backups as account data.
+ログイン試行は nonce と PKCE 検証値を 10 分間保持する。
+単一の `DELETE ... RETURNING` は、state のハッシュとブラウザー Cookie のハッシュが一致する場合だけ、期限内の試行を消費する。
+ログイン開始時に期限切れの試行とセッションを削除する。
+データベースとそのバックアップは認証データを含む。
 
-## Verification
+## テスト範囲
 
-Contract tests use isolated PostgreSQL databases through `pg-test-support`.
-Run them from the repository root.
-
-```sh
-./scripts/test-postgres.sh cargo test --locked -p user-persistence
-```
+契約テストは `pg-test-support` を通じて分離した PostgreSQL データベースを使う。
+アカウントのトランザクション、同時ログイン、セッション期限、スキーマ検証を対象とする。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

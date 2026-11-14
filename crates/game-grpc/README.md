@@ -1,75 +1,83 @@
-# game-grpc
+# game-grpc の参照仕様
 
-The generated `shogi.v1.GameService` API uses plaintext gRPC. The schema is
-[`proto/game.proto`](../../proto/game.proto). Vendored protoc builds Rust clients
-and servers. `GameRpc::new(GameService, Arc<dyn MatchmakingRepository>)` dispatches game operations.
-User management belongs to the separate HTTP service and has no gRPC methods.
+生成された `shogi.v1.GameService` API は平文の gRPC を使う。
+スキーマは [`proto/game.proto`](../../proto/game.proto) に定義する。
+同梱の `protoc` が Rust のクライアントとサーバーを生成する。
+`GameRpc::new(GameService, Arc<dyn MatchmakingRepository>)` が対局操作を振り分ける。
+ユーザー管理は独立した HTTP サービスが担当し、gRPC メソッドは持たない。
 
-`GetSnapshotForViewer(game_id, viewer_user_id)` and `CheckViewAccess(game_id, viewer_user_id)` serve trusted gateway callers. The former reads visibility, participants, and history in one coherent database view before reconstructing a snapshot. The latter checks current visibility and participants without loading history. Public games allow any authenticated viewer; private games allow only participants. Missing and inaccessible games both return `NotFound`. The caller must authenticate the viewer before supplying `viewer_user_id`; the gRPC listener itself remains an unauthenticated internal API.
+## 閲覧権限
 
-## Requests and responses
+`GetSnapshotForViewer(game_id, viewer_user_id)` は、公開状態、参加者、履歴を同じデータベーススナップショットから取得し、局面を復元する。
+`CheckViewAccess(game_id, viewer_user_id)` は履歴を読まずに、現在の公開状態と参加者を確認する。
 
-| Method | Required request fields | Response |
+公開対局は認証済みユーザーが閲覧でき、非公開対局は参加者だけが閲覧できる。
+存在しない対局と閲覧できない対局は、いずれも `NotFound` を返す。
+信頼された呼び出し元が閲覧者を認証してから `viewer_user_id` を渡す。
+gRPC の待ち受け自体は呼び出し元を認証しない。
+
+## リクエストとレスポンス
+
+| メソッド | 必須のリクエストフィールド | レスポンス |
 |---|---|---|
-| `JoinMatchmaking` | authenticated `user_id`, UUID `ticket_id`, `pool` | Ticket and first-admission flag |
-| `GetMatchmaking` | authenticated `user_id` | Active ticket or idle |
-| `GetMatchmakingTicket` | authenticated `user_id`, UUID `ticket_id` | Stored ticket |
-| `HeartbeatMatchmaking` | authenticated `user_id`, UUID `ticket_id`, positive `sequence` | Current ticket |
-| `CancelMatchmaking` | authenticated `user_id`, UUID `ticket_id` | Current ticket, including preceding cancellation |
+| `JoinMatchmaking` | 認証済み `user_id`、UUID の `ticket_id`、`pool` | チケットと初回受理フラグ |
+| `GetMatchmaking` | 認証済み `user_id` | 有効なチケット、または参加なし |
+| `GetMatchmakingTicket` | 認証済み `user_id`、UUID の `ticket_id` | 保存済みチケット |
+| `HeartbeatMatchmaking` | 認証済み `user_id`、UUID の `ticket_id`、正の `sequence` | 現在のチケット |
+| `CancelMatchmaking` | 認証済み `user_id`、UUID の `ticket_id` | 参加前のキャンセルも含む現在のチケット |
 | `GetSnapshot` | `game_id` | `Snapshot` |
-| `GetSnapshotForViewer` | `game_id`, authenticated `viewer_user_id` claim | `Snapshot` or `NotFound` when absent or inaccessible |
-| `CheckViewAccess` | `game_id`, authenticated `viewer_user_id` claim | Empty success or `NotFound` when absent or inaccessible |
-| `MakeMove` | `game_id`, `request_id`, `expected_seq`, `user_id`, `usi` | `Acceptance` |
-| `Resign` | `game_id`, `request_id`, `expected_seq`, `user_id` | `Acceptance` |
+| `GetSnapshotForViewer` | `game_id`、認証済みとして申告する `viewer_user_id` | `Snapshot`。存在しない場合や閲覧できない場合は `NotFound`。 |
+| `CheckViewAccess` | `game_id`、認証済みとして申告する `viewer_user_id` | 空の成功応答。存在しない場合や閲覧できない場合は `NotFound`。 |
+| `MakeMove` | `game_id`、`request_id`、`expected_seq`、`user_id`、`usi` | `Acceptance` |
+| `Resign` | `game_id`、`request_id`、`expected_seq`、`user_id` | `Acceptance` |
 
-IDs contain 1 through 128 bytes without whitespace. `expected_seq` is protobuf
-optional solely to distinguish omission from valid zero. Both mutation methods
-reject an omitted sequence. `MakeMove` accepts strict USI move notation.
-User IDs are supplied claims. This API is unauthenticated and intended for trusted
-internal callers. Matchmaking determines the opponent, game ID and sides.
-The HTTP user service does not authenticate these gRPC calls.
+ID は空白を含まない 1 から 128 バイトまでの値となる。
+`expected_seq` が protobuf の `optional` なのは、未指定と有効な 0 を区別するためだけである。
+両更新メソッドは、シーケンス番号の未指定を拒否する。`MakeMove` は厳密な USI 着手表記を受け付ける。
+ユーザー ID は呼び出し元の申告値となる。
+この API は認証を行わず、信頼できる内部呼び出し元を対象とする。
+マッチメイキングが対戦相手、対局 ID、先後を決定する。
+HTTP ユーザーサービスは、これらの gRPC 呼び出しを認証しない。
 
-Clients supply a bound user ID, and the server derives the side. The `Player`
-enum remains in outputs. Reserved fields and wire numbers are defined in
-[`game.proto`](../../proto/game.proto).
+クライアントは参加者として対応付けられたユーザー ID を渡し、サーバーが先後を決定する。
+出力には引き続き `Player` 列挙型を使う。
+予約済みフィールドと通信上のフィールド番号は [`game.proto`](../../proto/game.proto) に定義する。
 
-`Snapshot` contains an occupied-square board, all fourteen hand counts, turn,
-check, optional result, legal USI moves, participant IDs, and sequence.
-Finished snapshots retain the position and turn with no legal moves.
-`Acceptance` contains the accepted sequence, check, and optional result.
-Exact retries return the original acceptance, including after restart or finish.
+`Snapshot` は、駒のある升の盤面、先後合わせて 14 種類の持ち駒枚数、手番、王手状態、任意の結果、
+合法な USI 着手、参加者 ID、シーケンス番号を含む。
+終了済みのスナップショットは局面と手番を保持するが、合法手は空となる。
+`Acceptance` は受理したシーケンス番号、王手状態、任意の結果を含む。
+同一内容の再試行は、再起動後や終局後も元の受理結果を返す。
 
-## Errors and retries
+## エラーと再試行
 
-| Application outcome | gRPC code |
+| アプリケーションの結果 | gRPC コード |
 |---|---|
-| Malformed ID, move, missing sequence, or invalid heartbeat sequence | `InvalidArgument` |
-| Unknown game, or a viewer API called by an unauthorized viewer | `NotFound` |
-| User is not a participant | `PermissionDenied` |
-| Ticket pool conflict, or conflicting accepted request ID | `AlreadyExists` |
-| Stale sequence | `Aborted`, with `actual-seq` metadata |
-| Wrong turn, illegal move, or finished game | `FailedPrecondition` |
-| Storage failure or uncertain outcome | `Unavailable` |
-| Corrupt durable history or incompatible schema | `DataLoss` |
-| Internal invariant violation, rules implementation failure, or sequence exhaustion | `Internal` |
+| 不正な ID や着手、シーケンス番号の欠落、不正なハートビート番号 | `InvalidArgument` |
+| 未知の対局、または閲覧権限のないユーザーによる閲覧 API の呼び出し | `NotFound` |
+| ユーザーが参加者ではない | `PermissionDenied` |
+| チケットのプール競合、または受理済みリクエスト ID の内容の競合 | `AlreadyExists` |
+| 古いシーケンス番号 | `Aborted`。`actual-seq` メタデータを含む。 |
+| 手番違い、不正な着手、終了済み対局 | `FailedPrecondition` |
+| 保存層の障害、または結果不明 | `Unavailable` |
+| 永続履歴の破損、または非互換スキーマ | `DataLoss` |
+| 内部不変条件の違反、ルール実装の失敗、シーケンス番号の上限到達 | `Internal` |
 
-After `Unavailable` or a lost response, retry the same request ID with identical
-contents. Cancellation after enqueue does not cancel a durable command.
+`Unavailable` またはレスポンスの消失後は、同じリクエスト ID と同じ内容で再試行する。
+キュー投入後のキャンセルは、永続化する操作を取り消さない。
 
-Matchmaking refusals are successful RPC responses with `refused` state and the
-saved reason. The HTTP gateway maps a join refusal to 409. Unknown owner-scoped
-tickets return `NotFound`. Reusing a UUID with another pool returns `AlreadyExists`.
-After an uncertain join, retry the same UUID and pool or read its ticket. No
-production RPC or application method creates games from arbitrary participants.
+マッチメイキングの拒否は RPC としては成功し、`refused` 状態と保存済みの理由を返す。
+HTTP ゲートウェイは参加拒否を 409 に変換する。
+所有者の範囲内に存在しないチケットは `NotFound` を返す。
+同じ UUID を別のプールで使うと `AlreadyExists` を返す。
+参加結果が不明な場合は同じ UUID とプールで再試行するか、チケットを取得する。
+本番用の RPC とアプリケーションメソッドには、任意の参加者を指定して対局を作成する機能はない。
 
-## Examples and verification
+## サンプルとテスト
 
-The `play` example exercises moves and resignation. `persistence_proof` has separate
-`seed`, `resume`, and `finished` invocations for restart testing with protobuf
-artifacts. The [root README](../../README.md) contains runnable commands.
+`play` サンプルは着手と投了を確認する。
+`persistence_proof` は `seed`、`resume`、`finished` を別々に実行し、protobuf 成果物で再起動後の保持を検証する。
+実行コマンドは[ルートの README](../../README.md) に記述する。
 
-Run adapter tests from the repository root.
-
-```sh
-cargo test --locked -p game-grpc
-```
+アダプターのテストは変換と TCP リクエストを対象とする。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

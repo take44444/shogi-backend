@@ -1,82 +1,128 @@
-# Realtime gateway
+# リアルタイムゲートウェイの参照仕様
 
-The gateway lets an authenticated browser watch one game per WebSocket connection. Participants can submit moves and resignations. Other signed-in users can watch public games. Private games are visible only to their participants.
+ゲートウェイは、認証済みブラウザーに WebSocket 接続ごとに 1 対局の閲覧を提供する。
+対局参加者は着手と投了を送信できる。その他のログイン済みユーザーは公開対局を観戦できる。
+非公開対局を閲覧できるのは参加者だけである。
 
-Run the User Service, Game Service, Valkey, and outbox publisher first. The gateway has no database credentials. It calls the User Service at a fixed internal URL for every authentication check and the Game Service at a fixed internal gRPC endpoint for game commands and viewing rights.
+ゲートウェイはデータベースの認証情報を持たない。
+必要な認証確認のたびに `user-server` を呼び出し、操作と閲覧権限の確認には `game-server` を呼び出す。
+ローカルのバイナリー、Docker Compose、HTTPS 環境への配置は[起動手順](../../docs/how-to/run-realtime-gateway.md)に記述する。
+環境変数と資源上限は[設定の参照仕様](../../docs/reference/service-configuration.md#リアルタイムゲートウェイ)に記述する。
 
-```sh
-GATEWAY_PUBLIC_ORIGIN=http://localhost:8082 \
-GATEWAY_ALLOW_LOOPBACK_HTTP=true \
-USER_SERVICE_URL=http://127.0.0.1:8080 \
-GAME_SERVICE_URL=http://127.0.0.1:50051 \
-VALKEY_URL=redis://127.0.0.1:6379 \
-cargo run --locked -p realtime-gateway-server
-```
+## マッチメイキング HTTP API の契約
 
-The defaults are `GATEWAY_BIND_ADDR=127.0.0.1:8082`, `GATEWAY_MAX_CONNECTIONS=256`, `GATEWAY_MAX_USER_CONNECTIONS=8`, `GATEWAY_QUEUE_CAPACITY=64`, `GATEWAY_MAX_INPUT_BYTES=4096`, `GATEWAY_MAX_SNAPSHOT_BYTES=262144`, and `GATEWAY_MESSAGES_PER_SECOND=10`. Every limit can be set to a positive value with its named environment variable. The User Service must issue its development `user_session` cookie for the same host as the gateway. HTTPS uses `__Host-user_session` and does not require the loopback flag.
+すべてのエンドポイントは `user-server` でセッション Cookie を認証する。
+更新操作は、設定値と完全に一致する Origin と Host を要求する。
+GET でも Origin が指定されていれば一致が必要になる。
+`Sec-Fetch-Site` がある場合は `same-origin` でなければならない。
+リクエスト ID は認証済み所有者ごとに扱う UUID となる。本文にユーザー ID は指定できない。
 
-For a browser on one origin, use `docker compose --profile realtime up --build -d`. Its `browser-edge` serves authentication, `/matchmaking/*`, and `/ws/games/*` at `http://localhost:8082` by default. Set `REALTIME_PUBLIC_ORIGIN` and `REALTIME_PORT` together if the browser URL changes. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for login. The standalone `auth` profile has its own User Service origin; use the `realtime` profile alone for this flow. Production should terminate HTTPS at a same-origin reverse proxy and keep User Service, Game Service, gateway, and Valkey on an internal network.
-
-## Matchmaking HTTP contract
-
-Every endpoint authenticates the session cookie through User Service. Mutations
-require the exact configured Origin and Host. A supplied Origin must also match
-on GET. `Sec-Fetch-Site`, when present, must be `same-origin`. Request IDs are
-UUIDs scoped to the authenticated owner. The body never accepts a user ID.
-
-| Operation | Request | Response |
+| 操作 | リクエスト | レスポンス |
 | --- | --- | --- |
-| Join | `PUT /matchmaking/tickets/{uuid}`, `{"pool":"ten_minute_30"}` or `{"pool":"byoyomi_30"}` | 201 for a new waiting ticket, 200 for a stored successful request, 409 for a saved refusal |
-| Recover | `GET /matchmaking/me` | `{ "state":"idle", "ticket":null }`, or a waiting or playing ticket |
-| Read request | `GET /matchmaking/tickets/{uuid}` | 200 with current or terminal state, 404 for no ticket belonging to this owner |
-| Keep waiting | `POST /matchmaking/tickets/{uuid}/heartbeat`, `{"sequence":1}` | 200 with current state |
-| Cancel | `DELETE /matchmaking/tickets/{uuid}` | 200 with terminal state, or 409 `already_matched` with committed game ID |
+| 参加 | `PUT /matchmaking/tickets/{uuid}`、`{"pool":"ten_minute_30"}` または `{"pool":"byoyomi_30"}` | 新規の待機チケットは 201、保存済みの成功した要求は 200、保存済みの拒否は 409 |
+| 状態の回復 | `GET /matchmaking/me` | `{ "state":"idle", "ticket":null }`、または待機中か対局中のチケット |
+| 要求の取得 | `GET /matchmaking/tickets/{uuid}` | 現在または終端の状態は 200、所有者のチケットがなければ 404 |
+| 待機の継続 | `POST /matchmaking/tickets/{uuid}/heartbeat`、`{"sequence":1}` | 現在の状態を返す 200 |
+| キャンセル | `DELETE /matchmaking/tickets/{uuid}` | 終端の状態を返す 200、または確定した対局 ID を含む 409 `already_matched` |
 
-Ticket responses include `ticket_id`, nullable `pool`, and `state`. Waiting adds
-`enqueued_at`, `expires_at`, and `heartbeat_sequence` as integer database epoch
-milliseconds and sequence. Playing and finished add `game_id` and `side`.
-Refused adds `code` with `already_waiting`, `already_playing`, or `rating_pending`.
-Reusing a ticket with another pool returns 409 `pool_conflict`. A cancellation
-received before join has no pool and prevents any later join using that UUID.
+チケットのレスポンスは `ticket_id`、null を許容する `pool`、`state` を含む。
+待機中は、データベース時刻の Unix エポックからのミリ秒を整数で表す `enqueued_at` と `expires_at`、
+整数の `heartbeat_sequence` を追加する。
+対局中と終了済みでは `game_id` と `side` を追加する。
+拒否時は `already_waiting`、`already_playing`、`rating_pending` のいずれかを `code` に追加する。
+同じチケットを別のプールで再利用すると 409 `pool_conflict` を返す。
+参加より先に受け付けたキャンセルにはプールがなく、その UUID で後から参加することはできない。
 
-Use a new UUID for a fresh attempt. After 503 or a lost response, retry the same
-UUID and contents or read its stored state. Refused, cancelled, expired and
-finished requests never reenter the queue. Reads do not extend lifetime.
-Heartbeats use sequences from 1 through `i64::MAX`; only a strictly newer
-sequence extends a live wait to thirty seconds after database time. Retry a
-heartbeat with the same sequence. The suggested interval is ten seconds.
+新しい試行には新しい UUID を使う。
+503 またはレスポンスの消失後は、同じ UUID と内容で保存済みの結果を取得できる。
+チケットの読み取りでも状態を回復できる。
+拒否、キャンセル、期限切れ、終了済みの要求がキューに戻ることはない。
+読み取りは有効期限を延長しない。
+ハートビートのシーケンス番号は 1 から `i64::MAX` までとなる。
+待機が有効な間に前回より大きい番号を受信した場合だけ、期限をデータベース時刻の 30 秒後まで延長する。
+再試行には同じ番号を使う。推奨間隔は 10 秒である。
 
-A user can wait or play once across both pools. Matching uses committed ratings,
-initially 1500, and bilateral windows of 100 Elo plus 50 per thirty seconds,
-capped at 400. The existing game server tries both pools every second. Completion
-frees global participation; the same pool remains blocked until rating applies.
-`idle` does not imply that rating has applied. Clocks and disconnect losses are
-outside this API. Connect to `/ws/games/{game_id}` using the matched ID.
+ユーザーは両プールを通じて同時に 1 件だけ待機または対局できる。
+組み合わせには確定済みレートを使い、初期値は 1500 となる。
+双方の許容レート差は 100 Elo から始まり、30 秒ごとに 50 ずつ広がり、上限は 400 となる。
+既存の対局サーバーが毎秒両プールの組み合わせを試行する。
+終局するとプール共通の参加枠を解放するが、同じプールへの参加はレート適用まで制限される。
+`idle` はレートの適用完了を意味しない。
+時計と切断による敗北は、この API の対象外となる。
+組み合わせで返した対局 ID は `/ws/games/{game_id}` の接続先を特定する。
 
-Generate the browser contract with `scripts/generate-openapi.sh`. The output
-includes `matchmaking.json` alongside the user and player documents.
+ブラウザー向け OpenAPI 仕様は、ユーザーと棋譜の仕様とともに `matchmaking.json` として出力される。
+出力コマンドは [API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に記述する。
 
-## WebSocket contract
+## WebSocket の契約
 
-Open `GET /ws/games/{game_id}` on the browser's origin with subprotocol `shogi.realtime.v1`. An `Origin` matching the configured origin exactly and a unique valid session cookie are required. If `Sec-Fetch-Site` is present, it must be `same-origin`. A missing or inaccessible game returns HTTP 404 before upgrade. An invalid session returns 401. Dependency failures return 503.
+`GET /ws/games/{game_id}` は、ブラウザーと同じオリジンで、
+サブプロトコル `shogi.realtime.v1` の WebSocket を開く。
+設定したオリジンと完全に一致する `Origin`、重複のない有効なセッション Cookie が必要になる。
+`Sec-Fetch-Site` がある場合は `same-origin` でなければならない。
+存在しない対局と閲覧できない対局は、接続の昇格前に HTTP 404 を返す。
+無効なセッションは 401、依存サービスの障害は 503 を返す。
 
-All 64-bit sequence values are decimal JSON strings. A connection starts with one `snapshot` containing `game_id`, `seq`, `board`, `hands`, `turn`, `in_check`, `result`, `legal_moves`, `black_user_id`, and `white_user_id`. The board contains occupied squares with `file`, `rank`, `owner`, and `kind`. Hands contain `player`, `piece`, and `count` for all hand pieces. The result is `null` or `{ "winner": "black" | "white", "reason": "checkmate" | "resignation" }`.
+### スナップショット
 
-Send one command at a time. The gateway rejects unknown fields, client supplied user IDs, malformed USI moves, and noncanonical sequence strings.
+64 ビットのシーケンス値は、すべて 10 進数の JSON 文字列となる。
+接続は `snapshot` メッセージ 1 件で始まる。
+このメッセージは `game_id`、`seq`、`board`、`hands`、`turn`、`in_check`、`result`、
+`legal_moves`、`black_user_id`、`white_user_id` を含む。
+盤面は駒がある升を `file`、`rank`、`owner`、`kind` で表す。
+持ち駒は全種類について `player`、`piece`、`count` を含む。
+進行中の結果は `null` となる。
+終局結果の `winner` は `black` または `white`、`reason` は `checkmate` または `resignation` となる。
+
+### 操作と応答
+
+クライアントは操作を 1 件ずつ送る。
+ゲートウェイは未知のフィールド、呼び出し元が指定したユーザー ID、不正な USI 着手、正規形でないシーケンス文字列を拒否する。
 
 ```json
 {"type":"move","request_id":"client-1","expected_seq":"0","usi":"7g7f"}
 {"type":"resign","request_id":"client-2","expected_seq":"1"}
 ```
 
-An accepted command receives `{ "type": "accepted", "request_id": "client-1", "seq": "1", "in_check": false, "result": null }`. This acknowledges durable acceptance; it does not advance the browser's position. Apply `snapshot` and `event` messages to the position. An event has `event_id`, `game_id`, `seq`, `kind`, and either `usi`, `in_check`, `result` for a move or `result` for a finish. Internal request and user IDs are omitted from events. A checkmating move and its finish event share a sequence. An event can arrive before the command's acceptance reply.
+受理した操作には、次の応答を返す。
+`{ "type": "accepted", "request_id": "client-1", "seq": "1", "in_check": false, "result": null }`。
+この応答は永続的な受理を示し、ブラウザーの局面は進めない。
+局面を更新するのは `snapshot` と `event` メッセージである。
+各イベントは `event_id`、`game_id`、`seq`、`kind` を含む。
+着手イベントはさらに `usi`、`in_check`、`result` を含み、終局イベントは `result` を含む。
+イベントには内部リクエスト ID とユーザー ID を含めない。
+詰みの着手と終局イベントは同じシーケンス番号を持つ。
+操作の受理応答より先にイベントが届くことがある。
 
-An `error` includes a stable `code` and the `request_id` when the command was parsed. Codes are `invalid_input`, `busy`, `not_participant`, `request_conflict`, `stale_seq`, `rejected`, and `outcome_unknown`. `stale_seq` includes `actual_seq` when Game Service supplied it. Reconnect for a new snapshot after `stale_seq` or `resync_required`. An internal corruption error closes the socket without exposing details.
+### エラーと再試行
 
-If an acceptance reply is lost or the code is `outcome_unknown`, resend the identical command with the original `request_id`, `expected_seq`, and USI move. Do not generate a new request ID. A disconnect does not cancel a command already enqueued by Game Service.
+`error` は安定した `code` を含み、操作を解析できた場合は `request_id` も含む。
+コードは `invalid_input`、`busy`、`not_participant`、`request_conflict`、
+`stale_seq`、`rejected`、`outcome_unknown` となる。
+`stale_seq` は、`game-server` が実際の番号を返した場合に `actual_seq` を含む。
+`stale_seq` または `resync_required` からの回復には、再接続と新しいスナップショットが必要になる。
+内部の破損エラーでは、詳細を公開せずにソケットを閉じる。
 
-Reconnect with exponential backoff and random jitter after a socket close. The gateway subscribes before fetching the initial snapshot and buffers notifications during that fetch. Valkey Pub/Sub can still lose the last notification without a later event or disconnect to expose the gap. Reconnecting retrieves the current saved snapshot. No periodic position sync or anonymous spectator access is provided.
+受理応答が失われた場合、またはコードが `outcome_unknown` の場合は、
+元の `request_id`、`expected_seq`、USI 着手を使って同一内容で再試行する。
+新しいリクエスト ID では元の受理結果を回復できない。
+切断しても、`game-server` がすでにキューに入れた操作は取り消されない。
 
-The gateway checks the session and current viewing rights before each outgoing message and immediately before a command. It does not run a periodic session timer. A quiet connection can remain open after logout until it next sends or receives application data. If the User Service or Game Service cannot complete a required check, the connection closes. Already started operations and sends can race with logout or a visibility change.
+### 再接続とアクセス確認
 
-The subscriber uses one exact Valkey channel per connection with a bounded RESP3 push receiver. It closes on overflow, malformed messages, or disconnection rather than resuming a possibly incomplete stream. The 4096-byte notification check occurs after the Redis library parses a frame; keep Valkey on a trusted internal network.
+ソケット切断後、クライアントは指数バックオフに無作為な待機時間のばらつきを加えて再接続できる。
+ゲートウェイは初期スナップショットの取得前に購読を開始し、取得中の通知をバッファーに保持する。
+Valkey Pub/Sub で最後の通知が失われた場合、後続イベントも切断もなければ欠落を検出できないことがある。
+再接続すると保存済みの最新スナップショットを取得する。
+定期的な局面同期と匿名観戦は提供しない。
+
+ゲートウェイは各メッセージの送信前と操作の直前に、セッションと現在の閲覧権限を確認する。
+セッションを定期確認するタイマーはない。
+通信がない接続は、ログアウト後も次のアプリケーションデータの送受信まで開いたままになることがある。
+`user-server` または `game-server` で必要な確認ができなければ接続を閉じる。
+開始済みの操作や送信は、ログアウトや公開状態の変更と競合することがある。
+
+購読処理は接続ごとに 1 つの Valkey チャネルを指定し、容量制限のある RESP3 プッシュ受信キューを使う。
+容量超過、不正なメッセージ、切断が起きると、不完全な可能性がある通知列を再開せずに接続を閉じる。
+Redis ライブラリーがフレームを解析した後に、購読処理が通知の 4096 バイト上限を確認する。
+そのため、Valkey は信頼できる内部ネットワークに配置する必要がある。

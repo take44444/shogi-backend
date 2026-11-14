@@ -1,39 +1,38 @@
-# user-server
+# user-server の起動手順
 
-Run Google login, profiles, and browser sessions through the HTTP account
-service. It uses a separate PostgreSQL database and runs independently of
-`game-server`.
+Google ログイン、プロフィール、ブラウザーセッションを提供する HTTP アカウントサービスを起動する。
+専用の PostgreSQL データベースを使い、`game-server` とは独立して動作する。
 
-The [HTTP API reference](../../crates/user-http/README.md) describes requests,
-cookies, and errors. The [authentication decision](../../docs/adr/0002-browser-authentication.md)
-records the chosen approach. [Unfinished work](../../docs/design/unfinished-work.md)
-lists remaining features and verification limits.
+リクエスト、Cookie、エラーは [HTTP API の参照仕様](../../crates/user-http/README.md)に記述する。
+選択した方式の理由は[認証方式の ADR](../../docs/adr/0002-browser-authentication.md)に記録する。
+残りの機能と検証範囲は[未完成の機能](../../docs/design/unfinished-work.md)にまとめる。
 
-## Configuration
+## Google ログインを設定する
 
-Create a Google OAuth client of type **Web application**. Its authorized redirect URI must exactly match `USER_PUBLIC_ORIGIN` followed by `/auth/google/callback`. For local development, use `http://localhost:8080/auth/google/callback`. If the Google app is in Testing, add the accounts used for development as test users. The service requests `openid profile`. See [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect) for provider configuration.
+サービスを起動する前に Google クライアントを設定する。
 
-| Variable | Required | Default and constraints |
-| --- | --- | --- |
-| `GOOGLE_CLIENT_ID` | Yes | Google web client ID. |
-| `GOOGLE_CLIENT_SECRET` | Yes | Google web client secret. |
-| `USER_PUBLIC_ORIGIN` | Yes | HTTPS origin without credentials, path, query, or fragment. Determines the callback URL and allowed mutation Origin. |
-| `USER_DATABASE_URL` | Yes | PostgreSQL URL for the separate `users` database. The database must already exist. |
-| `USER_BIND_ADDR` | No | `127.0.0.1:8080`. Internal HTTP listener address. |
-| `USER_ALLOW_LOOPBACK_HTTP` | No | `false`. Set `true` to allow an HTTP public origin on `localhost`, `127.0.0.1`, or `[::1]`. |
-| `USER_SESSION_SECONDS` | No | `86400`. Absolute session lifetime, from `60` to `2592000` seconds. |
+1. 種類が **Web application** の Google OAuth クライアントを作成する。
+2. `USER_PUBLIC_ORIGIN` に `/auth/google/callback` を付けたリダイレクト URI を登録する。
+   ローカル開発では `http://localhost:8080/auth/google/callback` を使う。
+3. Google アプリが **Testing** の場合は、開発用アカウントをテストユーザーに追加する。
 
-## Run locally
+サービスは `openid profile` スコープを要求する。
+プロバイダー側の設定は [Google OpenID Connect のドキュメント](https://developers.google.com/identity/openid-connect/openid-connect)に記述されている。
 
-Run commands from the repository root. Start PostgreSQL and copy the
-configuration template if `.env` does not already exist.
+[ユーザーサービスの設定](../../docs/reference/service-configuration.md#ユーザーサービス)に従って環境変数を指定する。
+下記のローカル設定例には必須の値を含めている。
+
+## ローカルで起動する
+
+コマンドはリポジトリのルートで実行する。
+PostgreSQL を起動し、`.env` がまだなければ設定テンプレートをコピーする。
 
 ```sh
 docker compose up -d --wait postgres
 if [ ! -e .env ]; then cp .env.example .env; fi
 ```
 
-Set the Google credentials in `.env`. A local configuration is:
+`.env` に Google の認証情報を設定する。ローカル設定の例を示す。
 
 ```dotenv
 GOOGLE_CLIENT_ID='your-client-id.apps.googleusercontent.com'
@@ -44,7 +43,9 @@ USER_BIND_ADDR='127.0.0.1:8080'
 USER_DATABASE_URL='postgres://shogi:shogi@localhost:5432/users'
 ```
 
-The application and Cargo do not load `.env` automatically. Export its values in the current shell before starting the server. Reload the file and restart the process after changing configuration.
+アプリケーションと Cargo は `.env` を自動で読み込まない。
+サーバーの起動前に、現在のシェルで設定値をエクスポートする。
+設定を変更した場合は、ファイルを読み直してプロセスを再起動すること。
 
 ```sh
 set -a
@@ -53,41 +54,53 @@ set +a
 cargo run --locked -p user-server
 ```
 
-Startup reports `user HTTP server listening on 127.0.0.1:8080`. Open `http://localhost:8080/auth/google/start` to sign in. A successful callback redirects to `/me`, which returns the authenticated profile as JSON. First login creates an account; later logins resolve the same internal user ID.
+起動時に `user HTTP server listening on 127.0.0.1:8080` と出力する。
+`http://localhost:8080/auth/google/start` を開いてログインする。
+コールバックが成功すると `/me` に移動し、認証済みプロフィールを JSON で返す。
+初回ログインでアカウントを作成し、以後のログインでは同じ内部ユーザー ID を使う。
 
-## Run with Docker Compose
+## Docker Compose で起動する
 
-Compose reads the repository-root `.env` for Google credentials and the public origin.
+Compose は、リポジトリのルートにある `.env` から Google の認証情報と公開オリジンを読み込む。
+次のコマンドで起動する。
 
 ```sh
 docker compose --profile auth up --build -d user-server
 ```
 
-The `auth` profile is optional. The default Compose profile runs the game services. For the user service, Compose sets the container listener to `0.0.0.0:8080`, publishes the port on host loopback, and connects to the separate `users` database in PostgreSQL. The PostgreSQL service retains its data in `pg-data`. Container listener and database settings come from [compose.yaml](../../compose.yaml), rather than those entries in `.env`.
+`auth` プロファイルは任意で追加する。既定の Compose 構成は対局関連のサービスを起動する。
+ユーザーサービスのコンテナー内待ち受けアドレスは `0.0.0.0:8080` となり、ホストのループバックアドレスでポートを公開する。
+PostgreSQL 内の専用データベース `users` に接続し、データは `pg-data` に保持する。
+コンテナーの待ち受けアドレスと接続先データベースには、`.env` の値ではなく [compose.yaml](../../compose.yaml) の設定を使う。
 
-## Deployment
+## 本番環境に配置する
 
-Set a public HTTPS origin and register its exact callback URL with Google. Disable loopback HTTP development mode. Terminate TLS at a reverse proxy and restrict access to the internal HTTP listener. Preserve the browser's Origin header. The service does not use `X-Forwarded-*` headers for authentication decisions.
+公開 HTTPS オリジンを設定し、それに対応するコールバック URL を Google に登録する。
+ループバック HTTP 開発モードを無効にする。
+リバースプロキシで TLS を終端し、内部 HTTP 待ち受けへのアクセスを制限する。
+ブラウザーの Origin ヘッダーを保持すること。サービスは認証判断に `X-Forwarded-*` ヘッダーを使わない。
 
-Store the user database on persistent storage. Keep `.env` and Google credentials out of version control and restrict file access to the service operator. Exclude callback query strings, Cookies, and OAuth responses from proxy access logs. Do not expose a development HTTP listener to an untrusted network.
+ユーザーデータベースを永続ストレージに置く。
+`.env` と Google の認証情報をバージョン管理に含めず、ファイルへのアクセスを運用者に制限する。
+コールバックのクエリ文字列、Cookie、OAuth レスポンスをプロキシのアクセスログに記録しないこと。
+開発用 HTTP 待ち受けを信頼できないネットワークに公開しないこと。
 
-Startup requires Google discovery and JWKS access before the listener opens. Code exchange retrieves them again to reflect key rotation. Outbound requests use HTTPS, disable redirects, and have a five-second connection timeout and a ten-second timeout per request.
+[アカウント保存層の参照仕様](../../crates/user-persistence/README.md#起動時のスキーマ処理)に従ってデータベースロールに権限を付与する。
+Google のディスカバリー、署名鍵、トークン取得先への送信通信を許可する。
+起動時の動作とタイムアウトは[ユーザーサービスの設定](../../docs/reference/service-configuration.md#ユーザーサービス)に記述する。
 
-The database and role must already exist. Startup initializes or validates the
-account schema. The role needs database `CREATE` permission on every startup and
-permission to create objects in `public`. See the
-[account storage reference](../../crates/user-persistence/README.md#schema-startup).
+## 動作を検証する
 
-## Verification
-
-Run the account-service tests from the repository root.
+リポジトリのルートでアカウントサービスのテストを実行する。
 
 ```sh
 ./scripts/test-postgres.sh cargo test --locked -p user-id -p user-application -p user-persistence -p user-http -p user-server
 ```
 
-Tests cover signed ID-token validation, PKCE code exchange, browser-bound login attempts, concurrent registration, profile updates, CSRF checks, session expiry, restart, and logout. Local HTTP tests use a simulated provider; real Google login requires a configured OAuth client and browser interaction.
+テストは、署名付き ID トークンの検証、PKCE コード交換、ブラウザーに結び付いたログイン試行、
+同時登録、プロフィール更新、CSRF 検査、セッションの期限切れ、再起動、ログアウトを対象とする。
+ローカル HTTP テストは模擬プロバイダーを使う。
+実際の Google ログインには、設定済み OAuth クライアントとブラウザー操作が必要になる。
 
-`GET /openapi.json` serves the OpenAPI 3.1 contract. The
-[HTTP adapter reference](../../crates/user-http/README.md#openapi) describes
-exporting it without server startup or configuration.
+`GET /openapi.json` は OpenAPI 3.1 の仕様を返す。
+サーバーを起動せずに出力する場合は、[API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に従うこと。

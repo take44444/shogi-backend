@@ -1,201 +1,203 @@
-# Shogi backend
+# 将棋バックエンド
 
-A shogi backend with durable gRPC game commands, public HTTP game records, and
-Google login through a separate HTTP user service. PostgreSQL stores accepted
-commands and events. An independent publisher sends transient notifications
-through Valkey Pub/Sub.
+対局操作を永続化する gRPC API、公開棋譜の HTTP API、Google ログインを提供するバックエンド。
+ユーザー向け HTTP サービスは対局サービスから分離している。
+PostgreSQL は受理済みの操作、イベント、マッチメイキングのチケット、レート更新ジョブを保存する。
+独立したワーカーが Valkey への一時通知とレート更新を実行する。
 
-The realtime gateway exposes authenticated browser WebSockets for moves,
-resignation, opponent events, and signed-in spectators. See the
-[gateway guide](apps/realtime-gateway/README.md) for its browser contract and
-same-origin setup.
+リアルタイムゲートウェイは、認証済みブラウザー向けに着手、投了、対局イベント受信、観戦用の WebSocket を提供する。
+ブラウザーの接続設定は[ゲートウェイの起動手順](docs/how-to/run-realtime-gateway.md)、
+リクエストとメッセージは[ブラウザー API の参照仕様](apps/realtime-gateway/README.md)に記述する。
 
-Game gRPC trusts caller-supplied user IDs. Keep it on a trusted internal network.
-The user service does not authenticate game gRPC requests.
+対局 gRPC API は、呼び出し元が渡すユーザー ID を信頼する。信頼できる内部ネットワークに配置すること。
+ユーザーサービスは対局 gRPC リクエストを認証しない。
 
-Use Rust, Cargo, Docker, and Docker Compose for the commands below. Run them from
-the repository root. The build supplies a vendored `protoc`.
+以下のコマンドには Rust、Cargo、Docker、Docker Compose が必要になる。
+リポジトリのルートで実行すること。ビルドには同梱の `protoc` を使う。
 
-## Run a local game
+## ローカルで対局を実行する
 
-Start PostgreSQL, then start the game server.
+このリリースはスキーマバージョン 7 に対応する。
+古いデータベースは保持し、別の空のデータベースを用意すること。
+起動処理は古いスキーマを拒否し、データの移行や削除は行わない。
+
+サーバーは接続を受け付ける前に、スキーマバージョン 7 を初期化または検証する。
+データベースとロールは事前に作成すること。
+スキーマ検証には、初回以降の起動でもデータベースの `CREATE` 権限が必要になる。
+必要な権限と非互換スキーマの扱いは[保存層の参照仕様](crates/game-persistence/README.md#起動時のスキーマ処理)に記述する。
+
+PostgreSQL を起動し、続けて対局サーバーを起動する。
 
 ```sh
 docker compose up -d --wait postgres
 cargo run --locked -p game-server
 ```
 
-The server reports `game-server listening on 127.0.0.1:50051`. In another
-terminal, run the example client.
+サーバーは `game-server listening on 127.0.0.1:50051` と出力する。
+別のターミナルでサンプルクライアントを実行する。
 
 ```sh
 cargo run --locked -p game-grpc --example play
 ```
 
-The client joins two tickets, waits for a match, plays `7g7f 3c3d 8h2b+ 3a2b B*4e`, and resigns White.
-It checks capture, promotion, drops, snapshots, and exact retries. The final line
-reports `black wins at sequence 6`. The server generates the game ID and sides. An optional argument selects a fresh
-user prefix.
+クライアントはチケットを 2 件登録し、対戦相手の決定を待つ。
+その後、`7g7f 3c3d 8h2b+ 3a2b B*4e` の順に指し、後手が投了する。
+駒取り、成り、駒打ち、スナップショット、同一内容での再試行を検証する。
+最後の行は `black wins at sequence 6` となる。
+サーバーは対局 ID を生成し、先後を決定する。任意の引数で新しいユーザー名の接頭辞を指定できる。
 
-The server defaults to `127.0.0.1:50051` and
-`DATABASE_URL=postgres://shogi:shogi@localhost:5432/shogi`. A positional address
-overrides `GAME_SERVER_ADDR`.
+既定の接続先は `127.0.0.1:50051`、データベース接続設定は
+`DATABASE_URL=postgres://shogi:shogi@localhost:5432/shogi` となる。
+アドレスを位置引数で指定すると `GAME_SERVER_ADDR` より優先される。
 
 ```sh
 DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' cargo run --locked -p game-server -- 127.0.0.1:50052
 cargo run --locked -p game-grpc --example play -- http://127.0.0.1:50052 my-game
 ```
 
-Startup initializes or validates schema version 7 before listening. The database
-and role must already exist. Schema validation requires database `CREATE`
-permission even on subsequent startups. See the
-[storage reference](crates/game-persistence/README.md#schema-startup) for required
-permissions and incompatible-schema handling.
+## 終了済みの公開棋譜を取得する
 
-## Read public completed game records
-
-After the game server initializes the database, start the record service.
+対局サーバーがデータベースを初期化した後、棋譜サービスを起動する。
 
 ```sh
 cargo run --locked -p player-server
 ```
 
-Query it from another terminal. Replace the period with the game's UTC interval,
-expressed in microseconds, and use the ID of a completed game.
+別のターミナルから問い合わせる。
+期間は対象対局を含む UTC マイクロ秒の範囲に置き換え、終了済み対局の ID を指定する。
 
 ```sh
 curl 'http://127.0.0.1:8081/game-records?from=1793577600000000&to=1793664000000000&limit=30'
 curl 'http://127.0.0.1:8081/game-records/COMMITTED_GAME_UUID'
 ```
 
-The service uses separate SELECT-only credentials and needs no user service.
-See [player-server](apps/player-server/README.md) for startup and
-[player-http](crates/player-http/README.md) for query parameters, responses, and
-limits. For Google login and profile operations, follow the
-[user-server guide](apps/user-server/README.md).
+棋譜サービスは SELECT 専用の認証情報を使い、ユーザーサービスを必要としない。
+起動手順は [player-server](apps/player-server/README.md)、
+検索パラメーター、レスポンス、制限は [player-http](crates/player-http/README.md) に記述する。
+Google ログインとプロフィール操作は[ユーザーサービスの手順](apps/user-server/README.md)を参照すること。
 
-## Run with Docker Compose
+## Docker Compose で起動する
 
-Start the game server, publisher, Valkey, and PostgreSQL.
+対局サーバー、レートワーカー、Outbox 配信プロセス、Valkey、PostgreSQL を起動する。
 
 ```sh
 docker compose up --build -d
 ```
 
-The PostgreSQL bootstrap creates the `shogi` and `users` databases and the
-`shogi_reader` role. Both databases use the `pg-data` named volume. Published
-ports bind to host loopback. Set `GAME_SERVER_PORT`, `POSTGRES_PORT`, or
-`VALKEY_PORT` to override their host ports.
+PostgreSQL の初期設定は `shogi` と `users` データベース、`shogi_reader` ロールを作成する。
+両データベースは名前付きボリューム `pg-data` を使う。
+公開ポートはホストのループバックアドレスにバインドする。
+ホスト側ポートを変更する場合は `GAME_SERVER_PORT`、`POSTGRES_PORT`、`VALKEY_PORT` を設定する。
 
-Add the public record service with the `records` profile.
+公開棋譜サービスを追加する場合は `records` プロファイルを使う。
 
 ```sh
 docker compose --profile records up --build -d
 ```
 
-The optional `auth` profile runs the user service. Configure Google credentials
-as described in the [user-server guide](apps/user-server/README.md#run-with-docker-compose).
-The `realtime` profile adds a same-origin browser edge, gateway, and a User Service
-configured for that edge. Run `docker compose --profile realtime up --build -d`
-and use `http://localhost:8082` for login and game WebSockets. Set Google
-credentials before logging in. The gateway receives no database URL.
-`docker compose down` stops services and retains database data.
+ユーザーサービスを起動する場合は `auth` プロファイルを使う。
+[ユーザーサービスの手順](apps/user-server/README.md#docker-compose-で起動する)に従って Google の認証情報を設定する。
+ブラウザーからマッチメイキングと WebSocket を使う場合は、
+[ゲートウェイの起動手順](docs/how-to/run-realtime-gateway.md)に従うこと。
+この手順では `realtime` プロファイルと `http://localhost:8082` を使う。
 
-## Prove persistence across container recreation
+データベースのデータを保持してサービスを停止するには `docker compose down` を実行する。
 
-Start Compose as described above. Use a fresh user prefix and proof directory.
-Before each client invocation, wait for
-`game-server listening on 0.0.0.0:50051` in `docker compose logs game-server`.
-These commands assume the default gRPC port.
+## コンテナー再作成後のデータ保持を検証する
 
-```sh
-cargo run --locked -p game-grpc --example persistence_proof -- seed http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
-docker compose up -d --force-recreate game-server
-cargo run --locked -p game-grpc --example persistence_proof -- resume http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
-docker compose restart game-server
-cargo run --locked -p game-grpc --example persistence_proof -- finished http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
-```
+上記の手順で Compose を起動する。未使用のユーザー名の接頭辞と検証用ディレクトリを指定すること。
+以下のコマンドは既定の gRPC ポートを使う。
+起動または再起動のたびに、`docker compose logs game-server` に
+`game-server listening on 0.0.0.0:50051` が出るまで待ってからクライアントを実行する。
 
-The client saves protobuf snapshots and receipts, compares them after restart,
-continues play, and checks original receipts after restarting the finished game.
-The same commands work with a local server if you restart it between phases
-with the same `DATABASE_URL`.
+1. 対局を開始し、受理記録を保存する。
 
-## Publish committed game events
+   ```sh
+   cargo run --locked -p game-grpc --example persistence_proof -- seed http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
+   ```
 
-The game server commits accepted commands and their events atomically. It
-accepts commands while the publisher or broker is unavailable. To run a local
-publisher against the same database, start Valkey first.
+2. 対局サーバーのコンテナーを再作成する。
+
+   ```sh
+   docker compose up -d --force-recreate game-server
+   ```
+
+3. サーバーの起動完了後に対局を再開する。
+
+   ```sh
+   cargo run --locked -p game-grpc --example persistence_proof -- resume http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
+   ```
+
+4. 対局サーバーを再起動する。
+
+   ```sh
+   docker compose restart game-server
+   ```
+
+5. サーバーの起動完了後に終了済み対局を検証する。
+
+   ```sh
+   cargo run --locked -p game-grpc --example persistence_proof -- finished http://127.0.0.1:50051 restart-proof /tmp/shogi-proof
+   ```
+
+クライアントは protobuf のスナップショットと受理記録を保存し、再起動後に比較する。
+対局を継続し、終局後の再起動でも元の受理記録が取得できることを確認する。
+各段階の間で同じ `DATABASE_URL` を使ってサーバーを再起動すれば、ローカル実行でも検証できる。
+
+## 確定済みの対局イベントを配信する
+
+対局サーバーは、受理した操作とイベントを原子的にコミットする。
+配信プロセスやブローカーが停止していても操作を受理する。
+同じデータベースに対してローカルで配信プロセスを起動する場合は、先に Compose 側の配信プロセスを停止すること。
+同じ Outbox を同時に所有できる配信プロセスは 1 つだけである。その後、Valkey を起動する。
 
 ```sh
 docker compose up -d --wait valkey
 DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' VALKEY_URL='redis://127.0.0.1:6379' cargo run --locked -p outbox-publisher
 ```
 
-Stop any Compose publisher for that database before starting a local one.
-Only one publisher may own the database's outbox at a time.
+チャネル、JSON フィールド、配信保証は[通知の参照仕様](docs/reference/game-notifications.md)に記述する。
+配信プロセスの復旧と通知の重複は[Outbox の所有権](crates/game-persistence/README.md#outbox-の所有権)に記述する。
 
-Events use `shogi.games.<hex-game-id>.events`, where the game ID is encoded as
-lowercase hexadecimal UTF-8 bytes. Notification acceptance does not guarantee
-subscriber delivery or processing. Disconnected subscribers miss notifications,
-and uncertain sends can produce duplicates. Consumers must deduplicate event
-identities and recover missing state. See the
-[application contract](crates/game-application/README.md#event-publication),
-[publisher ownership reference](crates/game-persistence/README.md#outbox-ownership),
-and [event delivery decision](docs/adr/0003-game-event-delivery.md).
-
-The JSON envelope contains `schema_version: 1`, `event_id`, `type`, `game_id`,
-`seq`, `request_id`, and `user_id`. Move notifications also contain canonical
-USI `movement`, `in_check`, and `result`. The result is null while the game is
-ongoing, or contains `winner` and `reason`. Event types are `move_committed` and
-`game_finished`; winners are `black` and `white`; reasons are `checkmate` and
-`resignation`. The event ID joins the hexadecimal game ID, sequence, and event
-type with colons. A mating move emits both event types at the same sequence.
-Version-one encoder changes must preserve this mapping.
-
-Failed or timed-out publication leaves the event pending and stops the worker.
-Compose restarts it to retry. Published rows record broker acceptance only and
-remain stored; they do not represent a consumer's completion.
-
-Run the end-to-end proof with a disposable Compose project.
+使い捨ての Compose プロジェクトで、配信全体の検証を実行する。
 
 ```sh
 ./scripts/prove-outbox.sh
 ```
 
-The proof checks notifications, exact retries, publisher downtime, server
-recreation, Valkey outages, and recovery. It also checks notification acceptance
-with no subscribers. Default host ports are 55051, 56379, and 55435; override them
-with `GAME_SERVER_PORT`, `VALKEY_PORT`, and `POSTGRES_PORT`. Cleanup removes the
-proof project's containers and database volume.
+この検証は通知、同一内容での再試行、配信プロセスの停止、サーバー再作成、Valkey の障害と復旧を確認する。
+購読者がいない場合の通知受け入れも確認する。
+既定のホスト側ポートは 55051、56379、55435 となる。
+変更する場合は `GAME_SERVER_PORT`、`VALKEY_PORT`、`POSTGRES_PORT` を設定する。
+後処理は、検証用プロジェクトのコンテナーとデータベースボリュームを削除する。
 
-## Generate API documentation
+## API ドキュメントを生成する
 
-Export OpenAPI 3.1 JSON for both HTTP services without starting servers or
-configuring a database or Google credentials.
+棋譜、ユーザー、マッチメイキング API の OpenAPI 3.1 JSON を出力する。
+サーバーの起動、データベース設定、Google の認証情報は必要ない。
 
 ```sh
 bash scripts/generate-openapi.sh
 ```
 
-The output is `target/openapi/player.json` and `target/openapi/user.json`.
-An optional first argument selects another directory. Running HTTP services also
-serve their document at `GET /openapi.json`.
+出力先は `target/openapi/player.json`、`target/openapi/user.json`、`target/openapi/matchmaking.json` となる。
+任意の第 1 引数で出力ディレクトリを変更できる。
+起動中の HTTP サービスは `GET /openapi.json` でも仕様を返す。
 
-Generate Rust API documentation with rustdoc.
+Rust API ドキュメントは rustdoc で生成する。
 
 ```sh
 cargo doc --locked --workspace --no-deps
 cargo doc --locked -p game-application --no-deps --open
 ```
 
-HTML is written under `target/doc/`. Add `--document-private-items` to inspect
-internal modules. Protocol comments from `proto/game.proto` appear in the
-generated `game_grpc::proto` reference.
+HTML は `target/doc/` 以下に出力される。
+非公開モジュールを確認する場合は `--document-private-items` を追加する。
+`proto/game.proto` のプロトコルコメントは、生成された `game_grpc::proto` の参照仕様に含まれる。
 
-## Verify the workspace
+## ワークスペースを検証する
 
-Run the checks used by [Rust CI](.github/workflows/rust.yaml).
+[Rust CI](.github/workflows/rust.yaml) と同じ検査を実行する。
 
 ```sh
 python3 scripts/check-boundaries.py
@@ -207,60 +209,47 @@ python3 scripts/check-contract-interfaces.py
 python3 scripts/test-deployment.py
 ```
 
-The boundary checker inspects workspace dependency paths and direct external
-dependency declarations. Its tests verify that forbidden configurations fail.
-The interface checker compiles the examples in `tests/contracts/`.
-The deployment check starts disposable PostgreSQL and probes actual permissions.
+依存境界の検査は、ワークスペース内の依存経路と、直接指定した外部依存を調べる。
+そのテストは、禁止された設定が失敗することを確認する。
+インターフェースの検査は `tests/contracts/` のサンプルをコンパイルする。
+デプロイ構成の検査は使い捨ての PostgreSQL を起動し、実際の権限を確認する。
 
-`test-postgres.sh` starts isolated PostgreSQL and Valkey Compose services and
-removes them after the tests. Their default host ports are 55433 and 56333;
-override them with `POSTGRES_PORT` and `VALKEY_PORT`. If `TEST_DATABASE_URL` or
-`TEST_VALKEY_URL` is set, the script uses that service instead and starts only
-the missing one. The database URL must permit `CREATEDB` and `CREATEROLE`.
-Each database test creates its own database and removes it afterward.
+`test-postgres.sh` は検証専用の PostgreSQL と Valkey を Compose で起動し、テスト後に削除する。
+既定のホスト側ポートは 55433 と 56333 となる。
+変更する場合は `POSTGRES_PORT` と `VALKEY_PORT` を設定する。
+`TEST_DATABASE_URL` または `TEST_VALKEY_URL` が設定されていれば、指定されたサービスを使い、未指定のサービスだけを起動する。
+データベース接続ロールには `CREATEDB` と `CREATEROLE` が必要になる。
+各データベーステストは専用データベースを作成し、終了後に削除する。
 
-To run a package's database tests or check Rust documentation, use:
+パッケージ単位でテストする場合は `-p` を指定する。
+PostgreSQL または Valkey を使うパッケージは検証用スクリプトで実行する。
+Rust ドキュメントを検証する場合は、rustdoc の警告をエラーとして扱い、ドキュメントテストも実行する。
 
 ```sh
+cargo test --locked -p shogi-domain
 ./scripts/test-postgres.sh cargo test --locked -p game-persistence
 RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
 cargo test --locked --workspace --doc
 ```
 
-Compose credentials are local development defaults. Production deployments
-supply PostgreSQL credentials, TLS configuration, backups, and restricted roles.
-Apply the reader grants from the [bootstrap SQL](scripts/init-postgres.sql) for
-tables owned by the game writer. The application creates neither databases nor
-roles.
+Compose の認証情報はローカル開発用の既定値である。
+本番環境では PostgreSQL の認証情報、TLS 設定、バックアップ、権限を制限したロールを用意する。
+[読み取り用の権限](docs/reference/service-configuration.md#棋譜サービス)に従ってデータベースとロールを作成すること。
+アプリケーションはデータベースもロールも作成しない。
 
-The [documentation index](docs/README.md) links to adopted decisions, unfinished
-work, and future plans. Crate references describe the
-[domain rules](crates/shogi-domain/README.md),
-[application contract](crates/game-application/README.md),
-[storage](crates/game-persistence/README.md), and
-[gRPC API](crates/game-grpc/README.md).
+[ドキュメント一覧](docs/README.md)には採用済みの判断、未完成の機能、将来の設計案をまとめる。
+クレートの参照仕様には、[対局ルール](crates/shogi-domain/README.md)、
+[アプリケーションの契約](crates/game-application/README.md)、
+[保存層](crates/game-persistence/README.md)、[gRPC API](crates/game-grpc/README.md)を記述する。
 
-## Matchmaking and rated games
+## マッチメイキングとレート更新を確認する
 
-Authenticated browsers join through `PUT /matchmaking/tickets/{uuid}` with
-`{"pool":"ten_minute_30"}` or `{"pool":"byoyomi_30"}`. The gateway authenticates
-the session cookie and requires the configured Origin and Host for mutations.
-`GET /matchmaking/me` recovers an active ticket after reload. The server chooses
-a nearby opponent and random sides, then returns the game ID for the existing
-WebSocket endpoint. Send a strictly increasing heartbeat sequence every ten
-seconds while waiting. Waiting expires after thirty seconds without a new
-sequence. Neither time control runs clocks or adjudicates timeouts.
+`game-server`、`rating-worker-server`、`player-server` を同じデータベースに接続して起動する。
+[レートワーカーの手順](apps/rating-worker-server/README.md#実際の対局で確認する)に従い、
+ユーザーを組み合わせ、レート対象の対局を終了して、確定済みレートを取得する。
 
-The existing game server tries both pools every second. A user has one waiting
-or playing ticket across both pools. Terminal completion frees that global
-participation atomically. Same-pool joins wait for rating application; another
-pool can accept the user immediately. Ticket IDs and refusals survive restarts.
-See [the browser API](apps/realtime-gateway/README.md#matchmaking-http-contract).
-
-The rating worker starts with the default Compose services. The public player
-server returns committed values at `GET /users/{user_id}/ratings`.
-See [running the rating worker](apps/rating-worker-server/README.md).
-
-Schema version 7 supports fresh databases only. Startup rejects previous schemas
-without migration or data deletion. Keep any existing database and provision a
-separate empty database for this version.
+認証済みブラウザーから参加する場合は、[マッチメイキング HTTP API](apps/realtime-gateway/README.md#マッチメイキング-http-api-の契約)に従うこと。
+新しい参加要求には新しいチケット UUID を使う。
+待機中は 10 秒ごとに、前回より大きいシーケンス番号のハートビートを送る。
+新しいシーケンス番号を受信しないまま 30 秒経過すると、待機は期限切れになる。
+どちらのプールも時計や時間切れの判定は実装していない。

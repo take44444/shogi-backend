@@ -1,28 +1,22 @@
-# user-application
+# user-application の参照仕様
 
-Account types and the asynchronous `AccountRepository` port. Profiles contain a
-shared `UserId`, a `DisplayName`, and a creation time. External identities use a
-verified issuer and subject. Login attempts and sessions carry expiry times.
+このクレートはアカウントの型と非同期の `AccountRepository` ポートを定義する。
+プロフィールは共有の `UserId`、`DisplayName`、作成時刻を含む。
+外部 ID は検証済みの発行者とサブジェクトを使う。ログイン試行とセッションは有効期限を持つ。
 
-## Validation and responsibilities
+## 検証と責務
 
-`DisplayName::new` trims surrounding whitespace. It rejects empty names, names
-over 80 Unicode characters, and names containing control characters.
-`LoginAttempt`, `VerifiedIdentity`, and `NewSession` have no `Debug`
-implementation because they carry authentication data.
+`DisplayName::new` は前後の空白を取り除く。
+空の名前、80 Unicode 文字を超える名前、制御文字を含む名前は拒否する。
+`LoginAttempt`、`VerifiedIdentity`、`NewSession` は認証データを持つため、`Debug` を実装しない。
 
-The [HTTP adapter](../user-http/README.md) verifies Google identity before
-invoking the repository. The repository must consume login attempts atomically
-and resolve an account and create its session in one transaction. The
-[PostgreSQL adapter](../user-persistence/README.md) implements those operations.
-This crate has no game, HTTP, database, or OAuth library dependency.
+[HTTP アダプター](../user-http/README.md)は、リポジトリを呼び出す前に Google の本人確認情報を検証する。
+リポジトリはログイン試行を原子的に消費し、アカウントの特定とセッション作成を 1 つのトランザクションで行う。
+[PostgreSQL アダプター](../user-persistence/README.md)がこれらの操作を実装する。
+このクレートは対局、HTTP、データベース、OAuth のライブラリーに依存しない。
 
-## Verification
+## テスト範囲
 
-Run display-name validation tests from the repository root.
-
-```sh
-cargo test --locked -p user-application
-```
-
-Repository transaction and expiry behavior is tested in `user-persistence`.
+単体テストは表示名の検証を対象とする。
+リポジトリのトランザクションと有効期限の動作は `user-persistence` で検証する。
+実行コマンドは[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)に記述する。

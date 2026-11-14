@@ -1,65 +1,66 @@
-# player-server
+# player-server の起動手順
 
-Run the anonymous HTTP API for completed public game records. The service uses
-`player-http` with the read-only `PostgresGameRecords` adapter. It needs an
-initialized game database and SELECT-only credentials.
+終了済みの公開棋譜を取得する、認証不要の HTTP API を起動する。
+サービスは `player-http` と読み取り専用の `PostgresGameRecords` アダプターを使う。
+初期化済みの対局データベースと、SELECT 専用の認証情報が必要になる。
 
-See the [HTTP API reference](../../crates/player-http/README.md) for filters,
-responses, pagination, and errors.
+フィルター、レスポンス、ページ分割、エラーは [HTTP API の参照仕様](../../crates/player-http/README.md)に記述する。
 
-## Run locally
+## ローカルで起動する
 
-Start `game-server` first so it initializes the game schema. Then run the reader
-from the repository root.
+先に `game-server` を起動し、対局スキーマを初期化する。
+その後、リポジトリのルートで読み取りサービスを起動する。
 
 ```sh
 cargo run --locked -p player-server
 ```
 
-The server reports `player-server listening on 127.0.0.1:8081`. Use another
-terminal to query a completed game. Replace the period with the game's UTC
-microsecond interval and use its game ID.
+サーバーは `player-server listening on 127.0.0.1:8081` と出力する。
+別のターミナルで終了済み対局を取得する。
+期間を対象対局を含む UTC マイクロ秒の範囲に置き換え、対局 ID を指定する。
 
 ```sh
 curl 'http://127.0.0.1:8081/game-records?from=1793577600000000&to=1793664000000000&limit=30'
-curl 'http://127.0.0.1:8081/game-records/example-game'
+curl 'http://127.0.0.1:8081/game-records/COMPLETED_GAME_ID'
 ```
 
-## Configuration
+## 読み取りサービスを設定する
 
-| Environment variable | Default | Meaning |
-|---|---|---|
-| `PLAYER_BIND_ADDR` | `127.0.0.1:8081` | HTTP socket address |
-| `PLAYER_GAME_DATABASE_URL` | `postgres://shogi_reader:shogi_reader@localhost:5432/shogi` | PostgreSQL URL with SELECT-only credentials |
+ローカルの既定値を変更する場合は `PLAYER_BIND_ADDR` または `PLAYER_GAME_DATABASE_URL` を設定する。
+初期化済みの対局データベースに SELECT 専用でアクセスできるロールを使うこと。
+既定値と必要な権限は[設定と権限の参照仕様](../../docs/reference/service-configuration.md#棋譜サービス)に記述する。
 
-The reader requires schema version 7 and never initializes or upgrades the
-schema. Its role needs SELECT on `schema_version`, `games`, `journal` and
-`rating_states`, without table ownership or write privileges. The [bootstrap SQL](../../scripts/init-postgres.sql) grants access to
-new tables created by the game writer.
+## Docker Compose で起動する
 
-## Run with Docker Compose
+`records` プロファイルを指定してサービスを起動する。
 
 ```sh
 docker compose --profile records up --build -d
 ```
 
-Compose connects the reader to the writer's game database with separate
-credentials. It publishes HTTP on host loopback, at port 8081 by default.
-Set `PLAYER_SERVER_PORT` to change the host port. The restart policy retries
-startup while the writer initializes the schema.
+Compose は、書き込みサービスとは別の認証情報で同じ対局データベースに接続する。
+HTTP はホストのループバックアドレスで公開し、既定のポートは 8081 となる。
+ホスト側ポートを変更する場合は `PLAYER_SERVER_PORT` を設定する。
+書き込みサービスがスキーマを初期化している間は、再起動ポリシーに従って起動を再試行する。
 
-## Verification
+## 動作を検証する
 
-From the repository root, run the reader and HTTP adapter tests.
+リポジトリのルートで、読み取りサービスと HTTP アダプターのテストを実行する。
 
 ```sh
 ./scripts/test-postgres.sh cargo test --locked -p game-record-persistence -p player-http -p player-server
 ```
 
-The [API reference](../../crates/player-http/README.md#openapi) describes the
-OpenAPI endpoint and export command.
+サーバーを起動せずに OpenAPI を出力する場合は、[API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に従うこと。
 
-`GET /users/{user_id}/ratings` returns both latest committed rating pools without
-authentication. See the [HTTP rating contract](../../crates/player-http/README.md#read-user-ratings).
-The reader has no permission to read `rated_games`, `rating_slots`, `rating_jobs`
-or `rating_applications`.
+## 確定済みレートを取得する
+
+公開レート取得エンドポイントにユーザー ID を指定する。
+
+```sh
+curl 'http://127.0.0.1:8081/users/USER_ID/ratings'
+```
+
+レスポンスは両プールを含む。
+フィールドと、レート適用済み対局がないユーザーの扱いは
+[HTTP レート API の契約](../../crates/player-http/README.md#ユーザー別レートの取得)に記述する。

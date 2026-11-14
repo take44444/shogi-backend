@@ -1,52 +1,43 @@
-# Run the rating worker
+# レートワーカーを起動する
 
-Start PostgreSQL, the game server and the independent worker with `docker compose up`.
-Add `--profile records` to start the anonymous player HTTP server.
+`docker compose up --build -d` で PostgreSQL、対局サーバー、独立したレートワーカーを起動する。
+認証不要の棋譜 HTTP サーバーも起動する場合は `--profile records` を追加する。
 
-For local binaries, set `DATABASE_URL` to the same Game DB used by `game-server`.
-Run `cargo run -p rating-worker-server`. The worker validates schema version 7
-before polling and stops on Ctrl-C.
+ローカルのバイナリーを使う場合は、`game-server` と同じ対局データベースを `DATABASE_URL` に指定する。
+`cargo run --locked -p rating-worker-server` で起動し、Ctrl-C で停止する。
 
-The worker uses these environment variables.
+ポーリング、ジョブの取得、再試行の設定を変更する場合は、
+[レートワーカーの設定](../../docs/reference/service-configuration.md#レートワーカー)にある環境変数を指定する。
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `DATABASE_URL` | `postgres://shogi:shogi@localhost:5432/shogi` | Game DB writer connection. |
-| `RATING_WORKER_ID` | `worker-<process-id>` | Process identity, 1 through 128 bytes without whitespace. Use distinct names for concurrent workers. |
-| `RATING_LEASE_MS` | `30000` | Positive claim lifetime in milliseconds. |
-| `RATING_RETRY_LIMIT` | `5` | Positive maximum acquisitions, including expired claims. |
-| `RATING_BACKOFF_MS` | `1000` | Delay before a transient retry. |
-| `RATING_POLL_MS` | `250` | Positive delay between ticks. |
+## 隔離された対局の処理を再試行する
 
-## Retry a quarantined game
+書き込み権限を持つ認証情報を使い、`rating_jobs.last_error`、
+`rated_games` に保存した変更不可の開始時レート状態、対応する確定済みの対局結果を確認する。
+保存済みの入力が破損している場合は、再試行の前に修復すること。再試行は入力を自動修復しない。
 
-Inspect `rating_jobs.last_error`, the immutable `rated_games` starts and the
-corresponding committed game result with writer credentials. Repair corrupt
-stored input before retrying. A retry does not repair input automatically.
-
-Run the operator command with an explicit game ID.
+対局 ID を明示して運用コマンドを実行する。
 
 ```sh
-cargo run -p rating-worker-server -- retry-quarantined GAME_ID
+cargo run --locked -p rating-worker-server -- retry-quarantined GAME_ID
 ```
 
-For Compose, run `docker compose run --rm rating-worker-server retry-quarantined GAME_ID`.
-`Retried` means the job is pending with a fresh attempt budget and generation.
-`NotQuarantined` and `NotFound` leave storage unchanged. Reservations remain
-occupied throughout quarantine and retry. Do not delete reservations to recover
-work, because admission uses them to freeze ordered starts.
+Compose では `docker compose run --rm rating-worker-server retry-quarantined GAME_ID` を実行する。
+`Retried` は、試行回数の上限と世代を更新してジョブを待機状態に戻したことを示す。
+`NotQuarantined` と `NotFound` は保存状態を変更しない。
+隔離中も再試行中も、レート更新用の予約は占有されたままとなる。
+レート適用前に同じプールで次の対局を開始しないよう、マッチメイキングが予約を参照する。
+復旧のために予約を削除しないこと。
 
-## Exercise a real game
+## 実際の対局で確認する
 
-Start `game-server`, `rating-worker-server` and `player-server` against the same
-database. Use a new prefix for each run.
+`game-server`、`rating-worker-server`、`player-server` を同じデータベースに接続して起動する。
+実行ごとに新しい接頭辞を使う。
 
 ```sh
-cargo run -p game-grpc --example rating_proof -- http://127.0.0.1:50051 rating-demo
+cargo run --locked -p game-grpc --example rating_proof -- http://127.0.0.1:50051 rating-demo
 curl http://127.0.0.1:8081/users/rating-demo-one/ratings
 ```
 
-The example joins two tickets, waits for matchmaking, prints the committed game
-and random side bindings, and resigns White. Once the worker applies it,
-Black has 1516 and White has 1484 in `ten_minute_30`, each with one completed
-rated game. Their other pool remains null with zero games.
+サンプルはチケットを 2 件登録して対戦相手の決定を待ち、確定した対局と無作為に決めた先後を出力してから、後手が投了する。
+ワーカーの適用後、`ten_minute_30` のレートは先手のユーザーが 1516、後手のユーザーが 1484 となる。
+両ユーザーのレート適用済み対局数は 1 となる。もう一方のプールはレートが null、対局数が 0 のままとなる。
