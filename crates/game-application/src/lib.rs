@@ -42,6 +42,7 @@
 mod actor;
 mod events;
 pub use events::*;
+pub mod matchmaking;
 pub mod rating;
 mod repository;
 mod types;
