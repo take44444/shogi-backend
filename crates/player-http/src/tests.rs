@@ -1,6 +1,6 @@
 use super::*;
 use axum::{body::Body, http::Request};
-use game_application::{GameId as WriteId, GameService, MakeMove, Participants, RequestId, Resign};
+use game_application::{GameId as WriteId, MakeMove, Participants, RequestId, Resign};
 use game_persistence::SeaOrmStore;
 use game_record_persistence::PostgresGameRecords;
 use http_body_util::BodyExt;
@@ -24,10 +24,10 @@ async fn get(app: Router, path: &str) -> (StatusCode, Value) {
 async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions() {
     let database = pg_test_support::TestDatabase::new().await;
     let store = Arc::new(SeaOrmStore::connect(database.url()).await.unwrap());
-    let games = GameService::new(store);
+    let games = pg_test_support::GameFixture::new(store, database.url());
     let id = WriteId::new("game").unwrap();
     games
-        .create(
+        .seed(
             id.clone(),
             Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
                 .unwrap(),
@@ -58,7 +58,7 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
         .await
         .unwrap();
     games
-        .create(
+        .seed(
             WriteId::new("ongoing").unwrap(),
             Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
                 .unwrap(),

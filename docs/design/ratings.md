@@ -14,21 +14,21 @@ account, broker, actor or writer dependencies.
 
 ## Admission and completion
 
-`CreateGame` creates casual games. `CreateRatedGame` requires an explicit pool.
-Admission inserts both state rows if absent, locks them in stable user-ID order,
-checks the unique user-and-pool reservations, and freezes starts in the same
-transaction as game creation and both reservations. A second game involving
-either user in the same pool returns `FailedPrecondition` until the previous
-job is applied. Different pools have separate state rows and reservations.
+All production games start through [matchmaking](matchmaking.md). The client
+chooses a pool and owner-scoped ticket UUID. The server selects the opponent and
+sides. Pairing commits game creation, complete frozen `RatingState` values, both
+reservations, and both playing tickets in one database transaction. Initial effective Elo is 1500. Rating state rows lock in UserId
+order, shared with worker application.
 
-Creation is not idempotent. `GetRatedGame` returns immutable participants, pool
-and start states from durable storage for an uncertain create response. Compare
-the complete identity with the original request. A conflicting existing ID is
-not a successful retry. Casual and absent games have no rated identity.
+One waiting or playing ticket is allowed per user across both pools. Refusals,
+preceding cancellations and terminal tickets remain durable. After a lost
+response, clients read the ticket or retry its UUID with the same pool.
 
-The existing game acceptance transaction writes the terminal result, receipt,
-outbox events and one rating job atomically. Casual completion writes no job.
-The worker reads the committed result, independently of broker delivery.
+Terminal acceptance writes the result, receipt, outbox events, both finished
+tickets and one rating job atomically. It requires both valid playing tickets.
+The global participation becomes free, while reservations remain until worker
+application. Users can join the other pool immediately, but same-pool admission
+returns a durable `rating_pending` refusal until that reservation is released.
 
 ## Claims and application
 
@@ -61,9 +61,9 @@ No applied state means a null rating and zero completed games, including for a
 valid unknown user ID. It does not assert account existence or that pending
 updates have finished. Storage failures return 503.
 
-The fresh version 6 schema grants `shogi_reader` SELECT only on `schema_version`,
+The fresh version 7 schema grants `shogi_reader` SELECT only on `schema_version`,
 `games`, `journal` and `rating_states`, when that provisioned role exists.
-`rated_games`, `rating_slots`, `rating_jobs` and `rating_applications` remain
+`rated_games`, `rating_slots`, `rating_jobs`, `rating_applications` and `matchmaking_tickets` remain
 private. Provisioning has no blanket future-table grants. Startup works without
 the reader role, while deployments provision it before game schema initialization.
 Previous schema versions fail startup unchanged. No migration or automatic

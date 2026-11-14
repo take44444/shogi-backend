@@ -317,20 +317,6 @@ async fn insert_game(
 
 #[async_trait]
 impl GameRepository for SeaOrmStore {
-    async fn create_rated_game(
-        &self,
-        id: GameId,
-        participants: Participants,
-        pool: rating_domain::Pool,
-    ) -> Result<(), Error> {
-        rating::admit(&self.db, id, participants, pool).await
-    }
-    async fn rated_game(
-        &self,
-        id: &GameId,
-    ) -> Result<Option<game_application::rating::RatedGame>, Error> {
-        rating::identity(&self.db, id).await
-    }
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -380,12 +366,6 @@ impl GameRepository for SeaOrmStore {
         }
         Ok(access)
     }
-    async fn create_game(&self, id: GameId, participants: Participants) -> Result<(), Error> {
-        let tx = self.db.begin().await.map_err(storage)?;
-        insert_game(&tx, &id, &participants).await?;
-        tx.commit().await.map_err(storage)
-    }
-
     async fn version(&self, id: &GameId) -> Result<u64, Error> {
         let row = self
             .db

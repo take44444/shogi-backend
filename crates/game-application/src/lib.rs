@@ -1,7 +1,7 @@
 //! Game use cases backed by [`GameRepository`].
 //!
-//! [`GameService`] binds two distinct user IDs to a game and derives their sides
-//! from [`Participants`]. The caller supplies trusted IDs. Account management and
+//! Matchmaking creates games with permanent side bindings. [`GameService`] derives
+//! command sides from [`Participants`]. Account management and
 //! authentication belong to a separate service.
 //! The application contains no database types and has no default in-memory store.
 //!
@@ -20,7 +20,7 @@
 //! scoped to a game. After checking participant membership, exact retries match
 //! action kind, user, expected sequence, and typed move. They return the original
 //! [`Acceptance`] before stale-sequence or finished-game checks, even after restart.
-//! Rejected request IDs remain reusable. Creating a game is not idempotent.
+//! Rejected request IDs remain reusable. Matchmaking preserves durable ticket identities.
 //!
 //! A command stages a cloned game and receipt. The actor constructs a
 //! [`StagedGameChange`] to generate and freeze events before persistence. The repository
@@ -75,49 +75,6 @@ impl GameService {
             repository,
             games: Arc::default(),
         }
-    }
-
-    /// Creates a standard game with permanent side bindings, then reads its snapshot.
-    /// A snapshot failure can occur after game creation committed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::AlreadyExists`] for a duplicate game, or storage, actor,
-    /// or restoration errors from [`Self::snapshot`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if actor creation is needed outside a Tokio runtime.
-    pub async fn create(
-        &self,
-        id: GameId,
-        participants: Participants,
-    ) -> Result<Snapshot, ApplicationError> {
-        self.repository
-            .create_game(id.clone(), participants)
-            .await?;
-        self.snapshot(&id).await
-    }
-
-    /// Creates a rated game, reserving each participant's selected pool.
-    pub async fn create_rated(
-        &self,
-        id: GameId,
-        participants: Participants,
-        pool: rating::Pool,
-    ) -> Result<Snapshot, ApplicationError> {
-        self.repository
-            .create_rated_game(id.clone(), participants, pool)
-            .await?;
-        self.snapshot(&id).await
-    }
-
-    /// Reads immutable creation identity independently of the actor cache.
-    pub async fn rated_game(
-        &self,
-        id: &GameId,
-    ) -> Result<Option<rating::RatedGame>, ApplicationError> {
-        self.repository.rated_game(id).await
     }
 
     /// Returns an owned snapshot after checking the durable version.

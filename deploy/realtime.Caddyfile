@@ -1,5 +1,5 @@
 :8080 {
-    @games path /ws/games/*
+    @games path /ws/games/* /matchmaking/*
     reverse_proxy @games realtime-gateway:8082
     reverse_proxy realtime-user-server:8080
 }

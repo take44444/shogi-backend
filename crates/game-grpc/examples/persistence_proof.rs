@@ -1,3 +1,4 @@
+mod support;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 use prost::Message;
 use std::{fs, path::Path};
@@ -6,28 +7,25 @@ use tonic::transport::Channel;
 type Client = GameServiceClient<Channel>;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-fn movement(game: &str, seq: u64, usi: &str) -> proto::MakeMoveRequest {
+fn movement(identity: &proto::Snapshot, game: &str, seq: u64, usi: &str) -> proto::MakeMoveRequest {
     proto::MakeMoveRequest {
         game_id: game.into(),
         request_id: format!("move-{seq}"),
         expected_seq: Some(seq),
-        user_id: format!(
-            "{game}-{}",
-            if seq.is_multiple_of(2) {
-                "black"
-            } else {
-                "white"
-            }
-        ),
+        user_id: if seq.is_multiple_of(2) {
+            identity.black_user_id.clone()
+        } else {
+            identity.white_user_id.clone()
+        },
         usi: usi.into(),
     }
 }
-fn resignation(game: &str) -> proto::ResignRequest {
+fn resignation(identity: &proto::Snapshot, game: &str) -> proto::ResignRequest {
     proto::ResignRequest {
         game_id: game.into(),
         request_id: "resign".into(),
         expected_seq: Some(5),
-        user_id: format!("{game}-white"),
+        user_id: identity.white_user_id.clone(),
     }
 }
 async fn snapshot(client: &mut Client, game: &str) -> Result<proto::Snapshot> {
@@ -61,18 +59,18 @@ async fn main() -> Result<()> {
     match mode {
         "seed" => {
             fs::create_dir_all(dir)?;
-            let initial = client
-                .create_game(proto::CreateGameRequest {
-                    game_id: game.clone(),
-                    black_user_id: format!("{game}-black"),
-                    white_user_id: format!("{game}-white"),
-                })
-                .await?
-                .into_inner();
+            let initial = support::pair(
+                &mut client,
+                [&format!("{game}-one"), &format!("{game}-two")],
+            )
+            .await?;
+            save(&dir.join("identity.bin"), &initial)?;
+            let game = &initial.game_id;
+            let identity = initial.clone();
             assert_eq!(initial.seq, 0);
             for (seq, usi) in ["7g7f", "3c3d", "8h2b+"].into_iter().enumerate() {
                 let receipt = client
-                    .make_move(movement(game, seq as u64, usi))
+                    .make_move(movement(&identity, game, seq as u64, usi))
                     .await?
                     .into_inner();
                 assert_eq!(receipt.seq, seq as u64 + 1);
@@ -87,25 +85,30 @@ async fn main() -> Result<()> {
             println!("seed verified at sequence 3; restart or recreate the server before resume");
         }
         "resume" => {
+            let identity: proto::Snapshot = load(&dir.join("identity.bin"))?;
+            let game = &identity.game_id;
             let expected: proto::Snapshot = load(&dir.join("ongoing.bin"))?;
             assert_eq!(snapshot(&mut client, game).await?, expected);
             let first: proto::Acceptance = load(&dir.join("first.bin"))?;
             assert_eq!(
                 client
-                    .make_move(movement(game, 0, "7g7f"))
+                    .make_move(movement(&identity, game, 0, "7g7f"))
                     .await?
                     .into_inner(),
                 first
             );
             for (seq, usi) in [(3, "3a2b"), (4, "B*4e")] {
                 let receipt = client
-                    .make_move(movement(game, seq, usi))
+                    .make_move(movement(&identity, game, seq, usi))
                     .await?
                     .into_inner();
                 assert_eq!(receipt.seq, seq + 1);
             }
             let before = snapshot(&mut client, game).await?;
-            let finish = client.resign(resignation(game)).await?.into_inner();
+            let finish = client
+                .resign(resignation(&identity, game))
+                .await?
+                .into_inner();
             assert_eq!(finish.seq, 6);
             assert_eq!(
                 finish.result,
@@ -128,18 +131,26 @@ async fn main() -> Result<()> {
             );
         }
         "finished" => {
+            let identity: proto::Snapshot = load(&dir.join("identity.bin"))?;
+            let game = &identity.game_id;
             let expected: proto::Snapshot = load(&dir.join("finished.bin"))?;
             assert_eq!(snapshot(&mut client, game).await?, expected);
             let first: proto::Acceptance = load(&dir.join("first.bin"))?;
             let finish: proto::Acceptance = load(&dir.join("resign.bin"))?;
             assert_eq!(
                 client
-                    .make_move(movement(game, 0, "7g7f"))
+                    .make_move(movement(&identity, game, 0, "7g7f"))
                     .await?
                     .into_inner(),
                 first
             );
-            assert_eq!(client.resign(resignation(game)).await?.into_inner(), finish);
+            assert_eq!(
+                client
+                    .resign(resignation(&identity, game))
+                    .await?
+                    .into_inner(),
+                finish
+            );
             assert_eq!(snapshot(&mut client, game).await?, expected);
             println!(
                 "finished restart verified exact snapshot and both original receipts at sequence 6"

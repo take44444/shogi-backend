@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+game-application = { path = "../game-application" }
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio"] }
 tokio.workspace = true
 uuid = { version = "1", features = ["v4"] }

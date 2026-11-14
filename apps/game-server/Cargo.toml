@@ -8,8 +8,12 @@ publish.workspace = true
 game-persistence = { path = "../../crates/game-persistence" }
 game-application = { path = "../../crates/game-application" }
 game-grpc = { path = "../../crates/game-grpc" }
-tokio.workspace = true
+tokio = { workspace = true, features = ["time"] }
 tonic.workspace = true
+
+[dev-dependencies]
+pg-test-support = { path = "../../crates/pg-test-support" }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["sqlx-postgres", "runtime-tokio"] }
 
 [lints]
 workspace = true

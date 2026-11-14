@@ -15,7 +15,46 @@ cargo run --locked -p realtime-gateway-server
 
 The defaults are `GATEWAY_BIND_ADDR=127.0.0.1:8082`, `GATEWAY_MAX_CONNECTIONS=256`, `GATEWAY_MAX_USER_CONNECTIONS=8`, `GATEWAY_QUEUE_CAPACITY=64`, `GATEWAY_MAX_INPUT_BYTES=4096`, `GATEWAY_MAX_SNAPSHOT_BYTES=262144`, and `GATEWAY_MESSAGES_PER_SECOND=10`. Every limit can be set to a positive value with its named environment variable. The User Service must issue its development `user_session` cookie for the same host as the gateway. HTTPS uses `__Host-user_session` and does not require the loopback flag.
 
-For a browser on one origin, use `docker compose --profile realtime up --build -d`. Its `browser-edge` serves authentication and `/ws/games/*` at `http://localhost:8082` by default. Set `REALTIME_PUBLIC_ORIGIN` and `REALTIME_PORT` together if the browser URL changes. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for login. The standalone `auth` profile has its own User Service origin; use the `realtime` profile alone for this flow. Production should terminate HTTPS at a same-origin reverse proxy and keep User Service, Game Service, gateway, and Valkey on an internal network.
+For a browser on one origin, use `docker compose --profile realtime up --build -d`. Its `browser-edge` serves authentication, `/matchmaking/*`, and `/ws/games/*` at `http://localhost:8082` by default. Set `REALTIME_PUBLIC_ORIGIN` and `REALTIME_PORT` together if the browser URL changes. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for login. The standalone `auth` profile has its own User Service origin; use the `realtime` profile alone for this flow. Production should terminate HTTPS at a same-origin reverse proxy and keep User Service, Game Service, gateway, and Valkey on an internal network.
+
+## Matchmaking HTTP contract
+
+Every endpoint authenticates the session cookie through User Service. Mutations
+require the exact configured Origin and Host. A supplied Origin must also match
+on GET. `Sec-Fetch-Site`, when present, must be `same-origin`. Request IDs are
+UUIDs scoped to the authenticated owner. The body never accepts a user ID.
+
+| Operation | Request | Response |
+| --- | --- | --- |
+| Join | `PUT /matchmaking/tickets/{uuid}`, `{"pool":"ten_minute_30"}` or `{"pool":"byoyomi_30"}` | 201 for a new waiting ticket, 200 for a stored successful request, 409 for a saved refusal |
+| Recover | `GET /matchmaking/me` | `{ "state":"idle", "ticket":null }`, or a waiting or playing ticket |
+| Read request | `GET /matchmaking/tickets/{uuid}` | 200 with current or terminal state, 404 for no ticket belonging to this owner |
+| Keep waiting | `POST /matchmaking/tickets/{uuid}/heartbeat`, `{"sequence":1}` | 200 with current state |
+| Cancel | `DELETE /matchmaking/tickets/{uuid}` | 200 with terminal state, or 409 `already_matched` with committed game ID |
+
+Ticket responses include `ticket_id`, nullable `pool`, and `state`. Waiting adds
+`enqueued_at`, `expires_at`, and `heartbeat_sequence` as integer database epoch
+milliseconds and sequence. Playing and finished add `game_id` and `side`.
+Refused adds `code` with `already_waiting`, `already_playing`, or `rating_pending`.
+Reusing a ticket with another pool returns 409 `pool_conflict`. A cancellation
+received before join has no pool and prevents any later join using that UUID.
+
+Use a new UUID for a fresh attempt. After 503 or a lost response, retry the same
+UUID and contents or read its stored state. Refused, cancelled, expired and
+finished requests never reenter the queue. Reads do not extend lifetime.
+Heartbeats use sequences from 1 through `i64::MAX`; only a strictly newer
+sequence extends a live wait to thirty seconds after database time. Retry a
+heartbeat with the same sequence. The suggested interval is ten seconds.
+
+A user can wait or play once across both pools. Matching uses committed ratings,
+initially 1500, and bilateral windows of 100 Elo plus 50 per thirty seconds,
+capped at 400. The existing game server tries both pools every second. Completion
+frees global participation; the same pool remains blocked until rating applies.
+`idle` does not imply that rating has applied. Clocks and disconnect losses are
+outside this API. Connect to `/ws/games/{game_id}` using the matched ID.
+
+Generate the browser contract with `scripts/generate-openapi.sh`. The output
+includes `matchmaking.json` alongside the user and player documents.
 
 ## WebSocket contract
 

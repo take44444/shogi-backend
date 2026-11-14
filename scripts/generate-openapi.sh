@@ -6,3 +6,4 @@ mkdir -p "$output"
 for service in player user; do
   cargo run --quiet --locked -p "$service-http" --example "$service-openapi" > "$output/$service.json"
 done
+cargo run --quiet --locked -p realtime-gateway --example matchmaking-openapi > "$output/matchmaking.json"

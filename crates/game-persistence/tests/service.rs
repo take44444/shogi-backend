@@ -1,6 +1,5 @@
 use game_application::{
-    ApplicationError as Error, GameId, GameService, MakeMove, Participants, RequestId, Resign,
-    UserId,
+    ApplicationError as Error, GameId, MakeMove, Participants, RequestId, Resign, UserId,
 };
 use pg_test_support::TestDatabase;
 use shogi_domain::{CommandError, FinishReason, Player};
@@ -56,7 +55,7 @@ async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
         let barrier = barrier.clone();
         tasks.spawn(async move {
             barrier.wait().await;
-            service.create(id("same"), participants()).await
+            service.seed(id("same"), participants()).await
         });
     }
     let mut created = 0;
@@ -82,7 +81,7 @@ async fn concurrent_creation_has_exactly_one_winner_and_shared_state() {
 async fn competing_commands_at_one_sequence_accept_exactly_one() {
     let (_database, service) = setup().await;
     let game = id("race");
-    service.create(game.clone(), participants()).await.unwrap();
+    service.seed(game.clone(), participants()).await.unwrap();
     let mut tasks = JoinSet::new();
     let barrier = Arc::new(Barrier::new(32));
     for index in 0..32 {
@@ -128,7 +127,7 @@ async fn competing_commands_at_one_sequence_accept_exactly_one() {
 async fn concurrent_identical_retries_all_receive_original_acceptance() {
     let (_database, service) = setup().await;
     let game = id("retry");
-    service.create(game.clone(), participants()).await.unwrap();
+    service.seed(game.clone(), participants()).await.unwrap();
     let command = movement("same-request", 0, Player::Black, "7g7f");
     let mut tasks = JoinSet::new();
     let barrier = Arc::new(Barrier::new(32));
@@ -156,7 +155,7 @@ async fn concurrent_identical_retries_all_receive_original_acceptance() {
 async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
     let (_database, service) = setup().await;
     let game = id("rejection");
-    let before = service.create(game.clone(), participants()).await.unwrap();
+    let before = service.seed(game.clone(), participants()).await.unwrap();
     for (command, expected) in [
         (
             movement("correct-me", 2, Player::Black, "7g7f"),
@@ -206,7 +205,7 @@ async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
 async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
     let (_database, service) = setup().await;
     let game = id("ledger");
-    service.create(game.clone(), participants()).await.unwrap();
+    service.seed(game.clone(), participants()).await.unwrap();
     let first = movement("first", 0, Player::Black, "7g7f");
     let receipt = service.make_move(&game, first.clone()).await.unwrap();
     service
@@ -255,9 +254,19 @@ async fn games_and_independent_services_have_separate_id_namespaces() {
     let (_database, service) = setup().await;
     let (_other_database, other) = setup().await;
     let (a, b) = (id("a"), id("b"));
-    let initial_a = service.create(a.clone(), participants()).await.unwrap();
-    let initial_b = service.create(b.clone(), participants()).await.unwrap();
-    other.create(a.clone(), participants()).await.unwrap();
+    let initial_a = service.seed(a.clone(), participants()).await.unwrap();
+    let initial_b = service
+        .seed(
+            b.clone(),
+            Participants::new(
+                UserId::new("other-black").unwrap(),
+                UserId::new("other-white").unwrap(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    other.seed(a.clone(), participants()).await.unwrap();
     service
         .make_move(&a, movement("shared", 0, Player::Black, "7g7f"))
         .await
@@ -265,7 +274,14 @@ async fn games_and_independent_services_have_separate_id_namespaces() {
     assert_eq!(service.snapshot(&b).await.unwrap(), initial_b);
     assert_eq!(other.snapshot(&a).await.unwrap(), initial_a);
     service
-        .resign(&b, resignation("shared", 0, Player::White))
+        .resign(
+            &b,
+            Resign {
+                request_id: RequestId::new("shared").unwrap(),
+                expected_seq: 0,
+                user_id: UserId::new("other-white").unwrap(),
+            },
+        )
         .await
         .unwrap();
     assert!(service.snapshot(&a).await.unwrap().result.is_none());
@@ -294,12 +310,15 @@ fn user(side: Player) -> UserId {
 fn participants() -> Participants {
     Participants::new(user(Player::Black), user(Player::White)).unwrap()
 }
-async fn setup() -> (TestDatabase, GameService) {
+async fn setup() -> (TestDatabase, pg_test_support::GameFixture) {
     let database = TestDatabase::new().await;
     let store = Arc::new(
         game_persistence::SeaOrmStore::connect(database.url())
             .await
             .unwrap(),
     );
-    (database, GameService::new(store))
+    {
+        let games = pg_test_support::GameFixture::new(store, database.url());
+        (database, games)
+    }
 }

@@ -431,7 +431,6 @@ impl MatchmakingRepository for SeaOrmStore {
                 return Err(MError::Corrupt);
             }
         }
-        // Rating workers may hold their locks until after a waiting ticket expires.
         let time = now(&tx).await?;
         if select_pair(&locked, time).is_none() {
             expire(&tx, None).await?;
@@ -482,10 +481,6 @@ pub(crate) async fn finish(
         )
         .await
         .map_err(storage)?;
-    // Legacy creation is removed with its callers in the transport unit.
-    if rows.is_empty() {
-        return Ok(());
-    }
     let tickets = rows
         .into_iter()
         .map(decode)

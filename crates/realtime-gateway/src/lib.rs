@@ -2,6 +2,7 @@
 mod auth;
 mod cursor;
 mod game;
+mod matchmaking;
 
 use auth::{AuthClient, AuthError, Session};
 use axum::{
@@ -219,6 +220,7 @@ impl Gateway {
     /// Builds the HTTP router. The caller owns the listener.
     pub fn router(self: &Arc<Self>) -> Router {
         Router::new()
+            .merge(matchmaking::router())
             .route("/ws/games/{game_id}", get(upgrade))
             .with_state(self.clone())
     }
@@ -620,4 +622,9 @@ async fn run_connection(
         writer.abort();
         let _ = writer.await;
     }
+}
+
+/// Browser matchmaking OpenAPI document.
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    matchmaking::openapi()
 }

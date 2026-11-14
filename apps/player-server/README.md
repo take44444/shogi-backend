@@ -32,7 +32,7 @@ curl 'http://127.0.0.1:8081/game-records/example-game'
 | `PLAYER_BIND_ADDR` | `127.0.0.1:8081` | HTTP socket address |
 | `PLAYER_GAME_DATABASE_URL` | `postgres://shogi_reader:shogi_reader@localhost:5432/shogi` | PostgreSQL URL with SELECT-only credentials |
 
-The reader requires schema version 6 and never initializes or upgrades the
+The reader requires schema version 7 and never initializes or upgrades the
 schema. Its role needs SELECT on `schema_version`, `games`, `journal` and
 `rating_states`, without table ownership or write privileges. The [bootstrap SQL](../../scripts/init-postgres.sql) grants access to
 new tables created by the game writer.

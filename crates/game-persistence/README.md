@@ -1,7 +1,7 @@
 # game-persistence
 
 `SeaOrmStore::connect(&str).await` connects to PostgreSQL and initializes or
-validates the game schema. `SeaOrmStore` implements `GameRepository` for game
+validates the game schema. `SeaOrmStore` implements `MatchmakingRepository` for admission and `GameRepository` for game
 state, accepted requests, and the durable event outbox. Account storage belongs
 to the separate user service.
 
@@ -19,7 +19,7 @@ validation also requires database `CREATE`: it builds a reference schema inside
 a savepoint and rolls it back after comparison.
 
 Startup takes a PostgreSQL transaction advisory lock. An empty schema receives
-the version 6 ledger, tables, constraints, and indexes atomically. Existing
+the version 7 ledger, tables, constraints, and indexes atomically. Existing
 schemas must have the current ledger and required definitions, including column
 types, NULL constraints, keys, CHECK constraints, and indexes. Extra columns,
 indexes, and unrelated tables are permitted when required definitions remain.
@@ -71,7 +71,8 @@ Contract tests use isolated PostgreSQL databases through `pg-test-support`. They
 
 ## Rating transactions
 
-Rated creation reserves both user-and-pool slots and freezes starts atomically.
+Matchmaking atomically creates a game, freezes both rating states, reserves both
+user-and-pool slots and transitions both waiting tickets to playing.
 Terminal acceptance enqueues the rating job in the receipt and outbox transaction.
 `SeaOrmRatingJobs` claims, applies, defers and recovers jobs with owner, generation
 and database-time fences. The application ledger makes an uncertain successful
@@ -81,3 +82,20 @@ The initializer grants reader access only to `schema_version`, `games`, `journal
 and `rating_states` when `shogi_reader` exists. See the
 [rating design](../../docs/design/ratings.md) for ordering, recovery and table
 ownership.
+
+## Matchmaking transactions
+
+`matchmaking_tickets` stores waiting, playing, finished, cancelled, expired and
+refused requests. Its partial unique index on active `user_id` applies across
+both pools. The owner and ticket UUID form the retry key. Terminal histories
+are retained. The reader role has no SELECT grant on this table.
+
+Join, read-time expiry, cancel, heartbeat, periodic expiry, pairing and terminal
+acceptance acquire the common transaction advisory lock before any row lock.
+Ticket rows lock by `(user_id,ticket_id)`, and rating state rows by UserId.
+Fresh `clock_timestamp()` reads after lock waits determine expiry and matching.
+Rating workers retain their independent job and rating-state lock order.
+
+Terminal acceptance requires both matching playing tickets and changes them to
+finished in the result transaction. It leaves rating reservations to the existing
+worker. Production persistence exposes no direct game creation method.

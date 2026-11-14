@@ -6,14 +6,18 @@ package shogi.v1;
 // IDs contain 1 through 128 UTF-8 bytes with no Unicode whitespace.
 // Cancelled or lost responses can follow a committed command. For MakeMove and
 // Resign, retry identical contents with the same request ID and expected sequence.
-// CreateGame is not an exact-retry API; duplicates return AlreadyExists.
+// Matchmaking requests preserve an owner-scoped UUID for durable retry recovery.
 service GameService {
-  // Binds two distinct user IDs and creates a sequence-zero game.
-  rpc CreateGame(CreateGameRequest) returns (Snapshot);
-  // Reserves both players in the selected rating pool. Creation is not idempotent.
-  rpc CreateRatedGame(CreateRatedGameRequest) returns (Snapshot);
-  // Durable creation identity for reconciling an uncertain rated creation response.
-  rpc GetRatedGame(GetSnapshotRequest) returns (RatedGameIdentity);
+  // Owner-scoped durable admission. Refusals are returned as stored ticket states.
+  rpc JoinMatchmaking(JoinMatchmakingRequest) returns (JoinMatchmakingResponse);
+  // Reads current participation without extending waiting lifetime.
+  rpc GetMatchmaking(MatchmakingOwner) returns (MatchmakingCurrent);
+  // Reads one owner-scoped request, including terminal history.
+  rpc GetMatchmakingTicket(MatchmakingRequest) returns (MatchmakingTicket);
+  // Extends a live waiting ticket only for a strictly newer sequence.
+  rpc HeartbeatMatchmaking(HeartbeatMatchmakingRequest) returns (MatchmakingTicket);
+  // Cancels waiting state or stores a cancellation before join.
+  rpc CancelMatchmaking(MatchmakingRequest) returns (MatchmakingTicket);
   // Returns current participants, board, hands, legal moves, and sequence.
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
   // Authenticated viewer snapshot. Inaccessible games are indistinguishable from missing games.
@@ -36,16 +40,6 @@ message ViewerRequest {
 // Successful current access check.
 message ViewAccess {}
 
-// Creates a standard game with immutable bindings to two distinct user IDs.
-// Duplicate game IDs return AlreadyExists. Creation is not an exact-retry API.
-message CreateGameRequest {
-  // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
-  string game_id = 1;
-  // User ID permanently bound to Black, distinct from the White user.
-  string black_user_id = 2;
-  // User ID permanently bound to White, distinct from the Black user.
-  string white_user_id = 3;
-}
 // Reads a game after the server checks its durable version.
 message GetSnapshotRequest {
   // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
@@ -225,36 +219,66 @@ enum RatingPool {
   // Zero main time plus 30-second byoyomi.
   RATING_POOL_BYOYOMI_30 = 2;
 }
-// Creates a rated game with immutable participant and pool bindings.
-message CreateRatedGameRequest {
-  // Immutable game ID.
-  string game_id = 1;
-  // User bound to Black.
-  string black_user_id = 2;
-  // User bound to White.
-  string white_user_id = 3;
-  // Unspecified and unknown enum values are InvalidArgument.
-  RatingPool pool = 4;
+// A trusted authenticated owner claim.
+message MatchmakingOwner {
+  // User ID supplied by the authenticated internal caller.
+  string user_id = 1;
 }
-// Committed state frozen at admission.
-message RatingStart {
-  // Missing means unrated, with effective Elo 1500.
-  optional int64 rating = 1;
-  // Completed rated games at admission.
-  uint64 completed_rated_games = 2;
+// An owner-scoped UUID.
+message MatchmakingRequest {
+  // Authenticated owner claim.
+  string user_id = 1;
+  // Client-generated UUID, retained on retries.
+  string ticket_id = 2;
 }
-// NotFound means no rated identity, including a casual game with this ID.
-message RatedGameIdentity {
-  // Immutable game ID.
-  string game_id = 1;
-  // User bound to Black.
-  string black_user_id = 2;
-  // User bound to White.
-  string white_user_id = 3;
-  // Selected independent pool.
-  RatingPool pool = 4;
-  // Black state at admission.
-  RatingStart black_start = 5;
-  // White state at admission.
-  RatingStart white_start = 6;
+// Only the pool and request identity are supplied by the caller.
+message JoinMatchmakingRequest {
+  // Authenticated owner claim.
+  string user_id = 1;
+  // Client-generated UUID, retained on retries.
+  string ticket_id = 2;
+  // Supported nonzero rating pool.
+  RatingPool pool = 3;
+}
+// An ordered heartbeat. Preserve the sequence on retransmission.
+message HeartbeatMatchmakingRequest {
+  // Authenticated owner claim.
+  string user_id = 1;
+  // Owner-scoped client UUID.
+  string ticket_id = 2;
+  // Strictly positive sequence through i64::MAX.
+  int64 sequence = 3;
+}
+// A stored ticket plus whether this call admitted a new waiting request.
+message JoinMatchmakingResponse {
+  // Current stored request result, including durable refusals.
+  MatchmakingTicket ticket = 1;
+  // True only for the first successful waiting admission.
+  bool created = 2;
+}
+// No ticket means idle. Rating application may still be pending.
+message MatchmakingCurrent {
+  // The single waiting or playing ticket, absent when idle.
+  MatchmakingTicket ticket = 1;
+}
+// Owner-scoped ticket response. State determines which details are present.
+message MatchmakingTicket {
+  // Client-generated owner-scoped UUID.
+  string ticket_id = 1;
+  // Absent only for a cancellation received before join.
+  optional RatingPool pool = 2;
+  // waiting, playing, finished, cancelled, expired, or refused.
+  string state = 3;
+  // Immutable database epoch milliseconds, for waiting state.
+  optional int64 enqueued_at = 4;
+  // Exclusive waiting expiry in database epoch milliseconds.
+  optional int64 expires_at = 5;
+  // Last accepted heartbeat sequence, initially zero.
+  optional int64 heartbeat_sequence = 6;
+  // Committed game ID, for playing or finished.
+  optional string game_id = 7;
+  // Permanent side, for playing or finished.
+  optional Player side = 8;
+  // Durable already_waiting, already_playing, or rating_pending refusal.
+  optional string refusal_reason = 9;
 }

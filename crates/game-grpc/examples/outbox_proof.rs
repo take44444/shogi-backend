@@ -1,3 +1,4 @@
+mod support;
 use futures_util::StreamExt;
 use game_application::GameId;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
@@ -74,31 +75,19 @@ async fn subscribe(url: &str, game: &str) -> Result<PubSub> {
     }
     Err("Valkey did not become ready".into())
 }
-async fn create(client: &mut Client, game: &str) -> Result<()> {
-    let response = client
-        .create_game(proto::CreateGameRequest {
-            game_id: game.into(),
-            black_user_id: format!("{game}-black"),
-            white_user_id: format!("{game}-white"),
-        })
-        .await?
-        .into_inner();
-    assert_eq!(response.seq, 0);
-    Ok(())
+async fn create(client: &mut Client, prefix: &str) -> Result<proto::Snapshot> {
+    support::pair(client, [&format!("{prefix}-one"), &format!("{prefix}-two")]).await
 }
-fn movement(game: &str, seq: u64, usi: &str) -> proto::MakeMoveRequest {
+fn movement(identity: &proto::Snapshot, game: &str, seq: u64, usi: &str) -> proto::MakeMoveRequest {
     proto::MakeMoveRequest {
         game_id: game.into(),
         request_id: format!("move-{seq}"),
         expected_seq: Some(seq),
-        user_id: format!(
-            "{game}-{}",
-            if seq.is_multiple_of(2) {
-                "black"
-            } else {
-                "white"
-            }
-        ),
+        user_id: if seq.is_multiple_of(2) {
+            identity.black_user_id.clone()
+        } else {
+            identity.white_user_id.clone()
+        },
         usi: usi.into(),
     }
 }
@@ -142,11 +131,11 @@ async fn main() -> Result<()> {
     }
     let (endpoint, valkey, project) = (&args[0], &args[1], &args[2]);
     let mut client = connect(endpoint).await?;
-    let game = "proof.*.>棋\0";
+    let identity = create(&mut client, "proof.*.>棋\0").await?;
+    let game = identity.game_id.as_str();
     let mut sub = subscribe(valkey, game).await?;
-    create(&mut client, game).await?;
     let first = client
-        .make_move(movement(game, 0, "7g7f"))
+        .make_move(movement(&identity, game, 0, "7g7f"))
         .await?
         .into_inner();
     assert_eq!(first.seq, 1);
@@ -155,10 +144,10 @@ async fn main() -> Result<()> {
     assert_eq!(normal["in_check"], false);
     assert_eq!(normal["result"], Value::Null);
     assert_eq!(normal["request_id"], "move-0");
-    assert_eq!(normal["user_id"], format!("{game}-black"));
+    assert_eq!(normal["user_id"], identity.black_user_id);
     assert_eq!(
         client
-            .make_move(movement(game, 0, "7g7f"))
+            .make_move(movement(&identity, game, 0, "7g7f"))
             .await?
             .into_inner(),
         first
@@ -168,7 +157,7 @@ async fn main() -> Result<()> {
             game_id: game.into(),
             request_id: "end".into(),
             expected_seq: Some(1),
-            user_id: format!("{game}-white"),
+            user_id: identity.white_user_id.clone(),
         })
         .await?;
     let end = receive(&mut sub, game, 2, "game_finished").await?;
@@ -180,14 +169,14 @@ async fn main() -> Result<()> {
     quiet(&mut sub).await?;
     println!("normal move, exact retry, resignation, and safe channel verified");
 
-    let game = "backlog";
+    let identity = create(&mut client, "backlog").await?;
+    let game = identity.game_id.as_str();
     let mut sub = subscribe(valkey, game).await?;
-    create(&mut client, game).await?;
     compose(project, &["stop", "outbox-publisher"])?;
     for (seq, usi) in [(0, "7g7f"), (1, "3c3d")] {
         assert_eq!(
             client
-                .make_move(movement(game, seq, usi))
+                .make_move(movement(&identity, game, seq, usi))
                 .await?
                 .into_inner()
                 .seq,
@@ -212,7 +201,7 @@ async fn main() -> Result<()> {
     );
     assert_eq!(
         client
-            .make_move(movement(game, 0, "7g7f"))
+            .make_move(movement(&identity, game, 0, "7g7f"))
             .await?
             .into_inner()
             .seq,
@@ -230,7 +219,7 @@ async fn main() -> Result<()> {
     compose(project, &["stop", "valkey"])?;
     assert_eq!(
         client
-            .make_move(movement(game, 2, "2g2f"))
+            .make_move(movement(&identity, game, 2, "2g2f"))
             .await?
             .into_inner()
             .seq,
@@ -265,7 +254,7 @@ async fn main() -> Result<()> {
     quiet(&mut fresh_sub).await?;
     assert_eq!(
         client
-            .make_move(movement(game, 2, "2g2f"))
+            .make_move(movement(&identity, game, 2, "2g2f"))
             .await?
             .into_inner()
             .seq,
@@ -274,7 +263,7 @@ async fn main() -> Result<()> {
     quiet(&mut fresh_sub).await?;
     assert_eq!(
         client
-            .make_move(movement(game, 3, "8c8d"))
+            .make_move(movement(&identity, game, 3, "8c8d"))
             .await?
             .into_inner()
             .seq,
@@ -284,8 +273,8 @@ async fn main() -> Result<()> {
     println!(
         "publisher restart and request replay did not republish marked rows; new events still flow"
     );
-    let game = "unwatched";
-    create(&mut client, game).await?;
+    let identity = create(&mut client, "unwatched").await?;
+    let game = identity.game_id.as_str();
     let mut check = redis::Client::open(valkey.as_str())?
         .get_multiplexed_async_connection()
         .await?;
@@ -295,14 +284,16 @@ async fn main() -> Result<()> {
         .query_async(&mut check)
         .await?;
     assert_eq!(subscribers, 0);
-    client.make_move(movement(game, 0, "7g7f")).await?;
+    client
+        .make_move(movement(&identity, game, 0, "7g7f"))
+        .await?;
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let output = Command::new("docker")
                 .args([
                     "compose", "-p", project, "exec", "-T", "postgres", "psql",
                     "-U", "shogi", "-d", "shogi", "-Atc",
-                    "SELECT COUNT(*) FROM outbox_events WHERE game_id = 'unwatched' AND published = true",
+                    &format!("SELECT COUNT(*) FROM outbox_events WHERE game_id = '{game}' AND published = true"),
                 ])
                 .output()?;
             if !output.status.success() {

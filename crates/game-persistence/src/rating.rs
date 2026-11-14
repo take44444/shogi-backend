@@ -6,12 +6,8 @@ use game_application::rating::{
 };
 use game_application::{ApplicationError as Error, GameId, Participants, UserId};
 use rating_domain::{Pool, RatingChange, RatingState};
-use sea_orm::sea_query::{
-    Expr, ExprTrait, JoinType, LockBehavior, LockType, OnConflict, Order, Query,
-};
-use sea_orm::{
-    ConnectionTrait, DatabaseConnection, DatabaseTransaction, QueryResult, TransactionTrait,
-};
+use sea_orm::sea_query::{Expr, ExprTrait, JoinType, LockBehavior, LockType, Order, Query};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, QueryResult, TransactionTrait};
 
 fn worker_error(error: Error) -> WorkerError {
     if error == Error::Corrupt {
@@ -126,66 +122,6 @@ pub(crate) async fn locked_states(
         };
     }
     Ok([black.ok_or(Error::Corrupt)?, white.ok_or(Error::Corrupt)?])
-}
-pub(crate) async fn admit(
-    db: &DatabaseConnection,
-    id: GameId,
-    players: Participants,
-    pool: Pool,
-) -> Result<(), Error> {
-    let tx = db.begin().await.map_err(storage)?;
-    for user in sorted_users(&players) {
-        tx.execute(
-            Query::insert()
-                .into_table(a("rating_states"))
-                .columns([a("user_id"), a("pool"), a("rating"), a("completed")])
-                .values_panic([
-                    encode_id(user.as_str()).into(),
-                    pool.as_str().into(),
-                    Option::<i64>::None.into(),
-                    0_i64.into(),
-                ])
-                .on_conflict(
-                    OnConflict::columns([a("user_id"), a("pool")])
-                        .do_nothing()
-                        .to_owned(),
-                ),
-        )
-        .await
-        .map_err(storage)?;
-    }
-    let starts = locked_states(&tx, &players, pool).await?;
-    if tx
-        .query_one(
-            Query::select()
-                .column(a("id"))
-                .from(a("games"))
-                .and_where(Expr::col(a("id")).eq(encode_id(id.as_str()))),
-        )
-        .await
-        .map_err(storage)?
-        .is_some()
-    {
-        return Err(Error::AlreadyExists);
-    }
-    for user in sorted_users(&players) {
-        if tx
-            .query_one(
-                Query::select()
-                    .column(a("game_id"))
-                    .from(a("rating_slots"))
-                    .and_where(Expr::col(a("user_id")).eq(encode_id(user.as_str())))
-                    .and_where(Expr::col(a("pool")).eq(pool.as_str())),
-            )
-            .await
-            .map_err(storage)?
-            .is_some()
-        {
-            return Err(Error::RatingPoolBusy);
-        }
-    }
-    insert_rated(&tx, &id, &players, pool, starts).await?;
-    tx.commit().await.map_err(storage)
 }
 pub(crate) async fn insert_rated(
     tx: &DatabaseTransaction,
@@ -325,7 +261,7 @@ pub struct SeaOrmRatingJobs {
     store: SeaOrmStore,
 }
 impl SeaOrmRatingJobs {
-    /// Initializes or validates schema v6 before opening worker operations.
+    /// Initializes or validates schema v7 before opening worker operations.
     pub async fn connect(url: &str) -> Result<Self, Error> {
         Ok(Self {
             store: SeaOrmStore::connect(url).await?,

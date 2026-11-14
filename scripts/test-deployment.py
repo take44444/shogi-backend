@@ -38,7 +38,7 @@ def main():
     assert gateway["environment"]["GATEWAY_PUBLIC_ORIGIN"] == services["realtime-user-server"]["environment"]["USER_PUBLIC_ORIGIN"], "browser auth and gateway origins must match"
     assert "ENV DATABASE_URL" not in (ROOT / "Dockerfile").read_text(), "shared image must not supply database credentials to gateway"
     edge_config = (ROOT / "deploy/realtime.Caddyfile").read_text()
-    assert "/ws/games/*" in edge_config and "realtime-gateway:8082" in edge_config and "realtime-user-server:8080" in edge_config, "edge must route game WebSockets and auth on one origin"
+    assert "/matchmaking/*" in edge_config and "/ws/games/*" in edge_config and "realtime-gateway:8082" in edge_config and "realtime-user-server:8080" in edge_config, "edge must route game WebSockets and auth on one origin"
 
     def sql(user, database, statement, success=True):
         return run("exec", "-T", "postgres", "psql", "-U", user, "-d", database,
@@ -51,7 +51,7 @@ def main():
         for table in ["schema_version", "games", "journal", "rating_states"]:
             sql(writer.username, writer.path[1:], f"CREATE TABLE public.{table} (value INTEGER); GRANT SELECT ON public.{table} TO shogi_reader")
             sql(reader.username, reader.path[1:], f"SELECT value FROM public.{table}")
-        for table in ["permission_probe", "rated_games", "rating_slots", "rating_jobs", "rating_applications"]:
+        for table in ["permission_probe", "rated_games", "rating_slots", "rating_jobs", "rating_applications", "matchmaking_tickets"]:
             if table != "permission_probe":
                 sql(writer.username, writer.path[1:], f"CREATE TABLE public.{table} (value INTEGER)")
             denied = sql(reader.username, reader.path[1:], f"SELECT * FROM public.{table}", success=False)

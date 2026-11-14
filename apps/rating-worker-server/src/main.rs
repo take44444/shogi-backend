@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("RATING_POLL_MS must be positive".into());
     }
     let repository = Arc::new(SeaOrmRatingJobs::connect(&url).await.map_err(|error| {
-        std::io::Error::other(format!("Game DB startup failed: {error}. This release requires schema version 6. For an older schema, preserve its data and provision a separate empty database."))
+        std::io::Error::other(format!("Game DB startup failed: {error}. This release requires schema version 7. For an older schema, preserve its data and provision a separate empty database."))
     })?);
     let worker = RatingWorker::new(repository.clone(), policy);
     if !args.is_empty() {
