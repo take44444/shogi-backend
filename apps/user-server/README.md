@@ -1,11 +1,9 @@
 # user-server の起動手順
 
-Google ログイン、プロフィール、ブラウザーセッションを提供する HTTP アカウントサービスを起動する。
-専用の PostgreSQL データベースを使い、`game-server` とは独立して動作する。
+Google ログインを使う HTTP アカウントサービスを起動する。
 
-リクエスト、Cookie、エラーは [HTTP API の参照仕様](../../crates/user-http/README.md)に記述する。
-選択した方式の理由は[認証方式の ADR](../../docs/adr/0002-browser-authentication.md)に記録する。
-残りの機能と検証範囲は[未完成の機能](../../docs/design/unfinished-work.md)にまとめる。
+API の仕様を出力するには、[API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に従う。
+仕様、実装、テストの対応は[機能トレーサビリティ](../../docs/reference/feature-traceability.md)から確認する。
 
 ## Google ログインを設定する
 
@@ -16,11 +14,10 @@ Google ログイン、プロフィール、ブラウザーセッションを提�
    ローカル開発では `http://localhost:8080/auth/google/callback` を使う。
 3. Google アプリが **Testing** の場合は、開発用アカウントをテストユーザーに追加する。
 
-サービスは `openid profile` スコープを要求する。
 プロバイダー側の設定は [Google OpenID Connect のドキュメント](https://developers.google.com/identity/openid-connect/openid-connect)に記述されている。
 
-[ユーザーサービスの設定](../../docs/reference/service-configuration.md#ユーザーサービス)に従って環境変数を指定する。
-下記のローカル設定例には必須の値を含めている。
+環境変数は [.env.example](../../.env.example) を元に設定する。
+追加の設定と制約は [ServerConfig](../../crates/user-http/src/config.rs) で確認する。
 
 ## ローカルで起動する
 
@@ -32,16 +29,12 @@ docker compose up -d --wait postgres
 if [ ! -e .env ]; then cp .env.example .env; fi
 ```
 
-`.env` に Google の認証情報を設定する。ローカル設定の例を示す。
-
-```dotenv
-GOOGLE_CLIENT_ID='your-client-id.apps.googleusercontent.com'
-GOOGLE_CLIENT_SECRET='your-client-secret'
-USER_PUBLIC_ORIGIN='http://localhost:8080'
-USER_ALLOW_LOOPBACK_HTTP='true'
-USER_BIND_ADDR='127.0.0.1:8080'
-USER_DATABASE_URL='postgres://shogi:shogi@localhost:5432/users'
-```
+`.env` の `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` を、作成したクライアントの認証情報に置き換える。
+別の PostgreSQL を使う場合は、専用データベースとロールを事前に作成し、`USER_DATABASE_URL` を変更する。
+ロールにはデータベースの `CREATE` 権限と、`public` 内にオブジェクトを作成する権限を付与する。
+既存スキーマを検証するため、これらの権限は毎回の起動時にも必要になる。
+スーパーユーザー権限や `CREATEROLE` 権限の付与は不要となる。
+ローカル環境の作成手順は[初期設定 SQL](../../scripts/init-postgres.sql)を参照する。
 
 アプリケーションと Cargo は `.env` を自動で読み込まない。
 サーバーの起動前に、現在のシェルで設定値をエクスポートする。
@@ -56,8 +49,9 @@ cargo run --locked -p user-server
 
 起動時に `user HTTP server listening on 127.0.0.1:8080` と出力する。
 `http://localhost:8080/auth/google/start` を開いてログインする。
-コールバックが成功すると `/me` に移動し、認証済みプロフィールを JSON で返す。
-初回ログインでアカウントを作成し、以後のログインでは同じ内部ユーザー ID を使う。
+ログイン後に `/me` へ移動し、プロフィールの JSON が表示されることを確認する。
+リダイレクト URI とブラウザーで開く URL のホストを揃える。
+`localhost` と `127.0.0.1` を混在させると、ログイン用 Cookie を共有できない。
 
 ## Docker Compose で起動する
 
@@ -68,10 +62,8 @@ Compose は、リポジトリのルートにある `.env` から Google の認�
 docker compose --profile auth up --build -d user-server
 ```
 
-`auth` プロファイルは任意で追加する。既定の Compose 構成は対局関連のサービスを起動する。
-ユーザーサービスのコンテナー内待ち受けアドレスは `0.0.0.0:8080` となり、ホストのループバックアドレスでポートを公開する。
-PostgreSQL 内の専用データベース `users` に接続し、データは `pg-data` に保持する。
 コンテナーの待ち受けアドレスと接続先データベースには、`.env` の値ではなく [compose.yaml](../../compose.yaml) の設定を使う。
+ゲートウェイと同時に使う場合は、[リアルタイムゲートウェイの起動手順](../realtime-gateway/README.md)に従う。
 
 ## 本番環境に配置する
 
@@ -81,13 +73,12 @@ PostgreSQL 内の専用データベース `users` に接続し、データは `p
 ブラウザーの Origin ヘッダーを保持すること。サービスは認証判断に `X-Forwarded-*` ヘッダーを使わない。
 
 ユーザーデータベースを永続ストレージに置く。
+認証データを含むデータベースとバックアップへのアクセスを運用者に制限する。
 `.env` と Google の認証情報をバージョン管理に含めず、ファイルへのアクセスを運用者に制限する。
 コールバックのクエリ文字列、Cookie、OAuth レスポンスをプロキシのアクセスログに記録しないこと。
 開発用 HTTP 待ち受けを信頼できないネットワークに公開しないこと。
 
-[アカウント保存層の参照仕様](../../crates/user-persistence/README.md#起動時のスキーマ処理)に従ってデータベースロールに権限を付与する。
 Google のディスカバリー、署名鍵、トークン取得先への送信通信を許可する。
-起動時の動作とタイムアウトは[ユーザーサービスの設定](../../docs/reference/service-configuration.md#ユーザーサービス)に記述する。
 
 ## 動作を検証する
 
@@ -97,10 +88,4 @@ Google のディスカバリー、署名鍵、トークン取得先への送信�
 ./scripts/test-postgres.sh cargo test --locked -p user-id -p user-application -p user-persistence -p user-http -p user-server
 ```
 
-テストは、署名付き ID トークンの検証、PKCE コード交換、ブラウザーに結び付いたログイン試行、
-同時登録、プロフィール更新、CSRF 検査、セッションの期限切れ、再起動、ログアウトを対象とする。
-ローカル HTTP テストは模擬プロバイダーを使う。
-実際の Google ログインには、設定済み OAuth クライアントとブラウザー操作が必要になる。
-
-`GET /openapi.json` は OpenAPI 3.1 の仕様を返す。
-サーバーを起動せずに出力する場合は、[API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に従うこと。
+実際の Google ログインは、上記のローカル起動手順に従ってブラウザーで確認する。

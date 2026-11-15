@@ -4,8 +4,8 @@
     "id": "public-record-detail",
     "title": "終了済み公開対局の履歴取得",
     "source": {
-      "path": "crates/player-http/README.md",
-      "needle": "## 対局履歴の取得"
+      "path": "crates/player-http/src/lib.rs",
+      "needle": "async fn detail(State(app): State<App>, path: Result<Path<String>, PathRejection>) -> Response {"
     },
     "flow": [
       "The HTTP adapter validates the game ID and calls GameRecords::detail under the shared request limit.",

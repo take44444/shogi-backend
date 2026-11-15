@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| public-record-detail | 終了済み公開対局の履歴取得 | [crates/player-http/README.md](../../../crates/player-http/README.md#L44) |
+| public-record-detail | 終了済み公開対局の履歴取得 | [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L164) |
 
 ## 保証の成立条件と構成
 

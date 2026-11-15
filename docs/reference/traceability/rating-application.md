@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| rating-application | レート更新ジョブの実行と隔離からの復旧 | [apps/rating-worker-server/README.md](../../../apps/rating-worker-server/README.md#L1) |
+| rating-application | レート更新ジョブの実行と隔離からの復旧 | [crates/game-application/src/rating.rs](../../../crates/game-application/src/rating.rs#L235) |
 
 ## 保証の成立条件と構成
 

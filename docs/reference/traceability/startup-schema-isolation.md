@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| startup-schema-isolation | サービスの起動設定・スキーマ互換性・DB 分離 | [docs/reference/service-configuration.md](../../../docs/reference/service-configuration.md#L1) |
+| startup-schema-isolation | サービスの起動設定・スキーマ互換性・DB 分離 | [crates/game-persistence/src/schema.rs](../../../crates/game-persistence/src/schema.rs#L26) |
 
 ## 保証の成立条件と構成
 

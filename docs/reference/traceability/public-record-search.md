@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| public-record-search | 終了済み公開対局の検索 | [crates/player-http/README.md](../../../crates/player-http/README.md#L9) |
+| public-record-search | 終了済み公開対局の検索 | [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L140) |
 
 ## 保証の成立条件と構成
 

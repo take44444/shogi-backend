@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| user-ratings | ユーザー別の確定済みレート取得 | [crates/player-http/README.md](../../../crates/player-http/README.md#L55) |
+| user-ratings | ユーザー別の確定済みレート取得 | [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L182) |
 
 ## 保証の成立条件と構成
 

@@ -4,8 +4,8 @@
     "id": "public-record-search",
     "title": "終了済み公開対局の検索",
     "source": {
-      "path": "crates/player-http/README.md",
-      "needle": "## 終了済み対局の検索"
+      "path": "crates/player-http/src/lib.rs",
+      "needle": "async fn search("
     },
     "flow": [
       "The HTTP adapter decodes and validates filters and the cursor before acquiring shared request capacity.",

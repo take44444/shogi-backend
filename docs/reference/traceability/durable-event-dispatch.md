@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| durable-event-dispatch | 対局イベントの永続化と順序付き配信 | [README.md](../../../README.md#L147) |
+| durable-event-dispatch | 対局イベントの永続化と順序付き配信 | [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L238) |
 
 ## 保証の成立条件と構成
 

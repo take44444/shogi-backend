@@ -1,43 +1,26 @@
 # ドキュメント
 
-このディレクトリには、採用済みの判断、未完成の機能、将来の設計案を置く。
-現行の仕様は、型、公開 API、DB 制約、権限設定と、それらを検証するテストや CI に対応する。
+現行機能の保証、コンポーネント契約、テストと未検証事項は[生成した機能一覧](reference/feature-traceability.md)から確認する。
+API のフィールドや型は OpenAPI、[対局プロトコル](../proto/game.proto)、rustdoc を参照する。
+生成方法は[ワークスペースの手順](../README.md#api-ドキュメントを生成する)にまとめる。
 
-## 採用済みの判断
+## 開発と運用
 
-重要な判断と理由は、次の ADR に記録する。
+- [起動とワークスペース全体の検証](../README.md)
+- [ユーザーサービスと Google ログインの設定](../apps/user-server/README.md)
+- [公開データサービスの起動と読み取りロールの準備](../apps/player-server/README.md)
+- [ブラウザー向けゲートウェイの起動](../apps/realtime-gateway/README.md)
+- [レートワーカーと隔離された対局の再試行](../apps/rating-worker-server/README.md)
+- [機能定義と生成文書の更新](how-to/check-traceability.md)
+
+## 設計判断
 
 - [ユーザー DB を対局 DB から分離する](adr/0001-separate-user-database.md)
 - [Google による本人確認とアプリケーションのセッションを分ける](adr/0002-browser-authentication.md)
 - [対局イベントを受理時に確定し、一時通知と永続処理を分ける](adr/0003-game-event-delivery.md)
 
-## 未完成の機能と将来の設計案
+## 将来の設計
 
-次の文書には、実装や検証が残る項目を記述する。将来の設計案は、現行実装の保証ではない。
-
-- [未完成の機能と未検証の範囲](design/unfinished-work.md)
+- [未実装の機能と運用上の検証課題](design/unfinished-work.md)
 - [イベント配信と永続ジョブの将来設計](design/event-processing-plan.md)
-- [マッチメイキングの未検証事項と拡張時の制約](design/matchmaking.md)
-
-## 起動と運用の手順
-
-起動、設定、検証、復旧の手順は、次の文書にまとめる。
-
-- [リポジトリ全体の起動と検証](../README.md)
-- [ユーザーサービスの起動](../apps/user-server/README.md)
-- [公開棋譜サービスの起動](../apps/player-server/README.md)
-- [リアルタイムゲートウェイ の起動とブラウザーの接続設定](how-to/run-realtime-gateway.md)
-- [レートワーカーの起動と隔離ジョブの再試行](../apps/rating-worker-server/README.md)
-- [機能の保証とテストの対応を更新する](how-to/check-traceability.md)
-
-## 設定と API の参照仕様
-
-環境変数、リクエスト、レスポンス、処理上の制限は、次の文書に記述する。
-
-- [サービスの環境変数と必要な権限](reference/service-configuration.md)
-- [公開棋譜とレートの HTTP API](../crates/player-http/README.md)
-- [機能の保証とテストの対応](reference/feature-traceability.md)
-- [ユーザー HTTP API](../crates/user-http/README.md)
-- [対局 gRPC API](../crates/game-grpc/README.md)
-- [マッチメイキング HTTP API と対局 WebSocket](../apps/realtime-gateway/README.md)
-- [Valkey の対局通知](reference/game-notifications.md)
+- [マッチメイキングの拡張時に決めること](design/matchmaking.md)

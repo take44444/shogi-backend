@@ -4,8 +4,8 @@
     "id": "public-api-documents",
     "title": "公開 API 仕様の取得とオフライン生成",
     "source": {
-      "path": "README.md",
-      "needle": "## API ドキュメントを生成する"
+      "path": "crates/player-http/src/lib.rs",
+      "needle": "pub fn openapi() -> utoipa::openapi::OpenApi {"
     },
     "flow": [
       "User and player OpenApiRouter registrations produce offline documents and their anonymous /openapi.json responses.",

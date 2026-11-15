@@ -4,8 +4,8 @@
     "id": "user-ratings",
     "title": "ユーザー別の確定済みレート取得",
     "source": {
-      "path": "crates/player-http/README.md",
-      "needle": "## ユーザー別レートの取得"
+      "path": "crates/player-http/src/lib.rs",
+      "needle": "async fn ratings(State(app): State<App>, path: Result<Path<String>, PathRejection>) -> Response {"
     },
     "flow": [
       "HTTP アダプターは ID を検証し、処理枠を取得して UserRatings::get を呼ぶ。",

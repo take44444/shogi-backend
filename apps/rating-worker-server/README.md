@@ -6,8 +6,9 @@
 ローカルのバイナリーを使う場合は、`game-server` と同じ対局データベースを `DATABASE_URL` に指定する。
 `cargo run --locked -p rating-worker-server` で起動し、Ctrl-C で停止する。
 
-ポーリング、ジョブの取得、再試行の設定を変更する場合は、
-[レートワーカーの設定](../../docs/reference/service-configuration.md#レートワーカー)にある環境変数を指定する。
+ポーリング、ジョブの取得、再試行の設定は[起動処理](src/main.rs)で確認する。
+ワーカーを同時に複数起動する場合は、異なる `RATING_WORKER_ID` を指定する。
+仕様、実装、テストの対応は[レート更新のトレーサビリティ](../../docs/reference/traceability/rating-application.md)で確認する。
 
 ## 隔離された対局の処理を再試行する
 
@@ -22,11 +23,8 @@ cargo run --locked -p rating-worker-server -- retry-quarantined GAME_ID
 ```
 
 Compose では `docker compose run --rm rating-worker-server retry-quarantined GAME_ID` を実行する。
-`Retried` は、試行回数の上限と世代を更新してジョブを待機状態に戻したことを示す。
-`NotQuarantined` と `NotFound` は保存状態を変更しない。
-隔離中も再試行中も、レート更新用の予約は占有されたままとなる。
-レート適用前に同じプールで次の対局を開始しないよう、マッチメイキングが予約を参照する。
-復旧のために予約を削除しないこと。
+`Retried` が出力されたことを確認し、ワーカーの適用結果を確認する。
+復旧のために `rating_slots` の予約を削除しないこと。
 
 ## 実際の対局で確認する
 
@@ -36,8 +34,9 @@ Compose では `docker compose run --rm rating-worker-server retry-quarantined G
 ```sh
 cargo run --locked -p game-grpc --example rating_proof -- http://127.0.0.1:50051 rating-demo
 curl http://127.0.0.1:8081/users/rating-demo-one/ratings
+curl http://127.0.0.1:8081/users/rating-demo-two/ratings
 ```
 
-サンプルはチケットを 2 件登録して対戦相手の決定を待ち、確定した対局と無作為に決めた先後を出力してから、後手が投了する。
-ワーカーの適用後、`ten_minute_30` のレートは先手のユーザーが 1516、後手のユーザーが 1484 となる。
-両ユーザーのレート適用済み対局数は 1 となる。もう一方のプールはレートが null、対局数が 0 のままとなる。
+[サンプル](../../crates/game-grpc/examples/rating_proof.rs)が出力した先後と結果を確認する。
+ワーカーの適用後に両ユーザーのレートを再取得し、勝者のレート上昇と敗者の低下を確認する。
+`ten_minute_30` の対局数が両者とも 1 であり、もう一方のプールが未対局のままであることも確認する。

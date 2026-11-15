@@ -1,128 +1,106 @@
-# リアルタイムゲートウェイの参照仕様
+# リアルタイムゲートウェイを起動する
 
-ゲートウェイは、認証済みブラウザーに WebSocket 接続ごとに 1 対局の閲覧を提供する。
-対局参加者は着手と投了を送信できる。その他のログイン済みユーザーは公開対局を観戦できる。
-非公開対局を閲覧できるのは参加者だけである。
+コマンドはリポジトリのルートで実行する。
+マッチメイキングの HTTP 仕様は[OpenAPI の生成手順](../../README.md#api-ドキュメントを生成する)、
+WebSocket の形式は[プロトコル実装](../../crates/realtime-gateway/src/game.rs)を参照すること。
+認証、接続、資源制限の実装とテストは[機能の対応表](../../docs/reference/traceability/realtime-session-commands-limits.md)からたどる。
+環境変数と上限は [GatewayConfig](../../crates/realtime-gateway/src/lib.rs) に定義する。
 
-ゲートウェイはデータベースの認証情報を持たない。
-必要な認証確認のたびに `user-server` を呼び出し、操作と閲覧権限の確認には `game-server` を呼び出す。
-ローカルのバイナリー、Docker Compose、HTTPS 環境への配置は[起動手順](../../docs/how-to/run-realtime-gateway.md)に記述する。
-環境変数と資源上限は[設定の参照仕様](../../docs/reference/service-configuration.md#リアルタイムゲートウェイ)に記述する。
+## Docker Compose で起動する
 
-## マッチメイキング HTTP API の契約
+次の順で認証情報を設定し、サービスを起動する。
 
-すべてのエンドポイントは `user-server` でセッション Cookie を認証する。
-更新操作は、設定値と完全に一致する Origin と Host を要求する。
-GET でも Origin が指定されていれば一致が必要になる。
-`Sec-Fetch-Site` がある場合は `same-origin` でなければならない。
-リクエスト ID は認証済み所有者ごとに扱う UUID となる。本文にユーザー ID は指定できない。
+1. リポジトリのルートにある `.env` に `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` を設定する。
+   [Google クライアントの設定手順](../../apps/user-server/README.md#google-ログインを設定する)に従うこと。
+   リダイレクト URI には `http://localhost:8082/auth/google/callback` を使う。
+2. `realtime` プロファイルでサービスを起動する。
 
-| 操作 | リクエスト | レスポンス |
-| --- | --- | --- |
-| 参加 | `PUT /matchmaking/tickets/{uuid}`、`{"pool":"ten_minute_30"}` または `{"pool":"byoyomi_30"}` | 新規の待機チケットは 201、保存済みの成功した要求は 200、保存済みの拒否は 409 |
-| 状態の回復 | `GET /matchmaking/me` | `{ "state":"idle", "ticket":null }`、または待機中か対局中のチケット |
-| 要求の取得 | `GET /matchmaking/tickets/{uuid}` | 現在または終端の状態は 200、所有者のチケットがなければ 404 |
-| 待機の継続 | `POST /matchmaking/tickets/{uuid}/heartbeat`、`{"sequence":1}` | 現在の状態を返す 200 |
-| キャンセル | `DELETE /matchmaking/tickets/{uuid}` | 終端の状態を返す 200、または確定した対局 ID を含む 409 `already_matched` |
+   ```sh
+   docker compose --profile realtime up --build -d
+   ```
 
-チケットのレスポンスは `ticket_id`、null を許容する `pool`、`state` を含む。
-待機中は、データベース時刻の Unix エポックからのミリ秒を整数で表す `enqueued_at` と `expires_at`、
-整数の `heartbeat_sequence` を追加する。
-対局中と終了済みでは `game_id` と `side` を追加する。
-拒否時は `already_waiting`、`already_playing`、`rating_pending` のいずれかを `code` に追加する。
-同じチケットを別のプールで再利用すると 409 `pool_conflict` を返す。
-参加より先に受け付けたキャンセルにはプールがなく、その UUID で後から参加することはできない。
+3. `http://localhost:8082/auth/google/start` を開いてログインする。
+   成功すると `/me` に移動し、プロフィールを JSON で返す。
+4. `/matchmaking/*` と `/ws/games/*` に同じブラウザーオリジンから接続する。
 
-新しい試行には新しい UUID を使う。
-503 またはレスポンスの消失後は、同じ UUID と内容で保存済みの結果を取得できる。
-チケットの読み取りでも状態を回復できる。
-拒否、キャンセル、期限切れ、終了済みの要求がキューに戻ることはない。
-読み取りは有効期限を延長しない。
-ハートビートのシーケンス番号は 1 から `i64::MAX` までとなる。
-待機が有効な間に前回より大きい番号を受信した場合だけ、期限をデータベース時刻の 30 秒後まで延長する。
-再試行には同じ番号を使う。推奨間隔は 10 秒である。
+ブラウザーの URL を変更する場合は、`REALTIME_PUBLIC_ORIGIN` と `REALTIME_PORT` を一緒に設定する。
+Google のリダイレクト URI も合わせて変更すること。
+セッション Cookie を共有するには、ユーザーサービスとゲートウェイのブラウザー向けホストを一致させる。
+ブラウザーの URL では `localhost` と `127.0.0.1` を混在させない。
+この手順では `realtime` プロファイルだけを使う。
+`auth` プロファイルは、ユーザーサービスに別のオリジンを設定する。
 
-ユーザーは両プールを通じて同時に 1 件だけ待機または対局できる。
-組み合わせには確定済みレートを使い、初期値は 1500 となる。
-双方の許容レート差は 100 Elo から始まり、30 秒ごとに 50 ずつ広がり、上限は 400 となる。
-既存の対局サーバーが毎秒両プールの組み合わせを試行する。
-終局するとプール共通の参加枠を解放するが、同じプールへの参加はレート適用まで制限される。
-`idle` はレートの適用完了を意味しない。
-時計と切断による敗北は、この API の対象外となる。
-組み合わせで返した対局 ID は `/ws/games/{game_id}` の接続先を特定する。
+## ローカルのバイナリーを起動する
 
-ブラウザー向け OpenAPI 仕様は、ユーザーと棋譜の仕様とともに `matchmaking.json` として出力される。
-出力コマンドは [API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に記述する。
+次の順で依存サービス、ゲートウェイ、プロキシを起動する。
 
-## WebSocket の契約
+1. `user-server`、`game-server`、Valkey、Outbox 配信プロセスを起動する。
+   `user-server` には `USER_PUBLIC_ORIGIN=http://localhost:8082` と
+   `USER_ALLOW_LOOPBACK_HTTP=true` を設定する。
+2. ゲートウェイを起動する。
 
-`GET /ws/games/{game_id}` は、ブラウザーと同じオリジンで、
-サブプロトコル `shogi.realtime.v1` の WebSocket を開く。
-設定したオリジンと完全に一致する `Origin`、重複のない有効なセッション Cookie が必要になる。
-`Sec-Fetch-Site` がある場合は `same-origin` でなければならない。
-存在しない対局と閲覧できない対局は、接続の昇格前に HTTP 404 を返す。
-無効なセッションは 401、依存サービスの障害は 503 を返す。
+   ```sh
+   GATEWAY_BIND_ADDR=127.0.0.1:8083 \
+   GATEWAY_PUBLIC_ORIGIN=http://localhost:8082 \
+   GATEWAY_ALLOW_LOOPBACK_HTTP=true \
+   USER_SERVICE_URL=http://127.0.0.1:8080 \
+   GAME_SERVICE_URL=http://127.0.0.1:50051 \
+   VALKEY_URL=redis://127.0.0.1:6379 \
+   cargo run --locked -p realtime-gateway-server
+   ```
 
-### スナップショット
+   プロセスは `realtime-gateway-server listening on 127.0.0.1:8083` と出力する。
 
-64 ビットのシーケンス値は、すべて 10 進数の JSON 文字列となる。
-接続は `snapshot` メッセージ 1 件で始まる。
-このメッセージは `game_id`、`seq`、`board`、`hands`、`turn`、`in_check`、`result`、
-`legal_moves`、`black_user_id`、`white_user_id` を含む。
-盤面は駒がある升を `file`、`rank`、`owner`、`kind` で表す。
-持ち駒は全種類について `player`、`piece`、`count` を含む。
-進行中の結果は `null` となる。
-終局結果の `winner` は `black` または `white`、`reason` は `checkmate` または `resignation` となる。
+3. リバースプロキシを `localhost:8082` で待ち受けさせる。
+   `/matchmaking/*` と `/ws/games/*` を `127.0.0.1:8083` に転送する。
+   その他のパスは `127.0.0.1:8080` に転送する。
+   [deploy/realtime.Caddyfile](../../deploy/realtime.Caddyfile) を参考に、
+   コンテナーのアドレスをこれらのローカルアドレスに置き換える。
 
-### 操作と応答
+## マッチメイキングの待機を継続する
 
-クライアントは操作を 1 件ずつ送る。
-ゲートウェイは未知のフィールド、呼び出し元が指定したユーザー ID、不正な USI 着手、正規形でないシーケンス文字列を拒否する。
+参加要求に使ったチケット UUID を、結果が確定するまでクライアントに保持する。
+503 や応答の消失後は、同じ UUID と内容で再試行するか、そのチケットの状態を取得する。
+新しい参加要求を始める場合だけ、新しい UUID を発行する。
 
-```json
-{"type":"move","request_id":"client-1","expected_seq":"0","usi":"7g7f"}
-{"type":"resign","request_id":"client-2","expected_seq":"1"}
+待機中は 10 秒を目安に、前回より大きいシーケンス番号でハートビートを送る。
+同じハートビートを再試行する場合は、番号を変えずに再送する。
+リクエストの形式は OpenAPI、間隔の検証課題は[マッチメイキングの設計メモ](../../docs/design/matchmaking.md#初期値と負荷検証)を参照する。
+
+## ブラウザーから対局に接続する
+
+ログイン後、同じオリジンのブラウザーコンソールで実行する。
+マッチメイキングで取得した対局 ID に置き換える。
+
+```js
+const gameId = 'MATCHED_GAME_ID';
+const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const socket = new WebSocket(`${scheme}//${location.host}/ws/games/${encodeURIComponent(gameId)}`, 'shogi.realtime.v1');
+socket.onmessage = event => console.log(JSON.parse(event.data));
 ```
 
-受理した操作には、次の応答を返す。
-`{ "type": "accepted", "request_id": "client-1", "seq": "1", "in_check": false, "result": null }`。
-この応答は永続的な受理を示し、ブラウザーの局面は進めない。
-局面を更新するのは `snapshot` と `event` メッセージである。
-各イベントは `event_id`、`game_id`、`seq`、`kind` を含む。
-着手イベントはさらに `usi`、`in_check`、`result` を含み、終局イベントは `result` を含む。
-イベントには内部リクエスト ID とユーザー ID を含めない。
-詰みの着手と終局イベントは同じシーケンス番号を持つ。
-操作の受理応答より先にイベントが届くことがある。
+最初の `snapshot` を受け取り、自分が先手の初期局面なら着手を送る。
 
-### エラーと再試行
+```js
+const pendingCommand = {type: 'move', request_id: crypto.randomUUID(), expected_seq: '0', usi: '7g7f'};
+socket.send(JSON.stringify(pendingCommand));
+```
 
-`error` は安定した `code` を含み、操作を解析できた場合は `request_id` も含む。
-コードは `invalid_input`、`busy`、`not_participant`、`request_conflict`、
-`stale_seq`、`rejected`、`outcome_unknown` となる。
-`stale_seq` は、`game-server` が実際の番号を返した場合に `actual_seq` を含む。
-`stale_seq` または `resync_required` からの回復には、再接続と新しいスナップショットが必要になる。
-内部の破損エラーでは、詳細を公開せずにソケットを閉じる。
+操作結果と更新通知の扱いは[対局操作の対応表](../../docs/reference/traceability/realtime-session-commands-limits.md)、
+初期局面と通知の同期は[リアルタイム配信の対応表](../../docs/reference/traceability/realtime-game-feed.md)を参照すること。
 
-受理応答が失われた場合、またはコードが `outcome_unknown` の場合は、
-元の `request_id`、`expected_seq`、USI 着手を使って同一内容で再試行する。
-新しいリクエスト ID では元の受理結果を回復できない。
-切断しても、`game-server` がすでにキューに入れた操作は取り消されない。
+## 操作結果が不明な場合や切断後に復旧する
 
-### 再接続とアクセス確認
+操作は 1 件ずつ送り、送信前にリクエスト全体をクライアントに保存する。上の例では `pendingCommand` を保持する。
+受理応答が消失した場合や `outcome_unknown` を受け取った場合は、元の値と同じ内容で再送する。
+結果を回復するために新しい `request_id` を発行しない。
 
-ソケット切断後、クライアントは指数バックオフに無作為な待機時間のばらつきを加えて再接続できる。
-ゲートウェイは初期スナップショットの取得前に購読を開始し、取得中の通知をバッファーに保持する。
-Valkey Pub/Sub で最後の通知が失われた場合、後続イベントも切断もなければ欠落を検出できないことがある。
-再接続すると保存済みの最新スナップショットを取得する。
-定期的な局面同期と匿名観戦は提供しない。
+`stale_seq` または `resync_required` を受け取った場合は再接続し、新しい `snapshot` から局面を更新する。
+切断後の再接続には指数バックオフと無作為な待機時間のばらつきを使う。
+再接続で取得した局面の番号と、応答不明の操作を再試行するときの元の `expected_seq` は区別して保持する。
 
-ゲートウェイは各メッセージの送信前と操作の直前に、セッションと現在の閲覧権限を確認する。
-セッションを定期確認するタイマーはない。
-通信がない接続は、ログアウト後も次のアプリケーションデータの送受信まで開いたままになることがある。
-`user-server` または `game-server` で必要な確認ができなければ接続を閉じる。
-開始済みの操作や送信は、ログアウトや公開状態の変更と競合することがある。
+## HTTPS の背後に配置する
 
-購読処理は接続ごとに 1 つの Valkey チャネルを指定し、容量制限のある RESP3 プッシュ受信キューを使う。
-容量超過、不正なメッセージ、切断が起きると、不完全な可能性がある通知列を再開せずに接続を閉じる。
-Redis ライブラリーがフレームを解析した後に、購読処理が通知の 4096 バイト上限を確認する。
-そのため、Valkey は信頼できる内部ネットワークに配置する必要がある。
+認証、マッチメイキング、WebSocket を同じオリジンで提供するリバースプロキシで HTTPS を終端する。
+`user-server`、`game-server`、ゲートウェイ、Valkey は内部ネットワークに置く。
+ゲートウェイとユーザーサービスの公開オリジンを HTTPS に設定し、両方のループバック HTTP フラグを無効にする。

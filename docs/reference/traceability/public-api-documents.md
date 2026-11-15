@@ -9,7 +9,7 @@
 
 | ID | 機能 | 仕様 |
 | --- | --- | --- |
-| public-api-documents | 公開 API 仕様の取得とオフライン生成 | [README.md](../../../README.md#L174) |
+| public-api-documents | 公開 API 仕様の取得とオフライン生成 | [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L29) |
 
 ## 保証の成立条件と構成
 

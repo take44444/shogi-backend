@@ -4,8 +4,8 @@
     "id": "startup-schema-isolation",
     "title": "サービスの起動設定・スキーマ互換性・DB 分離",
     "source": {
-      "path": "docs/reference/service-configuration.md",
-      "needle": "# サービス設定の参照仕様"
+      "path": "crates/game-persistence/src/schema.rs",
+      "needle": "pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaError> {"
     },
     "flow": [
       "Executable configuration selects account/game databases, browser origins and service endpoints before application startup.",

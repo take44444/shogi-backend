@@ -4,8 +4,8 @@
     "id": "rating-application",
     "title": "レート更新ジョブの実行と隔離からの復旧",
     "source": {
-      "path": "apps/rating-worker-server/README.md",
-      "needle": "# レートワーカーを起動する"
+      "path": "crates/game-application/src/rating.rs",
+      "needle": "pub async fn tick(&self, owner: &WorkerId) -> Result<TickOutcome, RatingWorkerError> {"
     },
     "flow": [
       "A rated terminal receipt atomically creates a durable rating job from immutable admission metadata and committed result, independently of the broker.",

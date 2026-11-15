@@ -4,8 +4,8 @@
     "id": "durable-event-dispatch",
     "title": "対局イベントの永続化と順序付き配信",
     "source": {
-      "path": "README.md",
-      "needle": "## 確定済みの対局イベントを配信する"
+      "path": "crates/game-application/src/events.rs",
+      "needle": "pub async fn publish_next(&mut self) -> Result<bool, DispatchError> {"
     },
     "flow": [
       "StagedGameChange freezes canonical facts from an accepted receipt, and the PostgreSQL commit writes the receipt and outbox rows atomically.",
