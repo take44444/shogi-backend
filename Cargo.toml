@@ -20,3 +20,7 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
