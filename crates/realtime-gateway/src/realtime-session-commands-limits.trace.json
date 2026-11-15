@@ -1,0 +1,401 @@
+{
+  "version": 1,
+  "feature": {
+    "id": "realtime-session-commands-limits",
+    "title": "WebSocket の認証・対局操作・資源制限",
+    "source": {
+      "path": "crates/realtime-gateway/src/lib.rs",
+      "needle": "async fn upgrade("
+    },
+    "flow": [
+      "Upgrade validates exact browser Origin/Host, optional same-site metadata and one supported shogi.realtime.v1 offer, then checks the session cookie with the user service and game access with GameService.",
+      "The reader validates strict move/resign JSON and canonical decimal sequence; one in-flight permit and bounded queues limit command work. The gateway supplies the authenticated user to the upstream command.",
+      "The command worker and writer recheck session/access before actions and outgoing frames; acceptance/errors become stable browser frames and uncertain outcomes require exact retry.",
+      "Connection/user permits, input byte/rate limits, snapshot/buffer bounds and timed upstream/output operations constrain connection work. Gateway shutdown rejects upgrades and closes active sockets."
+    ]
+  },
+  "guarantees": [
+    {
+      "id": "handshake",
+      "statement": "Upgrade requires exact Origin/Host, optional same-origin fetch metadata, exactly one supported subprotocol offer and one valid session cookie. Session authentication and game access precede upgrade.",
+      "contracts": [
+        "browser-headers",
+        "session-auth",
+        "upgrade-permits"
+      ]
+    },
+    {
+      "id": "commands",
+      "statement": "Only strict move/resign commands are accepted; no caller user/side claim is accepted. expected_seq is a canonical decimal string through i64::MAX and the gateway supplies authenticated identity. Accepted and rejected commands use stable response codes; uncertain outcomes become outcome_unknown.",
+      "contracts": [
+        "command-input",
+        "command-response",
+        "live-checks"
+      ]
+    },
+    {
+      "id": "live-authorization",
+      "statement": "Session and game access are rechecked before command dispatch and each outgoing frame. Logout/expiry or privacy loss closes the connection before further permitted delivery.",
+      "contracts": [
+        "session-auth",
+        "live-checks",
+        "outgoing"
+      ]
+    },
+    {
+      "id": "resource-limits",
+      "statement": "Total and per-user connections, input frame/message bytes/rate, one in-flight command, bounded notification/output queues, snapshot size and upstream/output deadlines constrain connection work.",
+      "contracts": [
+        "upgrade-permits",
+        "command-input",
+        "outgoing"
+      ]
+    },
+    {
+      "id": "shutdown",
+      "statement": "Gateway shutdown prevents new upgrades and closes existing connections, including shutdown before the first connection. Capacity is released after disconnect.",
+      "contracts": [
+        "shutdown-contract",
+        "upgrade-permits"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "browser-headers",
+      "statement": "browser_headers requires one exact Origin and Host, permits absent fetch-site or same-origin only and finds exactly one supported shogi.realtime.v1 offer.",
+      "source": {
+        "path": "crates/realtime-gateway/src/lib.rs",
+        "needle": "fn browser_headers(headers: &HeaderMap, origin: &str) -> bool {"
+      },
+      "evidence": [
+        {
+          "test": "handshake-test",
+          "relationship": "asserts",
+          "reason": "Missing/evil/duplicate Origin, cross-site metadata and absent/wrong protocol reject with 403."
+        }
+      ],
+      "gap": "Not every Host, duplicate protocol and header normalization combination is explicitly asserted by this selected test."
+    },
+    {
+      "id": "session-auth",
+      "statement": "AuthClient requires one correctly shaped cookie, calls the user service with response size/time limits and recheck requires the returned user to remain the session user.",
+      "source": {
+        "path": "crates/realtime-gateway/src/auth.rs",
+        "needle": "pub(crate) async fn authenticate(&self, cookie: &str) -> Result<UserId, AuthError> {"
+      },
+      "evidence": [
+        {
+          "test": "handshake-test",
+          "relationship": "asserts",
+          "reason": "Missing/duplicate/invalid/unknown session cookies reject upgrade with 401."
+        },
+        {
+          "test": "logout",
+          "relationship": "asserts",
+          "reason": "Actual logout before a command and expiry before a notification close sockets; subsequent upgrades are 401."
+        }
+      ],
+      "gap": "No dedicated assertion covers auth service outage/redirect/oversized profile, returned user mismatch or every cookie encoding branch."
+    },
+    {
+      "id": "upgrade-permits",
+      "statement": "Upgrade authenticates/access-checks, checks shutdown before/after upstream calls, acquires total and per-user permits and configures frame/message limits; disconnect Drop releases capacity.",
+      "source": {
+        "path": "crates/realtime-gateway/src/lib.rs",
+        "needle": "async fn upgrade("
+      },
+      "evidence": [
+        {
+          "test": "capacity",
+          "relationship": "asserts",
+          "reason": "Total two/per-user one rejects excess with 429, and reconnect succeeds after disconnect."
+        },
+        {
+          "test": "private",
+          "relationship": "asserts",
+          "reason": "Private outsider and absent game yield indistinguishable 404 upgrade status/body."
+        },
+        {
+          "test": "input-limits",
+          "relationship": "asserts",
+          "reason": "Oversized frames close without committing."
+        },
+        {
+          "test": "shutdown-first",
+          "relationship": "asserts",
+          "reason": "Shutdown before any connection makes first upgrade 503."
+        }
+      ],
+      "gap": "No dedicated race assertion covers shutdown during an upstream handshake. Capacity tests do not exhaust every in-flight handshake state."
+    },
+    {
+      "id": "command-input",
+      "statement": "The reader enforces frame/rate limits, strict command parsing, one in-flight command permit and a bounded queue. Parser rejects unknown fields and noncanonical decimal sequences/USI.",
+      "source": {
+        "path": "crates/realtime-gateway/src/lib.rs",
+        "needle": "async fn reader("
+      },
+      "evidence": [
+        {
+          "test": "private",
+          "relationship": "asserts",
+          "reason": "Forged user_id returns invalid_input with sequence still zero; spectator move/resign return not_participant."
+        },
+        {
+          "test": "input-limits",
+          "relationship": "asserts",
+          "reason": "Input byte limit 128 and rate one terminate abusive sockets while durable sequence remains zero."
+        },
+        {
+          "test": "viewers",
+          "relationship": "exercises",
+          "reason": "Valid participant move and resign commands dispatch and return matching acceptance."
+        }
+      ],
+      "gap": "No parser table enumerates malformed decimal strings, oversized numeric values or all unknown fields. No dedicated busy/in-flight permit or command queue/output-overflow assertion."
+    },
+    {
+      "id": "command-response",
+      "statement": "command_reply maps acceptance and gRPC codes to accepted, invalid_input, not_participant, request_conflict, stale_seq/actual_seq, rejected or outcome_unknown; inaccessible/corrupt/internal upstream outcomes close.",
+      "source": {
+        "path": "crates/realtime-gateway/src/game.rs",
+        "needle": "pub(crate) fn command_reply(id: &str, result: Result<proto::Acceptance, Status>) -> CommandOutcome {"
+      },
+      "evidence": [
+        {
+          "test": "viewers",
+          "relationship": "asserts",
+          "reason": "Accepted request identity and sequence match participant commands."
+        },
+        {
+          "test": "private",
+          "relationship": "asserts",
+          "reason": "Outsider move/resign produce not_participant."
+        },
+        {
+          "test": "retry",
+          "relationship": "asserts",
+          "reason": "Retry after reconnect returns original accepted sequence without duplicate event."
+        }
+      ],
+      "gap": "No selected gateway test directly asserts stale_seq metadata, request_conflict, rejected, outcome_unknown or all upstream status/invalid-result close mappings."
+    },
+    {
+      "id": "live-checks",
+      "statement": "command_worker rechecks session and current game access before invoking upstream command using session.user.",
+      "source": {
+        "path": "crates/realtime-gateway/src/lib.rs",
+        "needle": "async fn command_worker("
+      },
+      "evidence": [
+        {
+          "test": "logout",
+          "relationship": "asserts",
+          "reason": "Logout before sending move closes and leaves durable sequence zero."
+        },
+        {
+          "test": "private",
+          "relationship": "asserts",
+          "reason": "Spectator cannot mutate or supply a participant identity."
+        }
+      ],
+      "gap": "No independent recheck-before-response race assertion or timed upstream mutation outcome test."
+    },
+    {
+      "id": "outgoing",
+      "statement": "writer rechecks session/access before every frame and bounds send/close waits; bootstrap rejects a snapshot exceeding configured bytes and uses bounded output/notification channels.",
+      "source": {
+        "path": "crates/realtime-gateway/src/lib.rs",
+        "needle": "async fn writer("
+      },
+      "evidence": [
+        {
+          "test": "logout",
+          "relationship": "asserts",
+          "reason": "Expired viewer closes before published resignation delivery."
+        },
+        {
+          "test": "private",
+          "relationship": "asserts",
+          "reason": "Privacy revoked for existing spectator closes on the next event."
+        },
+        {
+          "test": "snapshot-limit",
+          "relationship": "asserts",
+          "reason": "Snapshot bytes limit one closes without sending a partial position."
+        }
+      ],
+      "gap": "No slow-browser backlog, output write deadline, exhausted notification queue or snapshot upstream-timeout assertion. Snapshot limit is enforced in run_connection, which this evidence exercises."
+    },
+    {
+      "id": "shutdown-contract",
+      "statement": "shutdown stores a persistent stop signal; active connections watch it and upgrade refuses new work. wait_closed bounds waiting for all total permits.",
+      "source": {
+        "path": "crates/realtime-gateway/src/lib.rs",
+        "needle": "pub fn shutdown(&self) {"
+      },
+      "evidence": [
+        {
+          "test": "shutdown-test",
+          "relationship": "asserts",
+          "reason": "Active socket closes and later upgrade returns 503."
+        },
+        {
+          "test": "shutdown-first",
+          "relationship": "asserts",
+          "reason": "The first upgrade after shutdown is rejected 503."
+        }
+      ],
+      "gap": "Tests exercise router/library shutdown, not actual executable Ctrl-C, configuration validation or its ten-second drain deadline; wait_closed deadline exhaustion is not separately asserted."
+    }
+  ],
+  "tests": [
+    {
+      "id": "handshake-test",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "handshake_requires_exact_origin_unique_session_and_supported_subprotocol",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn handshake_requires_exact_origin_unique_session_and_supported_subprotocol() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture."
+    },
+    {
+      "id": "private",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture."
+    },
+    {
+      "id": "logout",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "logout_closes_before_command_and_expiry_closes_before_notification",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn logout_closes_before_command_and_expiry_closes_before_notification() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Real account logout and forced session expiry."
+    },
+    {
+      "id": "capacity",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "connection_and_user_limits_release_capacity_after_disconnect",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn connection_and_user_limits_release_capacity_after_disconnect() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom total/per-user limits."
+    },
+    {
+      "id": "input-limits",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "oversized_frames_and_input_rate_close_without_committing_commands",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn oversized_frames_and_input_rate_close_without_committing_commands() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom input/rate limits and durable snapshot assertion."
+    },
+    {
+      "id": "snapshot-limit",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "snapshot_size_limit_closes_without_sending_a_partial_position",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn snapshot_size_limit_closes_without_sending_a_partial_position() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Snapshot bytes limit one."
+    },
+    {
+      "id": "shutdown-test",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "shutdown_closes_active_connections_and_refuses_new_upgrades",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn shutdown_closes_active_connections_and_refuses_new_upgrades() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown directly."
+    },
+    {
+      "id": "shutdown-first",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "shutdown_before_any_connection_refuses_the_first_upgrade",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn shutdown_before_any_connection_refuses_the_first_upgrade() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown before any connection."
+    },
+    {
+      "id": "viewers",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "participants_and_spectator_receive_committed_moves_and_resignation",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn participants_and_spectator_receive_committed_moves_and_resignation() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture."
+    },
+    {
+      "id": "retry",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "async fn lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move() {"
+      },
+      "scope": "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture."
+    }
+  ],
+  "limitations": [
+    "The gateway authenticates browser identity; the upstream trusted gRPC service itself accepts claims. Session/access checks bound disclosure at checked operations, not a globally atomic cross-service authorization snapshot.",
+    "Resource bounds cover configured queues/permits and deadlines; selected tests do not prove every overload or timeout branch. There is no separate handshake/input semaphore beyond the implemented connection and in-flight command permits.",
+    "Executable startup/configuration/signal behavior is owned by the runtime feature record and is not established by these library router tests.",
+    "Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review."
+  ]
+}

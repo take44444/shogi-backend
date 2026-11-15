@@ -1,0 +1,424 @@
+{
+  "version": 1,
+  "feature": {
+    "id": "startup-schema-isolation",
+    "title": "サービスの起動設定・スキーマ互換性・DB 分離",
+    "source": {
+      "path": "docs/reference/service-configuration.md",
+      "needle": "# サービス設定の参照仕様"
+    },
+    "flow": [
+      "Executable configuration selects account/game databases, browser origins and service endpoints before application startup.",
+      "Account persistence initializes or validates its own schema; game writers and workers initialize empty game databases or validate schema version seven.",
+      "The public reader requires an existing compatible game schema and uses a bounded read-only pool under separate SELECT-only credentials.",
+      "Compose and initialization SQL provide separate account storage and a credential-free gateway; runtime deployment checks are a separate non-Cargo suite."
+    ]
+  },
+  "guarantees": [
+    {
+      "id": "browser-config",
+      "statement": "BrowserConfig requires a clean HTTPS origin, with HTTP available only through explicit loopback development mode, and derives the exact Google callback URL.",
+      "contracts": [
+        "contract-browser-config"
+      ]
+    },
+    {
+      "id": "account-schema",
+      "statement": "Account persistence initializes an empty database, preserves compatible schema/data, and fails closed on tested incompatible schema and ledger definitions.",
+      "contracts": [
+        "contract-account-schema"
+      ]
+    },
+    {
+      "id": "game-schema",
+      "statement": "Game startup initializes schema version seven only in an empty database and rejects incompatible required definitions or version without migration or deletion of tested schema/data.",
+      "contracts": [
+        "contract-game-schema"
+      ]
+    },
+    {
+      "id": "bounded-public-reader",
+      "statement": "The public reader creates no schema, requires version seven, admits four database connections with two-second acquisition/statement/lock limits, and relies on a separate SELECT-only role restricted to public tables.",
+      "contracts": [
+        "reader-boundary",
+        "reader-permissions"
+      ]
+    },
+    {
+      "id": "deployment-process-config",
+      "statement": "Configured services separate account and game storage, give the public reader separate credentials, and give the gateway no database credentials. Account startup validates configuration, connects storage and discovers its provider before listening; game and reader startup parse their addresses and connect compatible storage before serving.",
+      "contracts": [
+        "process-config",
+        "account-environment",
+        "game-process",
+        "reader-process"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "contract-browser-config",
+      "statement": "BrowserConfig validates scheme, loopback opt-in, credentials, path, query and fragment and derives callback_url from the normalized origin.",
+      "source": {
+        "path": "crates/user-http/src/config.rs",
+        "needle": "pub fn new(origin: &str, allow_loopback_http: bool) -> Result<Self, ConfigError> {"
+      },
+      "evidence": [
+        {
+          "test": "test-browser-config",
+          "relationship": "asserts",
+          "reason": "Direct cases accept HTTPS and explicit localhost/IPv6 loopback development, reject unsafe origins and compare the HTTPS callback URL."
+        }
+      ],
+      "gap": "ServerConfig::from_env requirements, PostgreSQL URL validation, session TTL, bind parsing and invalid development flags are not directly asserted by this constructor test."
+    },
+    {
+      "id": "contract-account-schema",
+      "statement": "PostgresAccounts::connect serializes schema initialization/validation and rejects missing or changed required account definitions and ledger while preserving compatible data.",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "    pub async fn connect(url: &str) -> Result<Self, Error> {"
+      },
+      "evidence": [
+        {
+          "test": "account-preservation",
+          "relationship": "asserts",
+          "reason": "A preexisting version-one fixture and identity/session survive connect, login, close and reopen."
+        },
+        {
+          "test": "account-drift",
+          "relationship": "asserts",
+          "reason": "Selected empty/missing ledger, missing index, nullable field, foreign key and version-check mutations all make reopen return Corrupt."
+        }
+      ],
+      "gap": "These selected mutations are not every DDL drift. Account runtime/provider startup and signal shutdown are not tested by persistence cases."
+    },
+    {
+      "id": "contract-game-schema",
+      "statement": "The writer initializer creates an empty schema, checks the required fingerprint and version seven under an advisory transaction lock, and grants four public tables to an existing reader role.",
+      "source": {
+        "path": "crates/game-persistence/src/schema.rs",
+        "needle": "pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaError> {"
+      },
+      "evidence": [
+        {
+          "test": "s1",
+          "relationship": "asserts",
+          "reason": "Fifteen required-definition mutations are rejected while before/after schema and data snapshots remain equal."
+        },
+        {
+          "test": "s2",
+          "relationship": "asserts",
+          "reason": "Unrelated tables and additional/renamed indexes are accepted unchanged."
+        },
+        {
+          "test": "s3",
+          "relationship": "asserts",
+          "reason": "A version-five fixture is rejected without migration or deletion."
+        },
+        {
+          "test": "r6",
+          "relationship": "asserts",
+          "reason": "A newly built schema matches the current schema fixture catalog."
+        },
+        {
+          "test": "s4",
+          "relationship": "asserts",
+          "reason": "A version-six fixture is rejected and its before/after schema/data snapshot remains equal."
+        },
+        {
+          "test": "malformed-game-ledger",
+          "relationship": "asserts",
+          "reason": "Malformed version-ledger definitions and an orphaned outbox table cause writer startup to return Corrupt."
+        }
+      ],
+      "gap": "Preserved tested schema/data snapshots do not imply absence of all SQL effects. Writer validation creates a temporary expected schema and can grant reader SELECT; the reader has a stricter column policy than the writer subset check."
+    },
+    {
+      "id": "reader-boundary",
+      "statement": "PostgresGameRecords::connect validates an existing schema without initialization, limits its pool to four, and sets read-only transactions plus two-second acquire, statement and lock timeouts.",
+      "source": {
+        "path": "crates/game-record-persistence/src/lib.rs",
+        "needle": "    pub async fn connect(url: &str) -> Result<Self, Error> {"
+      },
+      "evidence": [
+        {
+          "test": "r7",
+          "relationship": "asserts",
+          "reason": "An empty database stays empty and wrong/incomplete schemas are rejected."
+        },
+        {
+          "test": "s6",
+          "relationship": "asserts",
+          "reason": "Four held connections prevent a fifth until acquisition timeout; releasing a connection restores acquisition."
+        },
+        {
+          "test": "s7",
+          "relationship": "asserts",
+          "reason": "Actual timeout settings are checked, pg_sleep is cancelled with SQLSTATE 57014 and the connection recovers."
+        }
+      ],
+      "gap": "The lock_timeout setting is asserted, but a separate real lock-wait timeout scenario is not mapped."
+    },
+    {
+      "id": "reader-permissions",
+      "statement": "The provisioned shogi_reader role can SELECT schema_version, games, journal and rating_states, cannot access rating/matchmaking internals and cannot write even when default read-only is disabled.",
+      "source": {
+        "path": "scripts/init-postgres.sql",
+        "needle": "CREATE ROLE shogi_reader LOGIN PASSWORD 'shogi_reader';"
+      },
+      "evidence": [
+        {
+          "test": "s5",
+          "relationship": "asserts",
+          "reason": "The actual reader role receives insufficient_privilege after disabling default_transaction_read_only and attempting a write."
+        },
+        {
+          "test": "w11",
+          "relationship": "asserts",
+          "reason": "The actual reader selects the four public tables, is denied internal rating/matchmaking tables and cannot update rating_states."
+        }
+      ],
+      "gap": "These assertions use the test provisioned role. They do not prove arbitrary production credential ownership or permission policy."
+    },
+    {
+      "id": "process-config",
+      "statement": "Account startup loads ServerConfig, connects its store, discovers Google and then binds. Compose wires separate account storage, a distinct reader and a gateway without database credentials.",
+      "source": {
+        "path": "apps/user-server/src/main.rs",
+        "needle": "async fn main() -> Result<(), Box<dyn std::error::Error>> {"
+      },
+      "evidence": [],
+      "gap": "No mapped Rust test launches every service or asserts ServerConfig::from_env, actual Google discovery availability, Ctrl-C/close or application readiness. Existing python3 scripts/test-deployment.py checks Compose topology, loopback exposure, origin routing, reader permissions and denied account access with Docker/PostgreSQL; this non-Cargo command remains outside traceability run selectors."
+    },
+    {
+      "id": "account-environment",
+      "statement": "ServerConfig::from_env requires nonempty public origin, PostgreSQL URL and Google credentials, bounds session lifetime to 60 through 2592000 seconds, parses the bind address and accepts only true/false development flags.",
+      "source": {
+        "path": "crates/user-http/src/config.rs",
+        "needle": "pub fn from_env() -> Result<Self, ConfigError> {"
+      },
+      "evidence": [],
+      "gap": "BrowserConfig constructor tests do not call from_env. No mapped test mutates the environment to assert required variables, invalid URL prefixes, session lifetime bounds, bind parsing, development-flag parsing or defaults."
+    },
+    {
+      "id": "game-process",
+      "statement": "The game binary chooses its address from the first argument, GAME_SERVER_ADDR or loopback default, connects the writer schema before serving gRPC, and signals its matcher to stop after server shutdown.",
+      "source": {
+        "path": "apps/game-server/src/main.rs",
+        "needle": "async fn main() -> Result<(), Box<dyn std::error::Error>> {"
+      },
+      "evidence": [],
+      "gap": "No mapped test starts this binary to assert address precedence, malformed configuration, dependency failure, Ctrl-C or matcher teardown. Matcher behavior belongs to matchmaking; writer adapter tests do not prove process lifecycle."
+    },
+    {
+      "id": "reader-process",
+      "statement": "The public reader binary parses PLAYER_BIND_ADDR, connects PLAYER_GAME_DATABASE_URL through the validating read adapter before binding, shares that reader between records and ratings, and closes it after graceful Ctrl-C shutdown.",
+      "source": {
+        "path": "apps/player-server/src/main.rs",
+        "needle": "async fn main() -> Result<(), Box<dyn std::error::Error>> {"
+      },
+      "evidence": [],
+      "gap": "No mapped test starts this binary to assert environment defaults, bind parsing, rejected schema before listening, Ctrl-C or reader close. In-process HTTP and database adapter tests do not assert this executable wiring."
+    }
+  ],
+  "tests": [
+    {
+      "id": "test-browser-config",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::configuration_fails_closed",
+      "source": {
+        "path": "crates/user-http/src/tests.rs",
+        "needle": "fn configuration_fails_closed() {"
+      },
+      "scope": "Pure BrowserConfig validation; no environment mutation, Google request or process startup."
+    },
+    {
+      "id": "account-preservation",
+      "package": "user-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::existing_schema_and_data_survive_builder_refactor",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "async fn existing_schema_and_data_survive_builder_refactor() {"
+      },
+      "scope": "Real PostgreSQL version-one fixture, existing identity/session, connect/close/reopen."
+    },
+    {
+      "id": "account-drift",
+      "package": "user-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::missing_ledger_or_changed_indexes_fail_closed",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "async fn missing_ledger_or_changed_indexes_fail_closed() {"
+      },
+      "scope": "Real PostgreSQL selected schema/ledger mutations and rejected reopen."
+    },
+    {
+      "id": "s1",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "name": "changed_required_schema_is_rejected_without_modifying_schema_or_data",
+      "source": {
+        "path": "crates/game-persistence/tests/schema_contract.rs",
+        "needle": "async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() {"
+      },
+      "scope": "Real PostgreSQL fifteen required game-schema mutations with before/after snapshots."
+    },
+    {
+      "id": "s2",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "name": "current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged",
+      "source": {
+        "path": "crates/game-persistence/tests/schema_contract.rs",
+        "needle": "async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged() {"
+      },
+      "scope": "Real PostgreSQL compatible additional objects and unchanged snapshots."
+    },
+    {
+      "id": "s3",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "name": "version_five_is_rejected_without_migration_or_deletion",
+      "source": {
+        "path": "crates/game-persistence/tests/schema_contract.rs",
+        "needle": "async fn version_five_is_rejected_without_migration_or_deletion() {"
+      },
+      "scope": "Real PostgreSQL version-five schema fixture rejected without migration/deletion."
+    },
+    {
+      "id": "r6",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "name": "fresh_builder_schema_matches_the_current_schema_fixture",
+      "source": {
+        "path": "crates/game-persistence/tests/records.rs",
+        "needle": "async fn fresh_builder_schema_matches_the_current_schema_fixture() {"
+      },
+      "scope": "Real PostgreSQL fresh schema catalog compared with the current fixture."
+    },
+    {
+      "id": "r7",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "name": "reader_does_not_create_or_accept_wrong_schema",
+      "source": {
+        "path": "crates/game-persistence/tests/records.rs",
+        "needle": "async fn reader_does_not_create_or_accept_wrong_schema() {"
+      },
+      "scope": "Real PostgreSQL empty/wrong/incomplete reader schema with no initialization."
+    },
+    {
+      "id": "s5",
+      "package": "game-record-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::database_role_denies_writes_even_when_read_only_mode_is_disabled",
+      "source": {
+        "path": "crates/game-record-persistence/src/lib.rs",
+        "needle": "async fn database_role_denies_writes_even_when_read_only_mode_is_disabled() {"
+      },
+      "scope": "Real SELECT-only PostgreSQL role after disabling read-only session default."
+    },
+    {
+      "id": "s6",
+      "package": "game-record-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::fifth_reader_connection_times_out_until_one_of_four_is_released",
+      "source": {
+        "path": "crates/game-record-persistence/src/lib.rs",
+        "needle": "async fn fifth_reader_connection_times_out_until_one_of_four_is_released() {"
+      },
+      "scope": "Real PostgreSQL reader pool acquisition saturation and recovery."
+    },
+    {
+      "id": "s7",
+      "package": "game-record-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::statement_timeout_interrupts_real_database_work_and_connection_recovers",
+      "source": {
+        "path": "crates/game-record-persistence/src/lib.rs",
+        "needle": "async fn statement_timeout_interrupts_real_database_work_and_connection_recovers() {"
+      },
+      "scope": "Real PostgreSQL timeout settings and timed work cancellation/recovery."
+    },
+    {
+      "id": "w11",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "name": "actual_reader_role_can_read_only_the_public_rating_table",
+      "source": {
+        "path": "crates/game-persistence/tests/ratings.rs",
+        "needle": "async fn actual_reader_role_can_read_only_the_public_rating_table() {"
+      },
+      "scope": "Real PostgreSQL public reader privileges and denied internal tables/update."
+    },
+    {
+      "id": "s4",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "name": "version_six_is_rejected_unchanged",
+      "source": {
+        "path": "crates/game-persistence/tests/schema_contract.rs",
+        "needle": "async fn version_six_is_rejected_unchanged() {"
+      },
+      "scope": "Real PostgreSQL version-six fixture rejection with unchanged schema/data snapshot."
+    },
+    {
+      "id": "malformed-game-ledger",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "name": "malformed_ledgers_and_orphaned_outbox_tables_fail_closed",
+      "source": {
+        "path": "crates/game-persistence/tests/outbox.rs",
+        "needle": "async fn malformed_ledgers_and_orphaned_outbox_tables_fail_closed() {"
+      },
+      "scope": "Real PostgreSQL writer startup rejects selected malformed ledgers and orphaned outbox schema."
+    }
+  ],
+  "limitations": [
+    "Deployment topology and reader database isolation do have existing automated checks in python3 scripts/test-deployment.py. This trace graph maps only Cargo tests; it does not execute or replace that Docker-based command.",
+    "There is no application health endpoint. Compose PostgreSQL/Valkey probes do not establish application readiness.",
+    "CLI/environment parsing, external Google availability, startup failure propagation and graceful signal/close behavior across all six application binaries remain source-level contracts with explicit runtime test gaps.",
+    "Runtime ownership/configuration for event and rating loops is also documented by durable-event-dispatch and rating-application. No mapped startup test guarantees a process can always connect to its dependencies.",
+    "Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees."
+  ]
+}

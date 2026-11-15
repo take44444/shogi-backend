@@ -1,0 +1,295 @@
+{
+  "version": 1,
+  "feature": {
+    "id": "account-google-login",
+    "title": "Google によるブラウザーログイン",
+    "source": {
+      "path": "crates/user-http/src/lib.rs",
+      "needle": "async fn callback("
+    },
+    "flow": [
+      "GET /auth/google/start は IdentityProvider が生成した state・nonce・PKCE verifier とブラウザー Cookie を、10 分で期限切れとなる試行に結び付ける。",
+      "GET /auth/google/callback はブラウザーに一致する未使用の試行を PostgreSQL から消費してからコードを交換する。GoogleProvider は署名と本人確認の claims を検証する。",
+      "PostgresAccounts::login は issuer・subject でアカウントを解決し、アカウント・外部 ID・新セッションを同じトランザクションで保存する。HTTP はセッション Cookie を発行して /me に移動する。"
+    ]
+  },
+  "guarantees": [
+    {
+      "id": "browser-bound",
+      "statement": "ログイン試行はブラウザーに結び付き、有効期限を過ぎた試行や使用済みの試行はコード交換に使えない。",
+      "contracts": [
+        "http-attempt",
+        "attempt-consumption"
+      ]
+    },
+    {
+      "id": "pkce",
+      "statement": "認可要求は openid・profile と state・nonce・S256 PKCE を使い、コード交換は保存した verifier を送る。",
+      "contracts": [
+        "provider-authorization",
+        "provider-exchange"
+      ]
+    },
+    {
+      "id": "verified-identity",
+      "statement": "Google の署名、issuer、audience、nonce、有効期限、authorized party と、存在する場合の access-token hash を検証してから issuer・subject を本人識別に使う。",
+      "contracts": [
+        "verified-claims",
+        "provider-exchange"
+      ]
+    },
+    {
+      "id": "atomic-account-session",
+      "statement": "同じ issuer・subject の同時初回ログインは一つのアカウントに収束し、新しい本人識別情報とセッションはまとめて保存される。",
+      "contracts": [
+        "account-session-transaction"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "provider-authorization",
+      "statement": "GoogleProvider::authorize は state・nonce とランダムな S256 PKCE challenge/verifier を生成し、openid・profile の認可 URL を返す。",
+      "source": {
+        "path": "crates/user-http/src/google.rs",
+        "needle": "impl IdentityProvider for GoogleProvider {"
+      },
+      "evidence": [
+        {
+          "test": "oauth-authorization",
+          "relationship": "asserts",
+          "reason": "scope、response_type、state、nonce、S256 と verifier から再計算した challenge の一致、連続する state の相違を確認する。"
+        }
+      ]
+    },
+    {
+      "id": "http-attempt",
+      "statement": "start は state とブラウザー値の SHA-256 と nonce・verifier を保存する。callback は一致する試行を消費した後に provider の交換を呼び、新セッションを保存して /me への 303 と Cookie を返す。",
+      "source": {
+        "path": "crates/user-http/src/lib.rs",
+        "needle": "async fn callback("
+      },
+      "evidence": [
+        {
+          "test": "browser-attempt",
+          "relationship": "asserts",
+          "reason": "ブラウザー Cookie の欠落・不一致では交換回数 0、成功後の再利用は 401、失敗コードでの交換後も再試行不可であることを確認する。"
+        },
+        {
+          "test": "credential-hashes",
+          "relationship": "asserts",
+          "reason": "start が保存する state_hash・browser_hash が生値と異なり SHA-256 に一致すること、callback が 303 を返しセッションもハッシュで保存することを確認する。"
+        }
+      ],
+      "gap": "callback の state/code 長境界、provider error、code 欠落、重複ログイン Cookie、保存失敗時の HTTP 応答は未確認。既存セッション Cookie を送ると旧セッションを logout する実装だが、そのローテーションを確認する assertion はない。"
+    },
+    {
+      "id": "attempt-consumption",
+      "statement": "PostgresAccounts::consume_attempt は state・browser の両ハッシュが一致し expires_at > now の行を DELETE RETURNING で一度だけ取得する。",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "    async fn consume_attempt("
+      },
+      "evidence": [
+        {
+          "test": "attempt-expiry",
+          "relationship": "asserts",
+          "reason": "期限ちょうどの試行と不一致ブラウザーを Unauthorized とし、有効な試行は一度だけ消費できることを確認する。"
+        },
+        {
+          "test": "concurrent-login",
+          "relationship": "asserts",
+          "reason": "二つの接続から同じ試行を同時消費して、成功が一つだけであることを確認する。"
+        }
+      ]
+    },
+    {
+      "id": "provider-exchange",
+      "statement": "exchange_code は保存済み PKCE verifier を token endpoint に送り、取得した ID token を verify_response に渡す。",
+      "source": {
+        "path": "crates/user-http/src/google.rs",
+        "needle": "async fn exchange_code("
+      },
+      "evidence": [
+        {
+          "test": "oauth-exchange",
+          "relationship": "asserts",
+          "reason": "ローカル HTTP token endpoint に送る grant_type・code・verifier・redirect_uri と、署名済み応答からの subject を確認する。"
+        }
+      ],
+      "gap": "GoogleProvider::exchange の再ディスカバリー、実 Google 通信、HTTPS 専用クライアントのタイムアウトとリダイレクト拒否をこのテストは通らない。"
+    },
+    {
+      "id": "verified-claims",
+      "statement": "verify_response はライブラリーの署名・issuer・audience・nonce・期限検証に加えて azp と access-token hash を検証し、空でない subject と固定 Google issuer を返す。",
+      "source": {
+        "path": "crates/user-http/src/google.rs",
+        "needle": "fn verify_response("
+      },
+      "evidence": [
+        {
+          "test": "oauth-invalid-claims",
+          "relationship": "asserts",
+          "reason": "誤った issuer・audience・nonce、nonce 欠落、期限切れ、誤った azp、複数 audience かつ azp 欠落を拒否し、一致する azp は受け入れる。"
+        },
+        {
+          "test": "oauth-token-integrity",
+          "relationship": "asserts",
+          "reason": "access token の置換と ID token 署名の改変を Unauthorized とする。"
+        },
+        {
+          "test": "oauth-exchange",
+          "relationship": "asserts",
+          "reason": "正しく署名した応答を実際の検証関数に通して stable-subject を返すことを確認する。"
+        }
+      ],
+      "gap": "空 subject の拒否、ID token 欠落、名前がない場合や不正な名前の場合の Player へのフォールバックはこの記録のテストでは直接確認していない。"
+    },
+    {
+      "id": "account-session-transaction",
+      "statement": "PostgresAccounts::login は issuer・subject のロック下で既存プロフィールを再利用するかアカウントと外部 ID を作成し、セッション挿入と一緒にコミットする。",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "    async fn login("
+      },
+      "evidence": [
+        {
+          "test": "concurrent-login",
+          "relationship": "asserts",
+          "reason": "同じ本人識別で同時ログインした結果が一致し、両セッションが同一ユーザーを認証し、accounts が一行であることを確認する。"
+        },
+        {
+          "test": "login-rollback",
+          "relationship": "asserts",
+          "reason": "新 subject のセッション挿入を重複キーで失敗させ、accounts が増えず、別 token で再試行でき、元 token の本人識別が維持されることを確認する。"
+        }
+      ],
+      "gap": "issuer だけが異なる場合の分離や、コミット時失敗などすべてのトランザクション障害は列挙していない。"
+    }
+  ],
+  "tests": [
+    {
+      "id": "browser-attempt",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::login_is_browser_bound_and_consumed_before_any_exchange",
+      "source": {
+        "path": "crates/user-http/src/tests.rs",
+        "needle": "async fn login_is_browser_bound_and_consumed_before_any_exchange() {"
+      },
+      "scope": "実 Axum ルーターと PostgreSQL。交換回数を数える偽 IdentityProvider を使い、実 Google には接続しない。"
+    },
+    {
+      "id": "credential-hashes",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::persisted_browser_credentials_are_hashes_not_cookie_values",
+      "source": {
+        "path": "crates/user-http/src/tests.rs",
+        "needle": "async fn persisted_browser_credentials_are_hashes_not_cookie_values() {"
+      },
+      "scope": "実ルーターと PostgreSQL の保存行を比較する。本人確認は偽 provider。"
+    },
+    {
+      "id": "oauth-authorization",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "google::tests::authorization_uses_openid_profile_state_nonce_and_s256_pkce",
+      "source": {
+        "path": "crates/user-http/src/google/tests.rs",
+        "needle": "fn authorization_uses_openid_profile_state_nonce_and_s256_pkce() {"
+      },
+      "scope": "ローカル metadata から構成した実 GoogleProvider。認可 URL の生成を確認し、ネットワークは使わない。"
+    },
+    {
+      "id": "oauth-exchange",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "google::tests::code_exchange_sends_pkce_and_verifies_signed_token_over_http",
+      "source": {
+        "path": "crates/user-http/src/google/tests.rs",
+        "needle": "async fn code_exchange_sends_pkce_and_verifies_signed_token_over_http() {"
+      },
+      "scope": "ローカル HTTP token endpoint とテスト RSA 署名を使う exchange_code。discovery とブラウザールートは通らない。"
+    },
+    {
+      "id": "oauth-invalid-claims",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "google::tests::signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected",
+      "source": {
+        "path": "crates/user-http/src/google/tests.rs",
+        "needle": "fn signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected() {"
+      },
+      "scope": "テスト RSA で署名した claims を verify_response に渡す。実プロバイダーと DB は使わない。"
+    },
+    {
+      "id": "oauth-token-integrity",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "google::tests::substituted_access_token_and_tampered_signature_are_rejected",
+      "source": {
+        "path": "crates/user-http/src/google/tests.rs",
+        "needle": "fn substituted_access_token_and_tampered_signature_are_rejected() {"
+      },
+      "scope": "署名済みテスト応答の access token と署名を個別に改変して検証する。"
+    },
+    {
+      "id": "attempt-expiry",
+      "package": "user-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::expired_attempts_and_sessions_cannot_be_used",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "async fn expired_attempts_and_sessions_cannot_be_used() {"
+      },
+      "scope": "実 PostgreSQL repository に指定時刻を渡し、試行の期限・ブラウザー一致・単回消費を確認する。HTTP は通らない。"
+    },
+    {
+      "id": "concurrent-login",
+      "package": "user-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::concurrent_first_logins_and_callback_consumption_converge",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "async fn concurrent_first_logins_and_callback_consumption_converge() {"
+      },
+      "scope": "実 PostgreSQL の二つの接続で login と consume_attempt を競合させる。HTTP と Google は通らない。"
+    },
+    {
+      "id": "login-rollback",
+      "package": "user-persistence",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::failed_session_insert_rolls_back_a_new_identity",
+      "source": {
+        "path": "crates/user-persistence/src/lib.rs",
+        "needle": "async fn failed_session_insert_rolls_back_a_new_identity() {"
+      },
+      "scope": "実 PostgreSQL の重複 session key による失敗と再試行を確認する。HTTP のエラー変換は通らない。"
+    }
+  ],
+  "limitations": [
+    "実 Google の discovery・認可・コード交換からブラウザー Cookie までを通す end-to-end テストはない。署名検証、ローカル token endpoint、偽 provider の HTTP フローは別々の証拠である。",
+    "ログイン成功時の既存セッションローテーションは未確認。registration_profile_update_csrf_logout_and_restart の二回目のログインは既存セッション Cookie を送らないため、その根拠にはできない。",
+    "Cookie 属性とセッションの利用・失効は account-session、プロフィールと表示名は account-profile、設定・startup・schema は別の機能記録が扱う。",
+    "リンクの成立とテストの成功は、記述した保証の意味や網羅性の証明ではない。保証・契約・関連の削除や根拠の過大評価はレビューで確認する。"
+  ]
+}

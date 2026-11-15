@@ -1,0 +1,317 @@
+# ユーザー別の確定済みレート取得
+
+このページは `python3 scripts/traceability.py render` で生成する。
+
+元データは [crates/player-http/src/ratings.trace.json](../../../crates/player-http/src/ratings.trace.json)。
+[全機能の一覧](../feature-traceability.md)。
+
+## 対象機能
+
+| ID | 機能 | 仕様 |
+| --- | --- | --- |
+| user-ratings | ユーザー別の確定済みレート取得 | [crates/player-http/README.md](../../../crates/player-http/README.md#L55) |
+
+## 保証の成立条件と構成
+
+1. HTTP アダプターは ID を検証し、処理枠を取得して UserRatings::get を呼ぶ。
+2. アプリケーション層は型付き ID を RatingRepository に渡す。
+3. PostgreSQL 読み取り側が確定済み状態を読み、型の検証を通した結果を HTTP が JSON に変換する。
+
+以下の保証には、各行に示す契約が必要となる。テストの assertions は記載した事例の範囲に限られる。
+
+| ID | アプリケーションの保証と条件 | 必要な契約 |
+| --- | --- | --- |
+| committed-snapshot | 読み取りに成功するとプール別の確定済みレートを返す。アカウントの存在や未処理対局の適用完了は保証しない。 | [http-pools](#contract-http-pools), [application-forwarding](#contract-application-forwarding), [postgres-snapshot](#contract-postgres-snapshot) |
+| explicit-pools | 読み取りに成功すると両プールを返す。適用済み対局のないプールは rating が null、completed_rated_games が 0 となる。構文上有効な未知のユーザーにも認証なしで応答する。 | [http-pools](#contract-http-pools), [application-forwarding](#contract-application-forwarding), [postgres-snapshot](#contract-postgres-snapshot), [rating-state](#contract-rating-state) |
+| invalid-user | 不正なユーザー ID は保存層を呼ぶ前に 400 で拒否する。 | [http-input](#contract-http-input), [user-id](#contract-user-id) |
+| no-store | ハンドラーが処理したレスポンスに Cache-Control: no-store を付ける。 | [http-cache](#contract-http-cache) |
+| openapi-shape | OpenAPI は認証不要のレート取得、200・400・503 の応答、両プールと必須かつ null 許容の rating を記述する。 | [http-openapi](#contract-http-openapi) |
+| unavailable | 保存層の失敗や HTTP 処理枠の不足は 503 と error: unavailable を返す。 | [http-unavailable](#contract-http-unavailable) |
+
+## 宣言した対応関係
+
+矢印は著者が宣言した関係を示す。asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。
+
+```mermaid
+flowchart TD
+    n0["feature: user-ratings"]
+    n1["guarantee: committed-snapshot"]
+    n2["guarantee: explicit-pools"]
+    n3["guarantee: invalid-user"]
+    n4["guarantee: no-store"]
+    n5["guarantee: openapi-shape"]
+    n6["guarantee: unavailable"]
+    n7["contract: application-forwarding"]
+    n8["contract: http-cache"]
+    n9["contract: http-input"]
+    n10["contract: http-openapi"]
+    n11["contract: http-pools"]
+    n12["contract: http-unavailable"]
+    n13["contract: postgres-snapshot"]
+    n14["contract: rating-state"]
+    n15["contract: user-id"]
+    n16["test: domain-state"]
+    n17["test: domain-user-id"]
+    n18["test: http-invalid"]
+    n19["test: http-schema"]
+    n20["test: http-unrated"]
+    n21["test: http-values-errors"]
+    n22["test: postgres-pools"]
+    n23["test: postgres-unrated"]
+    n0 --> n1
+    n1 --> n11
+    n1 --> n7
+    n1 --> n13
+    n0 --> n2
+    n2 --> n11
+    n2 --> n7
+    n2 --> n13
+    n2 --> n14
+    n0 --> n3
+    n3 --> n9
+    n3 --> n15
+    n0 --> n4
+    n4 --> n8
+    n0 --> n5
+    n5 --> n10
+    n0 --> n6
+    n6 --> n12
+    n7 -->|exercises| n20
+    n7 -->|exercises| n21
+    n8 -->|asserts| n20
+    n8 -->|asserts| n21
+    n9 -->|asserts| n18
+    n10 -->|asserts| n19
+    n11 -->|asserts| n20
+    n11 -->|asserts| n21
+    n12 -->|asserts| n21
+    n13 -->|asserts| n23
+    n13 -->|asserts| n22
+    n14 -->|asserts| n16
+    n14 -->|exercises| n20
+    n14 -->|exercises| n21
+    n15 -->|asserts| n17
+```
+
+## コンポーネント契約と根拠
+
+<a id="contract-application-forwarding"></a>
+
+### application-forwarding
+
+UserRatings::get は型付きユーザー ID を RatingRepository に渡し、その結果を返す。
+
+実装位置: [crates/game-record-application/src/ratings.rs](../../../crates/game-record-application/src/ratings.rs#L24)。
+
+- [http-unrated](#test-http-unrated) (exercises): 実ルーターから UserRatings::get を通り、偽 repository は受けた ID が unknown であることを確認する。
+- [http-values-errors](#test-http-values-errors) (exercises): 成功値と 2 種類の失敗がアプリケーション層を通る。HTTP は失敗を同じ 503 に変換する。
+
+未検証: 任意の ID と結果の無変更転送を独立して確認するテストはない。HTTP の失敗変換では元の失敗種別の保持を確認できない。
+
+<a id="contract-http-cache"></a>
+
+### http-cache
+
+respond は応答の Cache-Control ヘッダーを no-store にする。
+
+実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L224)。
+
+- [http-unrated](#test-http-unrated) (asserts): 成功応答で共有ヘルパーが no-store を確認する。
+- [http-values-errors](#test-http-values-errors) (asserts): 成功と保存層の 2 種類の失敗で、共有ヘルパーが no-store を確認する。
+
+未検証: 登録した不正 ID テストは 400 の Cache-Control を確認しない。
+
+<a id="contract-http-input"></a>
+
+### http-input
+
+レート取得ハンドラーは Path の復号と UserId の検証が成功するまで repository を呼ばない。
+
+実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L182)。
+
+- [http-invalid](#test-http-invalid) (asserts): 空白・全角空白・不正 UTF-8 のパスを 400 で拒否し、呼ばれると panic する repository に到達しない。
+
+未検証: このテストには ID の全長境界や、すべての不正なパスの列挙はない。
+
+<a id="contract-http-openapi"></a>
+
+### http-openapi
+
+公開 OpenAPI にレート取得と、両プール・必須フィールド・null 許容 rating のスキーマを含める。
+
+実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L32)。
+
+- [http-schema](#test-http-schema) (asserts): レート取得のパラメーター、応答、認証設定、両プール、必須フィールド、rating の integer と null を OpenAPI JSON で比較する。
+
+<a id="contract-http-pools"></a>
+
+### http-pools
+
+HTTP アダプターは UserRatingSnapshot の両プールを JSON に変換し、未評価の null と 0 を保持する。
+
+実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L216)。
+
+- [http-unrated](#test-http-unrated) (asserts): 認証情報なしの未知ユーザーへの 200 応答と、両プールの null・0 を JSON 全体で比較する。
+- [http-values-errors](#test-http-values-errors) (asserts): 片方に 1516、もう片方に null を持つ応答を確認する。
+
+<a id="contract-http-unavailable"></a>
+
+### http-unavailable
+
+レート取得ハンドラーは処理枠取得の失敗と repository の全失敗を Unavailable に変換し、503 を返す。
+
+実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L182)。
+
+- [http-values-errors](#test-http-values-errors) (asserts): 偽 repository の Error::Unavailable と Error::Corrupt の双方で 503 と同一の JSON エラーを比較する。
+
+未検証: 処理枠が尽きたレート取得の応答を確認するテストは登録していない。
+
+<a id="contract-postgres-snapshot"></a>
+
+### postgres-snapshot
+
+PostgreSQL 読み取り側は指定ユーザーの確定済み rating_states を読み、存在しないプールを Unrated とし、保存値を RatingState で検証する。
+
+実装位置: [crates/game-record-persistence/src/ratings.rs](../../../crates/game-record-persistence/src/ratings.rs#L10)。
+
+- [postgres-unrated](#test-postgres-unrated) (asserts): 実 DB から black の確定済み 1516・1、未適用プールの Unrated、unknown の ten_minute_30 の Unrated を確認する。
+- [postgres-pools](#test-postgres-pools) (asserts): 実 DB から同じユーザーの両プールに異なる確定値 1516 と 1484、対局数 1 を確認する。
+
+未検証: 読み取り側での破損値拒否、別ユーザーの値が混ざらないこと、未知ユーザーの両プールの初期値を個別に確認する assertion はない。
+
+<a id="contract-rating-state"></a>
+
+### rating-state
+
+RatingState は未評価を null・0、評価済みを整数レートと正の適用済み対局数として表現する。
+
+実装位置: [crates/rating-domain/src/lib.rs](../../../crates/rating-domain/src/lib.rs#L35)。
+
+- [domain-state](#test-domain-state) (asserts): Some(1500) と対局数 0、および None と対局数 1 の組み合わせを拒否することを確認する。
+- [http-unrated](#test-http-unrated) (exercises): 既定の Unrated を HTTP に変換する。
+- [http-values-errors](#test-http-values-errors) (exercises): RatingState::from_parts(Some(1516), 1) による評価済み状態を使う。
+
+未検証: 不正な組み合わせの全列挙や読み取り側の破損値拒否は、この機能のテストでは確認していない。ドメイン全体のテスト一覧は対象外。
+
+<a id="contract-user-id"></a>
+
+### user-id
+
+UserId は 1〜128 UTF-8 バイトで Unicode 空白を含まない ID を保持する。
+
+実装位置: [crates/user-id/src/lib.rs](../../../crates/user-id/src/lib.rs#L16)。
+
+- [domain-user-id](#test-domain-user-id) (asserts): 有効な ASCII・日本語・128 バイトの保持と、空文字・空白・129 バイト・多バイト長超過の拒否を確認する。
+
+## 実在するテストと実行コマンド
+
+コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
+
+<a id="test-domain-state"></a>
+
+### domain-state
+
+テスト位置: [crates/rating-domain/src/lib.rs](../../../crates/rating-domain/src/lib.rs#L144)。
+
+範囲: RatingState の不正な組み合わせ 2 例と計算の境界を直接確認する。DB と HTTP は通らない。
+
+```sh
+cargo test --locked -p rating-domain --lib tests::expected_upsets_and_extremes_are_zero_sum_and_checked -- --exact --format pretty --color never
+```
+
+<a id="test-domain-user-id"></a>
+
+### domain-user-id
+
+テスト位置: [crates/user-id/src/lib.rs](../../../crates/user-id/src/lib.rs#L32)。
+
+範囲: UserId の有効値の保持と長さ・空白の境界を直接確認する。HTTP パスの復号は通らない。
+
+```sh
+cargo test --locked -p user-id --lib tests::preserves_valid_identifiers_and_rejects_byte_and_whitespace_boundaries -- --exact --format pretty --color never
+```
+
+<a id="test-http-invalid"></a>
+
+### http-invalid
+
+テスト位置: [crates/player-http/src/rating_tests.rs](../../../crates/player-http/src/rating_tests.rs#L72)。
+
+範囲: 実 Axum ルーター。呼び出されると panic する偽 repository を使用する。
+
+```sh
+cargo test --locked -p player-http --lib rating_tests::invalid_user_ids_are_rejected_before_storage -- --exact --format pretty --color never
+```
+
+<a id="test-http-schema"></a>
+
+### http-schema
+
+テスト位置: [crates/player-http/src/rating_tests.rs](../../../crates/player-http/src/rating_tests.rs#L87)。
+
+範囲: 実 OpenAPI 生成結果。HTTP 通信と DB は使わない。
+
+```sh
+cargo test --locked -p player-http --lib rating_tests::rating_openapi_contains_required_null_rating_and_both_named_pools -- --exact --format pretty --color never
+```
+
+<a id="test-http-unrated"></a>
+
+### http-unrated
+
+テスト位置: [crates/player-http/src/rating_tests.rs](../../../crates/player-http/src/rating_tests.rs#L43)。
+
+範囲: 実 Axum ルーターとアプリケーション層。偽 RatingRepository を使い、DB は使わない。
+
+```sh
+cargo test --locked -p player-http --lib rating_tests::anonymous_unknown_user_has_two_explicit_null_pools_and_zero_counts -- --exact --format pretty --color never
+```
+
+<a id="test-http-values-errors"></a>
+
+### http-values-errors
+
+テスト位置: [crates/player-http/src/rating_tests.rs](../../../crates/player-http/src/rating_tests.rs#L52)。
+
+範囲: 実 Axum ルーターとアプリケーション層。偽 repository の固定値と失敗を使用する。
+
+```sh
+cargo test --locked -p player-http --lib rating_tests::committed_values_are_pool_specific_and_storage_failures_are_503 -- --exact --format pretty --color never
+```
+
+<a id="test-postgres-pools"></a>
+
+### postgres-pools
+
+テスト位置: [crates/game-persistence/tests/ratings.rs](../../../crates/game-persistence/tests/ratings.rs#L518)。
+
+範囲: 実 PostgreSQL と PostgresGameRecords。両プールのワーカー適用後の読み取り。HTTP は通らない。
+
+```sh
+cargo test --locked -p game-persistence --test ratings both_pools_update_independently_from_their_frozen_start_states -- --exact --format pretty --color never
+```
+
+<a id="test-postgres-unrated"></a>
+
+### postgres-unrated
+
+テスト位置: [crates/game-persistence/tests/ratings.rs](../../../crates/game-persistence/tests/ratings.rs#L185)。
+
+範囲: 実 PostgreSQL と PostgresGameRecords。ワーカー適用後の読み取り。HTTP は通らない。
+
+```sh
+cargo test --locked -p game-persistence --test ratings completed_replay_is_read_only_and_never_releases_the_next_games_slots -- --exact --format pretty --color never
+```
+
+## 検査と根拠の限界
+
+check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
+run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
+この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
+位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
+宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
+
+- 実 PostgreSQL から HTTP レスポンスまでを通すレート取得の end-to-end テストはない。
+- リンクの成立とテストの成功は、宣言した保証の意味や網羅性の証明ではない。
+- 保証や契約そのものを削除した変更、孤立を残さない関連の削除、根拠の過大評価はレビューで確認する。
+- この機能はレート取得を扱う。レート計算、ワーカー、書き込み権限は機能一覧の別の対応表で扱う。

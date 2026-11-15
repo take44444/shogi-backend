@@ -1,0 +1,306 @@
+{
+  "version": 1,
+  "feature": {
+    "id": "public-api-documents",
+    "title": "公開 API 仕様の取得とオフライン生成",
+    "source": {
+      "path": "README.md",
+      "needle": "## API ドキュメントを生成する"
+    },
+    "flow": [
+      "User and player OpenApiRouter registrations produce offline documents and their anonymous /openapi.json responses.",
+      "The gateway exports a separate offline matchmaking OpenAPI document with owner-scoped routes and cookie alternatives.",
+      "Example binaries serialize these library documents; document generation does not start the services."
+    ]
+  },
+  "guarantees": [
+    {
+      "id": "offline-runtime-equality",
+      "statement": "User and player expose anonymous /openapi.json equal to offline generation without repository access or user identity-provider calls.",
+      "contracts": [
+        "player-runtime",
+        "user-runtime"
+      ]
+    },
+    {
+      "id": "player-schema",
+      "statement": "Player OpenAPI identifies its service and describes its routes, query/error contracts and public response schemas.",
+      "contracts": [
+        "contract-player-schema"
+      ]
+    },
+    {
+      "id": "user-schema",
+      "statement": "User OpenAPI identifies its service and describes its routes, cookie alternatives, DTOs, error media and redirect headers.",
+      "contracts": [
+        "contract-user-schema"
+      ]
+    },
+    {
+      "id": "matchmaking-document",
+      "statement": "The gateway offline document includes the five owner-scoped matchmaking operations and production/development session-cookie alternatives.",
+      "contracts": [
+        "gateway-schema"
+      ]
+    },
+    {
+      "id": "document-commands",
+      "statement": "The three example commands print library OpenAPI JSON without requiring service startup.",
+      "contracts": [
+        "example-exports"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "player-runtime",
+      "statement": "The player document route returns the same generated OpenAPI as player_http::openapi without reading storage.",
+      "source": {
+        "path": "crates/player-http/src/lib.rs",
+        "needle": "pub fn openapi() -> utoipa::openapi::OpenApi {"
+      },
+      "evidence": [
+        {
+          "test": "p9",
+          "relationship": "asserts",
+          "reason": "Anonymous router response equals offline JSON and panic-on-use record/rating repositories remain untouched."
+        }
+      ]
+    },
+    {
+      "id": "contract-player-schema",
+      "statement": "Player route-derived OpenAPI 3.1 has package identity, exact method/path set, query/error constraints and public response shapes.",
+      "source": {
+        "path": "crates/player-http/src/lib.rs",
+        "needle": "fn api_router() -> OpenApiRouter<App> {"
+      },
+      "evidence": [
+        {
+          "test": "p6",
+          "relationship": "asserts",
+          "reason": "Package name/version are checked, with absent dependency-derived contact/license."
+        },
+        {
+          "test": "p7",
+          "relationship": "asserts",
+          "reason": "OpenAPI 3.1, exact four paths and methods, parameter constraints, enumerated errors and resolvable local refs are asserted."
+        },
+        {
+          "test": "p8",
+          "relationship": "asserts",
+          "reason": "Assertions compare flattened actions, required nullable cursor and unsigned integer bounds with actual DTO JSON."
+        }
+      ]
+    },
+    {
+      "id": "user-runtime",
+      "statement": "The user document route returns offline OpenAPI without storage or identity-provider calls and applies private response headers.",
+      "source": {
+        "path": "crates/user-http/src/lib.rs",
+        "needle": "pub fn openapi() -> utoipa::openapi::OpenApi {"
+      },
+      "evidence": [
+        {
+          "test": "u3",
+          "relationship": "asserts",
+          "reason": "HTTPS and development in-process routers return equal offline JSON with security headers; repository and provider panic if used."
+        }
+      ]
+    },
+    {
+      "id": "contract-user-schema",
+      "statement": "User route-derived OpenAPI has service identity, the exact six operations, cookie security alternatives and request/response schemas.",
+      "source": {
+        "path": "crates/user-http/src/lib.rs",
+        "needle": "fn api_router() -> OpenApiRouter<App> {"
+      },
+      "evidence": [
+        {
+          "test": "u1",
+          "relationship": "asserts",
+          "reason": "Package name/version are checked, without contact/license attribution from dependencies."
+        },
+        {
+          "test": "u2",
+          "relationship": "asserts",
+          "reason": "Exact paths/methods, cookie alternatives, headers, redirects, DTO fields, error enums and all local references are asserted."
+        },
+        {
+          "test": "user-runtime-errors",
+          "relationship": "asserts",
+          "reason": "Runtime framework text rejections and application JSON rejections are checked against documented status/media and no-store."
+        },
+        {
+          "test": "user-error-media",
+          "relationship": "asserts",
+          "reason": "The documented PATCH response status set, JSON ErrorBody references, framework text schemas and callback text rejection are compared directly."
+        }
+      ],
+      "gap": "The runtime rejection sample does not cover every response family or all success/error headers. The schema checks do not establish provider availability."
+    },
+    {
+      "id": "gateway-schema",
+      "statement": "The gateway exports annotated matchmaking paths and two cookie security schemes through its offline OpenAPI accessor.",
+      "source": {
+        "path": "crates/realtime-gateway/src/matchmaking.rs",
+        "needle": "pub(crate) fn openapi() -> utoipa::openapi::OpenApi {"
+      },
+      "evidence": [
+        {
+          "test": "test-gateway-schema",
+          "relationship": "asserts",
+          "reason": "The generated document contains GET /matchmaking/me, GET/PUT/DELETE ticket and POST heartbeat operations plus both cookie names and OR security alternatives."
+        }
+      ],
+      "gap": "This test checks presence rather than exact equality of the gateway method/path set. The completeness catalog separately reconciles generated operations. Gateway has no runtime /openapi.json route."
+    },
+    {
+      "id": "example-exports",
+      "statement": "The player, user and matchmaking example entrypoints serialize their library document as pretty JSON.",
+      "source": {
+        "path": "crates/player-http/examples/player-openapi.rs",
+        "needle": "fn main() -> Result<(), Box<dyn std::error::Error>> {"
+      },
+      "evidence": [],
+      "gap": "No mapped test launches the example processes or checks their stdout, the shell generation script or published files. Equivalent examples are crates/user-http/examples/user-openapi.rs and crates/realtime-gateway/examples/matchmaking-openapi.rs."
+    }
+  ],
+  "tests": [
+    {
+      "id": "p6",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::document_identifies_this_service_without_dependency_attribution",
+      "source": {
+        "path": "crates/player-http/src/openapi_tests.rs",
+        "needle": "fn document_identifies_this_service_without_dependency_attribution() {"
+      },
+      "scope": "Offline player OpenAPI JSON, no HTTP/database."
+    },
+    {
+      "id": "p7",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::paths_queries_and_error_contract_are_derived_from_routes",
+      "source": {
+        "path": "crates/player-http/src/openapi_tests.rs",
+        "needle": "fn paths_queries_and_error_contract_are_derived_from_routes() {"
+      },
+      "scope": "Offline player route and schema assertions, no service startup."
+    },
+    {
+      "id": "p8",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers",
+      "source": {
+        "path": "crates/player-http/src/openapi_tests.rs",
+        "needle": "fn response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers() {"
+      },
+      "scope": "Player OpenAPI and actual DTO serialization, no storage."
+    },
+    {
+      "id": "p9",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::runtime_document_equals_offline_document_without_storage_access",
+      "source": {
+        "path": "crates/player-http/src/openapi_tests.rs",
+        "needle": "async fn runtime_document_equals_offline_document_without_storage_access() {"
+      },
+      "scope": "In-process player router with panic-on-use repositories."
+    },
+    {
+      "id": "u1",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::document_identifies_this_service_without_dependency_attribution",
+      "source": {
+        "path": "crates/user-http/src/openapi_tests.rs",
+        "needle": "fn document_identifies_this_service_without_dependency_attribution() {"
+      },
+      "scope": "Offline user OpenAPI JSON, no provider or storage."
+    },
+    {
+      "id": "u2",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::document_has_all_routes_real_schemas_and_cookie_security_alternatives",
+      "source": {
+        "path": "crates/user-http/src/openapi_tests.rs",
+        "needle": "fn document_has_all_routes_real_schemas_and_cookie_security_alternatives() {"
+      },
+      "scope": "Offline user route/schema/local-reference assertions."
+    },
+    {
+      "id": "u3",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::runtime_document_equals_offline_document_without_storage_or_provider_calls",
+      "source": {
+        "path": "crates/user-http/src/openapi_tests.rs",
+        "needle": "async fn runtime_document_equals_offline_document_without_storage_or_provider_calls() {"
+      },
+      "scope": "In-process HTTPS/development user routers with panic-on-use repository and provider."
+    },
+    {
+      "id": "user-runtime-errors",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::runtime_rejection_status_and_media_match_documented_contract",
+      "source": {
+        "path": "crates/user-http/src/openapi_tests.rs",
+        "needle": "async fn runtime_rejection_status_and_media_match_documented_contract() {"
+      },
+      "scope": "In-process user router checks selected documented response status/media and no-store."
+    },
+    {
+      "id": "test-gateway-schema",
+      "package": "realtime-gateway",
+      "target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "name": "matchmaking_openapi_covers_all_owner_scoped_routes",
+      "source": {
+        "path": "crates/realtime-gateway/tests/services.rs",
+        "needle": "fn matchmaking_openapi_covers_all_owner_scoped_routes() {"
+      },
+      "scope": "Pure gateway offline OpenAPI assertions; the integration target does not start services in this synchronous case."
+    },
+    {
+      "id": "user-error-media",
+      "package": "user-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "openapi_tests::document_distinguishes_json_errors_and_framework_text_rejections",
+      "source": {
+        "path": "crates/user-http/src/openapi_tests.rs",
+        "needle": "fn document_distinguishes_json_errors_and_framework_text_rejections() {"
+      },
+      "scope": "Generated user document status/media assertions without HTTP, storage or provider."
+    }
+  ],
+  "limitations": [
+    "Generated schema assertions and in-process responses do not prove documentation publication or real example-command stdout.",
+    "Only user and player have runtime document endpoints. The gateway document covers matchmaking; the WebSocket protocol is outside that OpenAPI.",
+    "Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees."
+  ]
+}

@@ -1,0 +1,505 @@
+{
+  "version": 1,
+  "feature": {
+    "id": "game-command-recovery",
+    "title": "対局操作の再試行・永続化・復旧",
+    "source": {
+      "path": "crates/game-application/src/actor.rs",
+      "needle": "async fn apply(&mut self, pending: MutationRequest) -> Result<Acceptance, ApplicationError> {"
+    },
+    "flow": [
+      "The per-game actor refreshes durable history and checks participant membership, exact accepted request replay, then expected sequence before staging a cloned legal candidate.",
+      "StagedGameChange freezes the acceptance and canonical event batch; commit_change performs version comparison and persists metadata, one receipt and those events atomically.",
+      "After an uncertain/conflicting commit the actor reloads durable receipts, returns the original acceptance when present and otherwise reports conflict/unavailability while fencing uncertain local state.",
+      "Caller cancellation after enqueue leaves the actor transaction running; restart reconstructs receipts, and dropping the final service sender lets queued commands drain."
+    ]
+  },
+  "guarantees": [
+    {
+      "id": "exact-retry",
+      "statement": "Only acceptance reserves a per-game request identity. After participant checks, an exact typed action/user/original expected-sequence retry returns the original acceptance before stale/finished checks, even after restart; changed accepted content conflicts.",
+      "contracts": [
+        "replay",
+        "actor-apply"
+      ]
+    },
+    {
+      "id": "sequence",
+      "statement": "Each new committed command advances sequence once through i64::MAX. Per-game actor processing and repository CAS serialize competing service instances and refresh losing state.",
+      "contracts": [
+        "actor-apply",
+        "durable-commit",
+        "sequence-cap"
+      ]
+    },
+    {
+      "id": "atomic-events",
+      "statement": "Candidate position becomes visible only after confirmed commit. Metadata, receipt and supplied canonical events commit together: move emits MoveCommitted, mate appends GameFinished at the same sequence, resignation emits GameFinished. Replay/rejection/restore emit nothing new.",
+      "contracts": [
+        "actor-apply",
+        "durable-commit",
+        "canonical-events"
+      ]
+    },
+    {
+      "id": "uncertain-recovery",
+      "statement": "An error may follow a durable commit. The actor reconciles a matching stored receipt or invalidates its state until a later successful durable refresh; failed reads never authorize continued cached mutation.",
+      "contracts": [
+        "actor-apply",
+        "reconciliation"
+      ]
+    },
+    {
+      "id": "cancellation",
+      "statement": "The 64-slot per-game mailbox bounds queued commands. Cancellation after enqueue does not undo execution; cancellation before enqueue does not execute, and closed senders allow queued work to drain.",
+      "contracts": [
+        "mailbox"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "replay",
+      "statement": "Replay first checks participant membership then compares the complete MutationRequest under the game-scoped accepted ID and returns its original Acceptance.",
+      "source": {
+        "path": "crates/game-application/src/actor.rs",
+        "needle": "fn replay(&self, request: &MutationRequest) -> Result<Option<Acceptance>, ApplicationError> {"
+      },
+      "evidence": [
+        {
+          "test": "retry",
+          "relationship": "asserts",
+          "reason": "Exact move/resign retries after finish return original acceptances; changed sequence/user/move/action conflict with no extra advance."
+        },
+        {
+          "test": "restart",
+          "relationship": "asserts",
+          "reason": "Original receipts survive ongoing and finished state across two server restarts."
+        },
+        {
+          "test": "namespaces",
+          "relationship": "asserts",
+          "reason": "Same request identity in separate games/services remains independent."
+        },
+        {
+          "test": "reject-id",
+          "relationship": "asserts",
+          "reason": "Every tested rejection preserves full snapshot and leaves the request ID reusable."
+        }
+      ]
+    },
+    {
+      "id": "actor-apply",
+      "statement": "Mutation refreshes state, applies replay before expected sequence checks, stages a cloned candidate and supplied events, and publishes in-memory candidate only after commit confirmation.",
+      "source": {
+        "path": "crates/game-application/src/actor.rs",
+        "needle": "async fn apply(&mut self, pending: MutationRequest) -> Result<Acceptance, ApplicationError> {"
+      },
+      "evidence": [
+        {
+          "test": "actor-events",
+          "relationship": "asserts",
+          "reason": "Fake repository observes exact staged move/resignation events before commit and only two writes despite replay/rejection."
+        },
+        {
+          "test": "priority",
+          "relationship": "asserts",
+          "reason": "Synthetic actor cases assert request-conflict before sequence mismatch before finished-game rejection."
+        },
+        {
+          "test": "cas",
+          "relationship": "asserts",
+          "reason": "Independent real store/service instances serialize CAS conflicts and identical concurrent retries."
+        },
+        {
+          "test": "uncertain",
+          "relationship": "asserts",
+          "reason": "Commit-after-error reconciles receipt; precommit failure fences until durable reads recover."
+        }
+      ]
+    },
+    {
+      "id": "sequence-cap",
+      "statement": "next_sequence rejects advancing i64::MAX; stale expected sequence is checked before attempting an exhausted advance.",
+      "source": {
+        "path": "crates/game-application/src/actor.rs",
+        "needle": "fn next_sequence(seq: u64) -> Result<u64, ApplicationError> {"
+      },
+      "evidence": [
+        {
+          "test": "cap",
+          "relationship": "asserts",
+          "reason": "Direct helper asserts portable maximum and exhausted boundary."
+        },
+        {
+          "test": "exhausted",
+          "relationship": "asserts",
+          "reason": "Synthetic exhausted actor distinguishes stale SequenceMismatch from SequenceExhausted."
+        }
+      ],
+      "gap": "Tests synthesize maximum state; they do not prove the rules engine supports billions of actual moves."
+    },
+    {
+      "id": "durable-commit",
+      "statement": "PostgreSQL commit_change compares expected version and atomically saves metadata, receipt, frozen supplied events and terminal dependent records; no partial success is exposed.",
+      "source": {
+        "path": "crates/game-persistence/src/lib.rs",
+        "needle": "async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {"
+      },
+      "evidence": [
+        {
+          "test": "cas",
+          "relationship": "asserts",
+          "reason": "Independent service/store instances CAS and refresh correctly."
+        },
+        {
+          "test": "rollback",
+          "relationship": "asserts",
+          "reason": "Injected actual statement/commit errors leave both metadata and receipt unchanged."
+        },
+        {
+          "test": "outbox-rollback",
+          "relationship": "asserts",
+          "reason": "Outbox enqueue failure rolls back game metadata, journal and events."
+        },
+        {
+          "test": "terminal-rollback",
+          "relationship": "asserts",
+          "reason": "Missing both terminal ticket records prevents result/receipt/outbox/job writes together."
+        }
+      ]
+    },
+    {
+      "id": "canonical-events",
+      "statement": "StagedGameChange validates sequence bounds/continuity and action/result combinations, then freezes normal move, move-plus-checkmate or resignation event order.",
+      "source": {
+        "path": "crates/game-application/src/events.rs",
+        "needle": "pub fn new(game_id: GameId, receipt: Receipt) -> Result<Self, ApplicationError> {"
+      },
+      "evidence": [
+        {
+          "test": "events",
+          "relationship": "asserts",
+          "reason": "Exact normal move, same-sequence move-then-mate-finish and resignation batches are compared; inconsistent action/result cases reject."
+        },
+        {
+          "test": "event-bounds",
+          "relationship": "asserts",
+          "reason": "Zero/noncontiguous/max/out-of-range acceptance and expected sequence boundaries are checked."
+        },
+        {
+          "test": "outbox-once",
+          "relationship": "asserts",
+          "reason": "Persisted event payload stays frozen; retry/rejection/restoration add no duplicate events."
+        }
+      ]
+    },
+    {
+      "id": "reconciliation",
+      "statement": "Reload clears local state before reading/validating durable history; failed reconciliation leaves it unavailable until a later refresh can restore it.",
+      "source": {
+        "path": "crates/game-application/src/actor.rs",
+        "needle": "async fn reload(&mut self) -> Result<(), ApplicationError> {"
+      },
+      "evidence": [
+        {
+          "test": "uncertain",
+          "relationship": "asserts",
+          "reason": "Fault adapter around real PostgreSQL tests commit-after-error receipt recovery, precommit failure, unreadable fencing and later recovery."
+        }
+      ],
+      "gap": "The fault adapter controls representative outcome paths; arbitrary process/crash interleavings are not proven."
+    },
+    {
+      "id": "mailbox",
+      "statement": "The per-game facade uses a 64-command bounded channel; actor execution outlives dropped reply receivers and drains closed queues.",
+      "source": {
+        "path": "crates/game-application/src/lib.rs",
+        "needle": "const MAILBOX_CAPACITY: usize = 64;"
+      },
+      "evidence": [
+        {
+          "test": "drain",
+          "relationship": "asserts",
+          "reason": "Dropped response and closed mailbox still execute queued commands."
+        },
+        {
+          "test": "enqueue-cancel",
+          "relationship": "asserts",
+          "reason": "A capacity-blocked cancelled send does not execute while an enqueued cancelled call does."
+        },
+        {
+          "test": "lifecycle",
+          "relationship": "asserts",
+          "reason": "Closed actor reloads durable store and final service drop closes senders."
+        }
+      ],
+      "gap": "64 bounds queued slots, excluding in-progress work and waiting senders. No global known-game actor registry bound or fairness guarantee is established."
+    }
+  ],
+  "tests": [
+    {
+      "id": "retry",
+      "package": "game-grpc",
+      "target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "name": "exact_replay_returns_original_receipt_after_finish_and_conflicts_are_rejected",
+      "source": {
+        "path": "crates/game-grpc/tests/tcp.rs",
+        "needle": "async fn exact_replay_returns_original_receipt_after_finish_and_conflicts_are_rejected() {"
+      },
+      "scope": "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup."
+    },
+    {
+      "id": "restart",
+      "package": "game-grpc",
+      "target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "name": "generated_tcp_client_restores_database_across_two_server_restarts",
+      "source": {
+        "path": "crates/game-grpc/tests/tcp.rs",
+        "needle": "async fn generated_tcp_client_restores_database_across_two_server_restarts() {"
+      },
+      "scope": "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup."
+    },
+    {
+      "id": "namespaces",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "name": "games_and_independent_services_have_separate_id_namespaces",
+      "source": {
+        "path": "crates/game-persistence/tests/service.rs",
+        "needle": "async fn games_and_independent_services_have_separate_id_namespaces() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport."
+    },
+    {
+      "id": "reject-id",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "name": "every_rejection_preserves_snapshot_and_does_not_reserve_id",
+      "source": {
+        "path": "crates/game-persistence/tests/service.rs",
+        "needle": "async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport."
+    },
+    {
+      "id": "actor-events",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::actor_supplies_events_before_commit_change_and_skips_retries_and_rejections",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "async fn actor_supplies_events_before_commit_change_and_skips_retries_and_rejections() {"
+      },
+      "scope": "Actor with an in-memory recording repository; asserts staged values before commit, not PostgreSQL atomicity."
+    },
+    {
+      "id": "priority",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::mutation_errors_prioritize_request_conflict_then_sequence_mismatch_then_game_finished",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "async fn mutation_errors_prioritize_request_conflict_then_sequence_mismatch_then_game_finished() {"
+      },
+      "scope": "Actor with synthetic durable record and fake repository; direct error precedence."
+    },
+    {
+      "id": "cap",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::sequence_cap_is_portable",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "fn sequence_cap_is_portable() {"
+      },
+      "scope": "Direct sequence helper, synthetic maximum; no rules execution or DB."
+    },
+    {
+      "id": "exhausted",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::exhausted_state_still_checks_expected_sequence_before_advancing",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "async fn exhausted_state_still_checks_expected_sequence_before_advancing() {"
+      },
+      "scope": "Actor state is directly set to maximum sequence for error precedence."
+    },
+    {
+      "id": "cas",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "name": "independent_instances_cas_refresh_and_identical_concurrent_replay",
+      "source": {
+        "path": "crates/game-persistence/tests/contracts.rs",
+        "needle": "async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Separate real store/service instances."
+    },
+    {
+      "id": "rollback",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "name": "real_statement_and_commit_failures_roll_back_both_metadata_and_receipt",
+      "source": {
+        "path": "crates/game-persistence/tests/contracts.rs",
+        "needle": "async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Real SQL and commit failure injection."
+    },
+    {
+      "id": "uncertain",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "name": "uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery",
+      "source": {
+        "path": "crates/game-persistence/tests/contracts.rs",
+        "needle": "async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. FaultStore wraps real PostgreSQL to control return/read failures."
+    },
+    {
+      "id": "events",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "events::tests::canonical_move_mate_and_resignation_events",
+      "source": {
+        "path": "crates/game-application/src/events.rs",
+        "needle": "fn canonical_move_mate_and_resignation_events() {"
+      },
+      "scope": "Direct StagedGameChange construction with synthetic receipts; no played checkmate or database."
+    },
+    {
+      "id": "event-bounds",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "events::tests::staging_checks_sequence_bounds_before_continuity",
+      "source": {
+        "path": "crates/game-application/src/events.rs",
+        "needle": "fn staging_checks_sequence_bounds_before_continuity() {"
+      },
+      "scope": "Direct synthetic receipt sequence boundaries."
+    },
+    {
+      "id": "outbox-once",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "name": "retry_rejection_restoration_and_frozen_payload",
+      "source": {
+        "path": "crates/game-persistence/tests/outbox.rs",
+        "needle": "async fn retry_rejection_restoration_and_frozen_payload() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Reads canonical persisted events; no broker delivery guarantee."
+    },
+    {
+      "id": "outbox-rollback",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "name": "failed_enqueue_rolls_back_metadata_journal_and_events",
+      "source": {
+        "path": "crates/game-persistence/tests/outbox.rs",
+        "needle": "async fn failed_enqueue_rolls_back_metadata_journal_and_events() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Injected outbox enqueue failure."
+    },
+    {
+      "id": "terminal-rollback",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "name": "missing_both_terminal_tickets_rolls_back_result_receipt_events_and_job",
+      "source": {
+        "path": "crates/game-persistence/tests/matchmaking.rs",
+        "needle": "async fn missing_both_terminal_tickets_rolls_back_result_receipt_events_and_job() {"
+      },
+      "scope": "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Terminal invariant failure via direct DB fixture changes."
+    },
+    {
+      "id": "drain",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::cancelled_reply_and_closed_mailbox_still_drain_commands",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "async fn cancelled_reply_and_closed_mailbox_still_drain_commands() {"
+      },
+      "scope": "Actor/fake repository and channel lifecycle; no process shutdown signal."
+    },
+    {
+      "id": "enqueue-cancel",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::cancelled_call_after_enqueue_executes_and_before_enqueue_does_not",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "async fn cancelled_call_after_enqueue_executes_and_before_enqueue_does_not() {"
+      },
+      "scope": "Controlled fake repository/channel capacity boundary."
+    },
+    {
+      "id": "lifecycle",
+      "package": "game-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "actor::tests::closed_actor_is_recovered_from_store_and_last_service_drop_closes_senders",
+      "source": {
+        "path": "crates/game-application/src/actor/tests.rs",
+        "needle": "async fn closed_actor_is_recovered_from_store_and_last_service_drop_closes_senders() {"
+      },
+      "scope": "In-memory RecordStore and sender lifecycle, not process restart."
+    }
+  ],
+  "limitations": [
+    "Successful representative fault/concurrency tests do not prove all crash schedules or durable infrastructure guarantees.",
+    "Game command trace owns canonical event production and atomic enqueue; publication, subscriber delivery and rating application are separate feature records.",
+    "Actor/mailbox fairness, total memory for known-game registries and an upper bound on waiting callers are not promised.",
+    "Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review."
+  ]
+}

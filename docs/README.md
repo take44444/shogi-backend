@@ -28,6 +28,7 @@
 - [公開棋譜サービスの起動](../apps/player-server/README.md)
 - [リアルタイムゲートウェイ の起動とブラウザーの接続設定](how-to/run-realtime-gateway.md)
 - [レートワーカーの起動と隔離ジョブの再試行](../apps/rating-worker-server/README.md)
+- [機能の保証とテストの対応を更新する](how-to/check-traceability.md)
 
 ## 設定と API の参照仕様
 
@@ -35,6 +36,7 @@
 
 - [サービスの環境変数と必要な権限](reference/service-configuration.md)
 - [公開棋譜とレートの HTTP API](../crates/player-http/README.md)
+- [機能の保証とテストの対応](reference/feature-traceability.md)
 - [ユーザー HTTP API](../crates/user-http/README.md)
 - [対局 gRPC API](../crates/game-grpc/README.md)
 - [マッチメイキング HTTP API と対局 WebSocket](../apps/realtime-gateway/README.md)

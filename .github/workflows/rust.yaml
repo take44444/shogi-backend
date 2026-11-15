@@ -48,6 +48,10 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Test workspace against PostgreSQL
         run: cargo test --locked --workspace
+      - name: Check feature traceability
+        run: |
+          python3 scripts/test-traceability.py
+          python3 scripts/traceability.py check
       - name: Check contract interfaces
         run: python3 scripts/check-contract-interfaces.py
       - name: Check deployment isolation and grants

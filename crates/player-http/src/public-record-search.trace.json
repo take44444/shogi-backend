@@ -1,0 +1,266 @@
+{
+  "version": 1,
+  "feature": {
+    "id": "public-record-search",
+    "title": "終了済み公開対局の検索",
+    "source": {
+      "path": "crates/player-http/README.md",
+      "needle": "## 終了済み対局の検索"
+    },
+    "flow": [
+      "The HTTP adapter decodes and validates filters and the cursor before acquiring shared request capacity.",
+      "GameRecords forwards the typed Search to the read repository, which selects public completed metadata with keyset pagination.",
+      "The HTTP adapter serializes metadata and the next cursor through the bounded no-store response helper."
+    ]
+  },
+  "guarantees": [
+    {
+      "id": "public-filtered-metadata",
+      "statement": "Anonymous search returns metadata only from currently public completed games and combines supplied filters with AND.",
+      "contracts": [
+        "query-boundary",
+        "application-forwarding",
+        "public-keysets"
+      ]
+    },
+    {
+      "id": "bounded-input",
+      "statement": "Search requires a nonnegative increasing UTC microsecond interval with inclusive start and exclusive end of at most 366 days, a limit of 1 through 100 with default 30, and valid typed filters without unknown or repeated fields. Invalid inputs return 400 before storage.",
+      "contracts": [
+        "query-boundary",
+        "bounds-cursor"
+      ]
+    },
+    {
+      "id": "seek-pages",
+      "statement": "Results descend by finish time and then binary game ID. The cursor binds filters while allowing a changed page limit, and subsequent pages recheck visibility.",
+      "contracts": [
+        "bounds-cursor",
+        "public-keysets"
+      ]
+    },
+    {
+      "id": "resource-response-policy",
+      "statement": "Handled responses use generic errors and no-store. The shared HTTP adapter admits at most 16 active requests and rejects serialized successes above one MiB.",
+      "contracts": [
+        "http-resource-policy"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "query-boundary",
+      "statement": "RawSearch parses typed fields and rejects invalid, unknown, or repeated query values before repository access.",
+      "source": {
+        "path": "crates/player-http/src/lib.rs",
+        "needle": "fn parse(self) -> Result<Search, Error> {"
+      },
+      "evidence": [
+        {
+          "test": "p2",
+          "relationship": "asserts",
+          "reason": "Each invalid request returns 400 and invalid_query with no-store; a valid request reaches the same failing repository and returns 500."
+        },
+        {
+          "test": "p1",
+          "relationship": "asserts",
+          "reason": "A real router and PostgreSQL reader return the one record matching a combined participant/rule/winner/reason/ply query."
+        }
+      ]
+    },
+    {
+      "id": "bounds-cursor",
+      "statement": "Search validates interval, limit and ply bounds, and decodes a cursor tied to the filter fingerprint rather than page size.",
+      "source": {
+        "path": "crates/game-record-application/src/lib.rs",
+        "needle": "pub fn new(filters: Filters, limit: u32, cursor: Option<&str>) -> Result<Self, Error> {"
+      },
+      "evidence": [
+        {
+          "test": "a1",
+          "relationship": "asserts",
+          "reason": "Direct cases reject bad bounds and malformed cursors, accept changed limit, preserve cursor bytes, and reject changed participant."
+        },
+        {
+          "test": "r1",
+          "relationship": "asserts",
+          "reason": "A repository page cursor is rejected after changing the winner filter."
+        }
+      ],
+      "gap": "The mapped cases do not mutate every fingerprint field or exhaust cursor byte and UTF-8 boundaries."
+    },
+    {
+      "id": "application-forwarding",
+      "statement": "GameRecords::search passes the typed Search to its RecordRepository and returns its result.",
+      "source": {
+        "path": "crates/game-record-application/src/lib.rs",
+        "needle": "pub async fn search(&self, search: &Search) -> Result<Page, Error> {"
+      },
+      "evidence": [
+        {
+          "test": "p1",
+          "relationship": "exercises",
+          "reason": "The real router traverses this application method to a real PostgreSQL reader."
+        },
+        {
+          "test": "p2",
+          "relationship": "exercises",
+          "reason": "The valid query traverses this method to a repository failure."
+        }
+      ],
+      "gap": "No independent test asserts unchanged forwarding of arbitrary Search values and repository results."
+    },
+    {
+      "id": "public-keysets",
+      "statement": "The PostgreSQL reader filters public completed metadata, applies all requested filters, and seeks strictly after the prior finish-time and binary-ID pair.",
+      "source": {
+        "path": "crates/game-record-persistence/src/lib.rs",
+        "needle": "async fn search(&self, search: &Search) -> Result<Page, Error> {"
+      },
+      "evidence": [
+        {
+          "test": "r1",
+          "relationship": "asserts",
+          "reason": "Direct repository assertions cover individual filters, a combined case, c/b ID tie ordering followed by older a, exclusion of an unseen newer row, and omission of a newly hidden row."
+        },
+        {
+          "test": "r5",
+          "relationship": "asserts",
+          "reason": "Stored identifiers with encoding edge cases retain binary tie order and cursor round trips."
+        },
+        {
+          "test": "p1",
+          "relationship": "asserts",
+          "reason": "The anonymous real router returns only public metadata and becomes unavailable after closing the reader."
+        }
+      ]
+    },
+    {
+      "id": "http-resource-policy",
+      "statement": "The shared adapter takes an immediate semaphore permit and respond maps errors, applies no-store, and bounds serialized JSON to one MiB.",
+      "source": {
+        "path": "crates/player-http/src/lib.rs",
+        "needle": "fn respond<T: Serialize>(result: Result<T, Error>) -> Response {"
+      },
+      "evidence": [
+        {
+          "test": "p4",
+          "relationship": "asserts",
+          "reason": "Sixteen blocked searches enter storage, the seventeenth gets immediate 503 and no-store, and capacity returns after release."
+        },
+        {
+          "test": "p5",
+          "relationship": "asserts",
+          "reason": "Direct response-helper checks accept exactly one MiB and return 422 with a generic error for the next byte."
+        },
+        {
+          "test": "p2",
+          "relationship": "asserts",
+          "reason": "Invalid search requests assert generic 400 JSON bodies and no-store. A valid request reaching the corrupt repository asserts 500 status and no-store, without checking its body."
+        }
+      ],
+      "gap": "The size boundary uses strings rather than a maximum real page. No mixed search/detail/ratings exhaustion test is mapped."
+    }
+  ],
+  "tests": [
+    {
+      "id": "p1",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions",
+      "source": {
+        "path": "crates/player-http/src/tests.rs",
+        "needle": "async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions() {"
+      },
+      "scope": "Real Axum router, application service and PostgreSQL reader; no player TCP listener."
+    },
+    {
+      "id": "p2",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage",
+      "source": {
+        "path": "crates/player-http/src/tests.rs",
+        "needle": "async fn query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage() {"
+      },
+      "scope": "Real Axum router with a failing fake repository; invalid cases distinguish rejection before storage."
+    },
+    {
+      "id": "a1",
+      "package": "game-record-application",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "tests::bounds_and_cursor_binding",
+      "source": {
+        "path": "crates/game-record-application/src/lib.rs",
+        "needle": "fn bounds_and_cursor_binding() {"
+      },
+      "scope": "Pure Search/filter/cursor value checks without HTTP or PostgreSQL."
+    },
+    {
+      "id": "r1",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "name": "public_completed_metadata_only_filters_and_stable_keysets",
+      "source": {
+        "path": "crates/game-persistence/tests/records.rs",
+        "needle": "async fn public_completed_metadata_only_filters_and_stable_keysets() {"
+      },
+      "scope": "Real PostgreSQL reader and writer fixtures exercise filters, visibility and keyset changes."
+    },
+    {
+      "id": "r5",
+      "package": "game-persistence",
+      "target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "name": "identifier_encoding_preserves_binary_ties_and_cursor_round_trips",
+      "source": {
+        "path": "crates/game-persistence/tests/records.rs",
+        "needle": "async fn identifier_encoding_preserves_binary_ties_and_cursor_round_trips() {"
+      },
+      "scope": "Real PostgreSQL identifier ordering and cursor round trips."
+    },
+    {
+      "id": "p4",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "contract_tests::sixteen_active_requests_admit_no_seventeenth_and_release_capacity",
+      "source": {
+        "path": "crates/player-http/src/contract_tests.rs",
+        "needle": "async fn sixteen_active_requests_admit_no_seventeenth_and_release_capacity() {"
+      },
+      "scope": "In-process Axum admission using a deliberately blocked fake repository."
+    },
+    {
+      "id": "p5",
+      "package": "player-http",
+      "target": {
+        "kind": "lib"
+      },
+      "name": "contract_tests::serialized_response_accepts_one_mib_and_rejects_the_next_byte",
+      "source": {
+        "path": "crates/player-http/src/contract_tests.rs",
+        "needle": "async fn serialized_response_accepts_one_mib_and_rejects_the_next_byte() {"
+      },
+      "scope": "Direct shared response helper with exact serialized byte boundaries; no real record page."
+    }
+  ],
+  "limitations": [
+    "Pages do not promise one fixed database snapshot across requests. Cursors are filter-bound values, not authenticated tokens.",
+    "No mapped test starts a real player-server TCP listener. Raw framework fallbacks are outside the handled-response no-store guarantee.",
+    "Reader connection limits, database timeouts and database permissions are mapped by startup-schema-isolation.",
+    "Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees."
+  ]
+}
