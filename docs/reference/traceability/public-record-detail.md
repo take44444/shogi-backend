@@ -2,7 +2,7 @@
 
 このページは `python3 scripts/traceability.py render` で生成する。
 
-元データは [crates/player-http/src/public-record-detail.trace.json](../../../crates/player-http/src/public-record-detail.trace.json)。
+元データは [crates/player-http/src/trace/public-record-detail/feature.rs](../../../crates/player-http/src/trace/public-record-detail/feature.rs)。
 [全機能の一覧](../feature-traceability.md)。
 
 ## 対象機能
@@ -42,15 +42,19 @@ flowchart TD
     n7["contract: metadata-invariants"]
     n8["contract: public-dto"]
     n9["contract: snapshot-history"]
-    n10["test: a2"]
-    n11["test: a3"]
-    n12["test: p1"]
-    n13["test: p2"]
-    n14["test: p3"]
-    n15["test: r1"]
-    n16["test: r2"]
-    n17["test: r3"]
-    n18["test: r4"]
+    n10["test: test-game-persistence-test-contracts-postgres-enforces-result-pairs-foreign-keys-and-distinct-participants"]
+    n11["test: test-game-persistence-test-records-corrupt-and-oversized-details-fail-without-partial-history"]
+    n12["test: test-game-persistence-test-records-current-schema-rejects-missing-metadata-and-inconsistent-finish-time"]
+    n13["test: test-game-persistence-test-records-detail-keeps-one-database-view-when-history-changes-between-reads"]
+    n14["test: test-game-persistence-test-records-finish-time-is-writer-utc-and-retries-preserve-it"]
+    n15["test: test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets"]
+    n16["test: test-game-persistence-test-records-public-history-accepts-4096-structural-operations-without-replaying-legality"]
+    n17["test: test-game-persistence-test-records-writer-metadata-is-atomic-move-count-excludes-resign-and-retry-keeps-time"]
+    n18["test: test-game-record-application-lib-game-record-application-tests-metadata-construction-requires-distinct-players-and-consistent-finish-counts"]
+    n19["test: test-game-record-application-lib-game-record-application-tests-record-scalars-reject-values-outside-storage-bounds"]
+    n20["test: test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions"]
+    n21["test: test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic"]
+    n22["test: test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage"]
     n0 --> n1
     n1 --> n6
     n1 --> n7
@@ -66,18 +70,22 @@ flowchart TD
     n4 --> n8
     n4 --> n7
     n4 --> n9
-    n5 -->|exercises| n12
-    n5 -->|exercises| n14
-    n6 -->|asserts| n13
-    n6 -->|asserts| n14
-    n6 -->|asserts| n12
-    n7 -->|asserts| n10
-    n7 -->|asserts| n11
-    n8 -->|asserts| n12
+    n5 -->|exercises| n20
+    n5 -->|exercises| n21
+    n6 -->|asserts| n20
+    n6 -->|asserts| n21
+    n6 -->|asserts| n22
+    n7 -->|unreviewed| n10
+    n7 -->|unreviewed| n12
+    n7 -->|unreviewed| n14
+    n7 -->|unreviewed| n17
+    n7 -->|asserts| n18
+    n7 -->|asserts| n19
+    n8 -->|asserts| n20
+    n9 -->|asserts| n11
+    n9 -->|asserts| n13
     n9 -->|asserts| n15
     n9 -->|asserts| n16
-    n9 -->|asserts| n17
-    n9 -->|asserts| n18
 ```
 
 ## コンポーネント契約と根拠
@@ -90,8 +98,8 @@ GameRecords::detail passes the typed GameId to its repository and returns the re
 
 実装位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L338)。
 
-- [p1](#test-p1) (exercises): The real router traverses this method into the PostgreSQL reader.
-- [p3](#test-p3) (exercises): Fake repository errors traverse this method before HTTP mapping.
+- [test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions](#test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions) (exercises): The real router traverses this method into the PostgreSQL reader.
+- [test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic](#test-test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic) (exercises): Fake repository errors traverse this method before HTTP mapping.
 
 未検証: There is no independent unchanged-forwarding test for arbitrary IDs and results.
 
@@ -103,9 +111,9 @@ The detail handler validates the path ID, uses the shared permit and maps reposi
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L164)。
 
-- [p2](#test-p2) (asserts): An ID containing a decoded space returns 400 before the failing repository can return 500.
-- [p3](#test-p3) (asserts): Fake corrupt, oversized and unavailable failures become 500/422/503 and fixed JSON with no-store.
-- [p1](#test-p1) (asserts): Missing and ongoing real database records yield identical 404 status/body, and successful detail has no-store.
+- [test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions](#test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions) (asserts): Missing and ongoing real database records yield identical 404 status/body, and successful detail has no-store.
+- [test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic](#test-test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic) (asserts): Fake corrupt, oversized and unavailable failures become 500/422/503 and fixed JSON with no-store.
+- [test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage](#test-test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage) (asserts): An ID containing a decoded space returns 400 before the failing repository can return 500.
 
 未検証: The real-router fixture does not create a hidden record; its hidden behavior is supported by the repository test and shared error mapping. Shared admission and byte limits are mapped in public-record-search.
 
@@ -117,8 +125,12 @@ Metadata requires distinct participants, a terminal sequence, valid storage scal
 
 実装位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L224)。
 
-- [a2](#test-a2) (asserts): Direct constructors reject listed duplicate-player, zero-sequence and inconsistent move/resignation count cases.
-- [a3](#test-a3) (asserts): Direct scalar conversion assertions reject values outside PostgreSQL signed-integer storage bounds.
+- [test-game-persistence-test-contracts-postgres-enforces-result-pairs-foreign-keys-and-distinct-participants](#test-test-game-persistence-test-contracts-postgres-enforces-result-pairs-foreign-keys-and-distinct-participants) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-persistence-test-records-current-schema-rejects-missing-metadata-and-inconsistent-finish-time](#test-test-game-persistence-test-records-current-schema-rejects-missing-metadata-and-inconsistent-finish-time) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-persistence-test-records-finish-time-is-writer-utc-and-retries-preserve-it](#test-test-game-persistence-test-records-finish-time-is-writer-utc-and-retries-preserve-it) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-persistence-test-records-writer-metadata-is-atomic-move-count-excludes-resign-and-retry-keeps-time](#test-test-game-persistence-test-records-writer-metadata-is-atomic-move-count-excludes-resign-and-retry-keeps-time) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-record-application-lib-game-record-application-tests-metadata-construction-requires-distinct-players-and-consistent-finish-counts](#test-test-game-record-application-lib-game-record-application-tests-metadata-construction-requires-distinct-players-and-consistent-finish-counts) (asserts): Direct constructors reject listed duplicate-player, zero-sequence and inconsistent move/resignation count cases.
+- [test-game-record-application-lib-game-record-application-tests-record-scalars-reject-values-outside-storage-bounds](#test-test-game-record-application-lib-game-record-application-tests-record-scalars-reject-values-outside-storage-bounds) (asserts): Direct scalar conversion assertions reject values outside PostgreSQL signed-integer storage bounds.
 
 <a id="contract-public-dto"></a>
 
@@ -128,7 +140,7 @@ DetailDto emits metadata and ordered action DTOs without internal request, recei
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L343)。
 
-- [p1](#test-p1) (asserts): The exact metadata key set, equality with list metadata and two ordered operations are asserted; serialized detail excludes each listed secret substring.
+- [test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions](#test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions) (asserts): The exact metadata key set, equality with list metadata and two ordered operations are asserted; serialized detail excludes each listed secret substring.
 
 未検証: This assertion covers one move and one resignation, not every move, drop and terminal-result encoding.
 
@@ -140,10 +152,10 @@ The reader uses one repeatable-read transaction and validates a complete contigu
 
 実装位置: [crates/game-record-persistence/src/lib.rs](../../../crates/game-record-persistence/src/lib.rs#L309)。
 
-- [r1](#test-r1) (asserts): Repository lookup directly asserts a hidden completed record is not found.
-- [r2](#test-r2) (asserts): Eight corruption mutations and excess history are rejected rather than returning partial detail.
-- [r3](#test-r3) (asserts): A second connection changes metadata and history while history reading is blocked; returned detail retains the prior consistent snapshot.
-- [r4](#test-r4) (asserts): All 4096 structural operations are accepted, while 4097 are rejected without replaying board legality.
+- [test-game-persistence-test-records-corrupt-and-oversized-details-fail-without-partial-history](#test-test-game-persistence-test-records-corrupt-and-oversized-details-fail-without-partial-history) (asserts): Eight corruption mutations and excess history are rejected rather than returning partial detail.
+- [test-game-persistence-test-records-detail-keeps-one-database-view-when-history-changes-between-reads](#test-test-game-persistence-test-records-detail-keeps-one-database-view-when-history-changes-between-reads) (asserts): A second connection changes metadata and history while history reading is blocked; returned detail retains the prior consistent snapshot.
+- [test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets](#test-test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets) (asserts): Repository lookup directly asserts a hidden completed record is not found.
+- [test-game-persistence-test-records-public-history-accepts-4096-structural-operations-without-replaying-legality](#test-test-game-persistence-test-records-public-history-accepts-4096-structural-operations-without-replaying-legality) (asserts): All 4096 structural operations are accepted, while 4097 are rejected without replaying board legality.
 
 未検証: These are selected corruption mutations rather than an exhaustive matrix. Structural validation deliberately does not establish shogi move legality.
 
@@ -151,83 +163,23 @@ The reader uses one repeatable-read transaction and validates a complete contigu
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-a2"></a>
+<a id="test-test-game-persistence-test-contracts-postgres-enforces-result-pairs-foreign-keys-and-distinct-participants"></a>
 
-### a2
+### test-game-persistence-test-contracts-postgres-enforces-result-pairs-foreign-keys-and-distinct-participants
 
-テスト位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L384)。
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/postgres_enforces_result_pairs_foreign_keys_and_distinct_participants.rs](../../../crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/postgres_enforces_result_pairs_foreign_keys_and_distinct_participants.rs#L2)。
 
-範囲: Pure metadata constructor cases without a database or legal game replay.
-
-```sh
-cargo test --locked -p game-record-application --lib tests::metadata_construction_requires_distinct_players_and_consistent_finish_counts -- --exact --format pretty --color never
-```
-
-<a id="test-a3"></a>
-
-### a3
-
-テスト位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L359)。
-
-範囲: Pure scalar storage-boundary cases.
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
 
 ```sh
-cargo test --locked -p game-record-application --lib tests::record_scalars_reject_values_outside_storage_bounds -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test contracts postgres_enforces_result_pairs_foreign_keys_and_distinct_participants -- --exact --format pretty --color never
 ```
 
-<a id="test-p1"></a>
+<a id="test-test-game-persistence-test-records-corrupt-and-oversized-details-fail-without-partial-history"></a>
 
-### p1
+### test-game-persistence-test-records-corrupt-and-oversized-details-fail-without-partial-history
 
-テスト位置: [crates/player-http/src/tests.rs](../../../crates/player-http/src/tests.rs#L24)。
-
-範囲: Real Axum router, application service and PostgreSQL reader; asserts public serialization and missing/ongoing behavior.
-
-```sh
-cargo test --locked -p player-http --lib tests::anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions -- --exact --format pretty --color never
-```
-
-<a id="test-p2"></a>
-
-### p2
-
-テスト位置: [crates/player-http/src/tests.rs](../../../crates/player-http/src/tests.rs#L156)。
-
-範囲: In-process router and failing fake repository; includes malformed detail ID.
-
-```sh
-cargo test --locked -p player-http --lib tests::query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage -- --exact --format pretty --color never
-```
-
-<a id="test-p3"></a>
-
-### p3
-
-テスト位置: [crates/player-http/src/tests.rs](../../../crates/player-http/src/tests.rs#L202)。
-
-範囲: In-process router with fake repository failures; no database.
-
-```sh
-cargo test --locked -p player-http --lib tests::bounded_detail_and_storage_errors_are_generic -- --exact --format pretty --color never
-```
-
-<a id="test-r1"></a>
-
-### r1
-
-テスト位置: [crates/game-persistence/tests/records.rs](../../../crates/game-persistence/tests/records.rs#L113)。
-
-範囲: Real PostgreSQL public-record filtering and hidden-detail lookup.
-
-```sh
-cargo test --locked -p game-persistence --test records public_completed_metadata_only_filters_and_stable_keysets -- --exact --format pretty --color never
-```
-
-<a id="test-r2"></a>
-
-### r2
-
-テスト位置: [crates/game-persistence/tests/records.rs](../../../crates/game-persistence/tests/records.rs#L350)。
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/snapshot-history/corrupt_and_oversized_details_fail_without_partial_history.rs](../../../crates/game-persistence/tests/trace/public-record-detail/snapshot-history/corrupt_and_oversized_details_fail_without_partial_history.rs#L9)。
 
 範囲: Real PostgreSQL journal/metadata corruption and oversized-history rejection.
 
@@ -235,11 +187,23 @@ cargo test --locked -p game-persistence --test records public_completed_metadata
 cargo test --locked -p game-persistence --test records corrupt_and_oversized_details_fail_without_partial_history -- --exact --format pretty --color never
 ```
 
-<a id="test-r3"></a>
+<a id="test-test-game-persistence-test-records-current-schema-rejects-missing-metadata-and-inconsistent-finish-time"></a>
 
-### r3
+### test-game-persistence-test-records-current-schema-rejects-missing-metadata-and-inconsistent-finish-time
 
-テスト位置: [crates/game-persistence/tests/records.rs](../../../crates/game-persistence/tests/records.rs#L669)。
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/current_schema_rejects_missing_metadata_and_inconsistent_finish_time.rs](../../../crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/current_schema_rejects_missing_metadata_and_inconsistent_finish_time.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p game-persistence --test records current_schema_rejects_missing_metadata_and_inconsistent_finish_time -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-records-detail-keeps-one-database-view-when-history-changes-between-reads"></a>
+
+### test-game-persistence-test-records-detail-keeps-one-database-view-when-history-changes-between-reads
+
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/snapshot-history/detail_keeps_one_database_view_when_history_changes_between_reads.rs](../../../crates/game-persistence/tests/trace/public-record-detail/snapshot-history/detail_keeps_one_database_view_when_history_changes_between_reads.rs#L9)。
 
 範囲: Concurrent real PostgreSQL mutation between reader statements tests snapshot consistency.
 
@@ -247,11 +211,35 @@ cargo test --locked -p game-persistence --test records corrupt_and_oversized_det
 cargo test --locked -p game-persistence --test records detail_keeps_one_database_view_when_history_changes_between_reads -- --exact --format pretty --color never
 ```
 
-<a id="test-r4"></a>
+<a id="test-test-game-persistence-test-records-finish-time-is-writer-utc-and-retries-preserve-it"></a>
 
-### r4
+### test-game-persistence-test-records-finish-time-is-writer-utc-and-retries-preserve-it
 
-テスト位置: [crates/game-persistence/tests/records.rs](../../../crates/game-persistence/tests/records.rs#L743)。
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/finish_time_is_writer_utc_and_retries_preserve_it.rs](../../../crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/finish_time_is_writer_utc_and_retries_preserve_it.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p game-persistence --test records finish_time_is_writer_utc_and_retries_preserve_it -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets"></a>
+
+### test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets
+
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/snapshot-history/public_completed_metadata_only_filters_and_stable_keysets.rs](../../../crates/game-persistence/tests/trace/public-record-detail/snapshot-history/public_completed_metadata_only_filters_and_stable_keysets.rs#L9)。
+
+範囲: Real PostgreSQL public-record filtering and hidden-detail lookup.
+
+```sh
+cargo test --locked -p game-persistence --test records public_completed_metadata_only_filters_and_stable_keysets -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-records-public-history-accepts-4096-structural-operations-without-replaying-legality"></a>
+
+### test-game-persistence-test-records-public-history-accepts-4096-structural-operations-without-replaying-legality
+
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/snapshot-history/public_history_accepts_4096_structural_operations_without_replaying_legality.rs](../../../crates/game-persistence/tests/trace/public-record-detail/snapshot-history/public_history_accepts_4096_structural_operations_without_replaying_legality.rs#L9)。
 
 範囲: Real PostgreSQL structural history boundary; intentionally does not replay legality.
 
@@ -259,14 +247,91 @@ cargo test --locked -p game-persistence --test records detail_keeps_one_database
 cargo test --locked -p game-persistence --test records public_history_accepts_4096_structural_operations_without_replaying_legality -- --exact --format pretty --color never
 ```
 
+<a id="test-test-game-persistence-test-records-writer-metadata-is-atomic-move-count-excludes-resign-and-retry-keeps-time"></a>
+
+### test-game-persistence-test-records-writer-metadata-is-atomic-move-count-excludes-resign-and-retry-keeps-time
+
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_time.rs](../../../crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_time.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p game-persistence --test records writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_time -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-record-application-lib-game-record-application-tests-metadata-construction-requires-distinct-players-and-consistent-finish-counts"></a>
+
+### test-game-record-application-lib-game-record-application-tests-metadata-construction-requires-distinct-players-and-consistent-finish-counts
+
+テスト位置: [crates/game-record-application/src/trace/public-record-detail/metadata-invariants/metadata_construction_requires_distinct_players_and_consistent_finish_counts.rs](../../../crates/game-record-application/src/trace/public-record-detail/metadata-invariants/metadata_construction_requires_distinct_players_and_consistent_finish_counts.rs#L9)。
+
+範囲: Pure metadata constructor cases without a database or legal game replay.
+
+```sh
+cargo test --locked -p game-record-application --lib tests::metadata_construction_requires_distinct_players_and_consistent_finish_counts -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-record-application-lib-game-record-application-tests-record-scalars-reject-values-outside-storage-bounds"></a>
+
+### test-game-record-application-lib-game-record-application-tests-record-scalars-reject-values-outside-storage-bounds
+
+テスト位置: [crates/game-record-application/src/trace/public-record-detail/metadata-invariants/record_scalars_reject_values_outside_storage_bounds.rs](../../../crates/game-record-application/src/trace/public-record-detail/metadata-invariants/record_scalars_reject_values_outside_storage_bounds.rs#L9)。
+
+範囲: Pure scalar storage-boundary cases.
+
+```sh
+cargo test --locked -p game-record-application --lib tests::record_scalars_reject_values_outside_storage_bounds -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions"></a>
+
+### test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions
+
+テスト位置: [crates/player-http/src/trace/public-record-detail/application-forwarding/anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions.rs](../../../crates/player-http/src/trace/public-record-detail/application-forwarding/anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions.rs#L9)。
+
+範囲: Real Axum router, application service and PostgreSQL reader; asserts public serialization and missing/ongoing behavior.
+
+```sh
+cargo test --locked -p player-http --lib tests::anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic"></a>
+
+### test-player-http-lib-player-http-tests-bounded-detail-and-storage-errors-are-generic
+
+テスト位置: [crates/player-http/src/trace/public-record-detail/application-forwarding/bounded_detail_and_storage_errors_are_generic.rs](../../../crates/player-http/src/trace/public-record-detail/application-forwarding/bounded_detail_and_storage_errors_are_generic.rs#L9)。
+
+範囲: In-process router with fake repository failures; no database.
+
+```sh
+cargo test --locked -p player-http --lib tests::bounded_detail_and_storage_errors_are_generic -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage"></a>
+
+### test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage
+
+テスト位置: [crates/player-http/src/trace/public-record-detail/http-boundary/query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage.rs](../../../crates/player-http/src/trace/public-record-detail/http-boundary/query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage.rs#L9)。
+
+範囲: In-process router and failing fake repository; includes malformed detail ID.
+
+```sh
+cargo test --locked -p player-http --lib tests::query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage -- --exact --format pretty --color never
+```
+
 ## 検査と根拠の限界
 
 check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
 この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
-位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - No mapped test starts a player-server TCP listener. No guarantee is made that structurally readable history consists of legal shogi play.
 - Shared HTTP byte/admission bounds and reader role/timeouts are mapped in public-record-search and startup-schema-isolation.
 - Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees.
+
+## ディレクトリ方式の検査範囲
+
+Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
+全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。

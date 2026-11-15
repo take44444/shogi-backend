@@ -2,7 +2,7 @@
 
 このページは `python3 scripts/traceability.py render` で生成する。
 
-元データは [crates/realtime-gateway/src/realtime-session-commands-limits.trace.json](../../../crates/realtime-gateway/src/realtime-session-commands-limits.trace.json)。
+元データは [crates/realtime-gateway/src/trace/realtime-session-commands-limits/feature.rs](../../../crates/realtime-gateway/src/trace/realtime-session-commands-limits/feature.rs)。
 [全機能の一覧](../feature-traceability.md)。
 
 ## 対象機能
@@ -48,16 +48,16 @@ flowchart TD
     n11["contract: session-auth"]
     n12["contract: shutdown-contract"]
     n13["contract: upgrade-permits"]
-    n14["test: capacity"]
-    n15["test: handshake-test"]
-    n16["test: input-limits"]
-    n17["test: logout"]
-    n18["test: private"]
-    n19["test: retry"]
-    n20["test: shutdown-first"]
-    n21["test: shutdown-test"]
-    n22["test: snapshot-limit"]
-    n23["test: viewers"]
+    n14["test: test-realtime-gateway-test-services-connection-and-user-limits-release-capacity-after-disconnect"]
+    n15["test: test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol"]
+    n16["test: test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification"]
+    n17["test: test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move"]
+    n18["test: test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands"]
+    n19["test: test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation"]
+    n20["test: test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant"]
+    n21["test: test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade"]
+    n22["test: test-realtime-gateway-test-services-shutdown-closes-active-connections-and-refuses-new-upgrades"]
+    n23["test: test-realtime-gateway-test-services-snapshot-size-limit-closes-without-sending-a-partial-position"]
     n0 --> n1
     n1 --> n7
     n1 --> n8
@@ -79,24 +79,24 @@ flowchart TD
     n5 --> n13
     n6 -->|asserts| n15
     n7 -->|asserts| n18
-    n7 -->|asserts| n16
-    n7 -->|exercises| n23
-    n8 -->|asserts| n23
-    n8 -->|asserts| n18
+    n7 -->|exercises| n19
+    n7 -->|asserts| n20
+    n8 -->|asserts| n17
     n8 -->|asserts| n19
-    n9 -->|asserts| n17
-    n9 -->|asserts| n18
-    n10 -->|asserts| n17
-    n10 -->|asserts| n18
-    n10 -->|asserts| n22
+    n8 -->|asserts| n20
+    n9 -->|asserts| n16
+    n9 -->|asserts| n20
+    n10 -->|asserts| n16
+    n10 -->|asserts| n20
+    n10 -->|asserts| n23
     n11 -->|asserts| n15
-    n11 -->|asserts| n17
+    n11 -->|asserts| n16
     n12 -->|asserts| n21
-    n12 -->|asserts| n20
+    n12 -->|asserts| n22
     n13 -->|asserts| n14
     n13 -->|asserts| n18
-    n13 -->|asserts| n16
     n13 -->|asserts| n20
+    n13 -->|asserts| n21
 ```
 
 ## コンポーネント契約と根拠
@@ -109,7 +109,7 @@ browser_headers requires one exact Origin and Host, permits absent fetch-site or
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L271)。
 
-- [handshake-test](#test-handshake-test) (asserts): Missing/evil/duplicate Origin, cross-site metadata and absent/wrong protocol reject with 403.
+- [test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol](#test-test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol) (asserts): Missing/evil/duplicate Origin, cross-site metadata and absent/wrong protocol reject with 403.
 
 未検証: Not every Host, duplicate protocol and header normalization combination is explicitly asserted by this selected test.
 
@@ -121,9 +121,9 @@ The reader enforces frame/rate limits, strict command parsing, one in-flight com
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L401)。
 
-- [private](#test-private) (asserts): Forged user_id returns invalid_input with sequence still zero; spectator move/resign return not_participant.
-- [input-limits](#test-input-limits) (asserts): Input byte limit 128 and rate one terminate abusive sockets while durable sequence remains zero.
-- [viewers](#test-viewers) (exercises): Valid participant move and resign commands dispatch and return matching acceptance.
+- [test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands](#test-test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands) (asserts): Input byte limit 128 and rate one terminate abusive sockets while durable sequence remains zero.
+- [test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation) (exercises): Valid participant move and resign commands dispatch and return matching acceptance.
+- [test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Forged user_id returns invalid_input with sequence still zero; spectator move/resign return not_participant.
 
 未検証: No parser table enumerates malformed decimal strings, oversized numeric values or all unknown fields. No dedicated busy/in-flight permit or command queue/output-overflow assertion.
 
@@ -135,9 +135,9 @@ command_reply maps acceptance and gRPC codes to accepted, invalid_input, not_par
 
 実装位置: [crates/realtime-gateway/src/game.rs](../../../crates/realtime-gateway/src/game.rs#L179)。
 
-- [viewers](#test-viewers) (asserts): Accepted request identity and sequence match participant commands.
-- [private](#test-private) (asserts): Outsider move/resign produce not_participant.
-- [retry](#test-retry) (asserts): Retry after reconnect returns original accepted sequence without duplicate event.
+- [test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move](#test-test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move) (asserts): Retry after reconnect returns original accepted sequence without duplicate event.
+- [test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): Accepted request identity and sequence match participant commands.
+- [test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Outsider move/resign produce not_participant.
 
 未検証: No selected gateway test directly asserts stale_seq metadata, request_conflict, rejected, outcome_unknown or all upstream status/invalid-result close mappings.
 
@@ -149,8 +149,8 @@ command_worker rechecks session and current game access before invoking upstream
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L472)。
 
-- [logout](#test-logout) (asserts): Logout before sending move closes and leaves durable sequence zero.
-- [private](#test-private) (asserts): Spectator cannot mutate or supply a participant identity.
+- [test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification) (asserts): Logout before sending move closes and leaves durable sequence zero.
+- [test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Spectator cannot mutate or supply a participant identity.
 
 未検証: No independent recheck-before-response race assertion or timed upstream mutation outcome test.
 
@@ -162,9 +162,9 @@ writer rechecks session/access before every frame and bounds send/close waits; b
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L347)。
 
-- [logout](#test-logout) (asserts): Expired viewer closes before published resignation delivery.
-- [private](#test-private) (asserts): Privacy revoked for existing spectator closes on the next event.
-- [snapshot-limit](#test-snapshot-limit) (asserts): Snapshot bytes limit one closes without sending a partial position.
+- [test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification) (asserts): Expired viewer closes before published resignation delivery.
+- [test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Privacy revoked for existing spectator closes on the next event.
+- [test-realtime-gateway-test-services-snapshot-size-limit-closes-without-sending-a-partial-position](#test-test-realtime-gateway-test-services-snapshot-size-limit-closes-without-sending-a-partial-position) (asserts): Snapshot bytes limit one closes without sending a partial position.
 
 未検証: No slow-browser backlog, output write deadline, exhausted notification queue or snapshot upstream-timeout assertion. Snapshot limit is enforced in run_connection, which this evidence exercises.
 
@@ -176,8 +176,8 @@ AuthClient requires one correctly shaped cookie, calls the user service with res
 
 実装位置: [crates/realtime-gateway/src/auth.rs](../../../crates/realtime-gateway/src/auth.rs#L87)。
 
-- [handshake-test](#test-handshake-test) (asserts): Missing/duplicate/invalid/unknown session cookies reject upgrade with 401.
-- [logout](#test-logout) (asserts): Actual logout before a command and expiry before a notification close sockets; subsequent upgrades are 401.
+- [test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol](#test-test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol) (asserts): Missing/duplicate/invalid/unknown session cookies reject upgrade with 401.
+- [test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification) (asserts): Actual logout before a command and expiry before a notification close sockets; subsequent upgrades are 401.
 
 未検証: No dedicated assertion covers auth service outage/redirect/oversized profile, returned user mismatch or every cookie encoding branch.
 
@@ -189,8 +189,8 @@ shutdown stores a persistent stop signal; active connections watch it and upgrad
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L228)。
 
-- [shutdown-test](#test-shutdown-test) (asserts): Active socket closes and later upgrade returns 503.
-- [shutdown-first](#test-shutdown-first) (asserts): The first upgrade after shutdown is rejected 503.
+- [test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade](#test-test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade) (asserts): The first upgrade after shutdown is rejected 503.
+- [test-realtime-gateway-test-services-shutdown-closes-active-connections-and-refuses-new-upgrades](#test-test-realtime-gateway-test-services-shutdown-closes-active-connections-and-refuses-new-upgrades) (asserts): Active socket closes and later upgrade returns 503.
 
 未検証: Tests exercise router/library shutdown, not actual executable Ctrl-C, configuration validation or its ten-second drain deadline; wait_closed deadline exhaustion is not separately asserted.
 
@@ -202,10 +202,10 @@ Upgrade authenticates/access-checks, checks shutdown before/after upstream calls
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L293)。
 
-- [capacity](#test-capacity) (asserts): Total two/per-user one rejects excess with 429, and reconnect succeeds after disconnect.
-- [private](#test-private) (asserts): Private outsider and absent game yield indistinguishable 404 upgrade status/body.
-- [input-limits](#test-input-limits) (asserts): Oversized frames close without committing.
-- [shutdown-first](#test-shutdown-first) (asserts): Shutdown before any connection makes first upgrade 503.
+- [test-realtime-gateway-test-services-connection-and-user-limits-release-capacity-after-disconnect](#test-test-realtime-gateway-test-services-connection-and-user-limits-release-capacity-after-disconnect) (asserts): Total two/per-user one rejects excess with 429, and reconnect succeeds after disconnect.
+- [test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands](#test-test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands) (asserts): Oversized frames close without committing.
+- [test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Private outsider and absent game yield indistinguishable 404 upgrade status/body.
+- [test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade](#test-test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade) (asserts): Shutdown before any connection makes first upgrade 503.
 
 未検証: No dedicated race assertion covers shutdown during an upstream handshake. Capacity tests do not exhaust every in-flight handshake state.
 
@@ -213,11 +213,11 @@ Upgrade authenticates/access-checks, checks shutdown before/after upstream calls
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-capacity"></a>
+<a id="test-test-realtime-gateway-test-services-connection-and-user-limits-release-capacity-after-disconnect"></a>
 
-### capacity
+### test-realtime-gateway-test-services-connection-and-user-limits-release-capacity-after-disconnect
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L902)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-session-commands-limits/upgrade-permits/connection_and_user_limits_release_capacity_after_disconnect.rs](../../../crates/realtime-gateway/tests/trace/realtime-session-commands-limits/upgrade-permits/connection_and_user_limits_release_capacity_after_disconnect.rs#L9)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom total/per-user limits.
 
@@ -225,11 +225,11 @@ Upgrade authenticates/access-checks, checks shutdown before/after upstream calls
 cargo test --locked -p realtime-gateway --test services connection_and_user_limits_release_capacity_after_disconnect -- --exact --format pretty --color never
 ```
 
-<a id="test-handshake-test"></a>
+<a id="test-test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol"></a>
 
-### handshake-test
+### test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L707)。
+テスト位置: [crates/realtime-gateway/tests/trace/account-session/realtime-authentication/handshake_requires_exact_origin_unique_session_and_supported_subprotocol.rs](../../../crates/realtime-gateway/tests/trace/account-session/realtime-authentication/handshake_requires_exact_origin_unique_session_and_supported_subprotocol.rs#L9)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
 
@@ -237,23 +237,11 @@ cargo test --locked -p realtime-gateway --test services connection_and_user_limi
 cargo test --locked -p realtime-gateway --test services handshake_requires_exact_origin_unique_session_and_supported_subprotocol -- --exact --format pretty --color never
 ```
 
-<a id="test-input-limits"></a>
+<a id="test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification"></a>
 
-### input-limits
+### test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L931)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom input/rate limits and durable snapshot assertion.
-
-```sh
-cargo test --locked -p realtime-gateway --test services oversized_frames_and_input_rate_close_without_committing_commands -- --exact --format pretty --color never
-```
-
-<a id="test-logout"></a>
-
-### logout
-
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L764)。
+テスト位置: [crates/realtime-gateway/tests/trace/account-session/realtime-authentication/logout_closes_before_command_and_expiry_closes_before_notification.rs](../../../crates/realtime-gateway/tests/trace/account-session/realtime-authentication/logout_closes_before_command_and_expiry_closes_before_notification.rs#L9)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Real account logout and forced session expiry.
 
@@ -261,23 +249,11 @@ cargo test --locked -p realtime-gateway --test services oversized_frames_and_inp
 cargo test --locked -p realtime-gateway --test services logout_closes_before_command_and_expiry_closes_before_notification -- --exact --format pretty --color never
 ```
 
-<a id="test-private"></a>
+<a id="test-test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move"></a>
 
-### private
+### test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L621)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
-
-```sh
-cargo test --locked -p realtime-gateway --test services private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant -- --exact --format pretty --color never
-```
-
-<a id="test-retry"></a>
-
-### retry
-
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L590)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move.rs#L9)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
 
@@ -285,47 +261,23 @@ cargo test --locked -p realtime-gateway --test services private_games_are_hidden
 cargo test --locked -p realtime-gateway --test services lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move -- --exact --format pretty --color never
 ```
 
-<a id="test-shutdown-first"></a>
+<a id="test-test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands"></a>
 
-### shutdown-first
+### test-realtime-gateway-test-services-oversized-frames-and-input-rate-close-without-committing-commands
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L873)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-session-commands-limits/command-input/oversized_frames_and_input_rate_close_without_committing_commands.rs](../../../crates/realtime-gateway/tests/trace/realtime-session-commands-limits/command-input/oversized_frames_and_input_rate_close_without_committing_commands.rs#L9)。
 
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown before any connection.
-
-```sh
-cargo test --locked -p realtime-gateway --test services shutdown_before_any_connection_refuses_the_first_upgrade -- --exact --format pretty --color never
-```
-
-<a id="test-shutdown-test"></a>
-
-### shutdown-test
-
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L859)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown directly.
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom input/rate limits and durable snapshot assertion.
 
 ```sh
-cargo test --locked -p realtime-gateway --test services shutdown_closes_active_connections_and_refuses_new_upgrades -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services oversized_frames_and_input_rate_close_without_committing_commands -- --exact --format pretty --color never
 ```
 
-<a id="test-snapshot-limit"></a>
+<a id="test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation"></a>
 
-### snapshot-limit
+### test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L971)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Snapshot bytes limit one.
-
-```sh
-cargo test --locked -p realtime-gateway --test services snapshot_size_limit_closes_without_sending_a_partial_position -- --exact --format pretty --color never
-```
-
-<a id="test-viewers"></a>
-
-### viewers
-
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L540)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/participants_and_spectator_receive_committed_moves_and_resignation.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/participants_and_spectator_receive_committed_moves_and_resignation.rs#L9)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
 
@@ -333,15 +285,68 @@ cargo test --locked -p realtime-gateway --test services snapshot_size_limit_clos
 cargo test --locked -p realtime-gateway --test services participants_and_spectator_receive_committed_moves_and_resignation -- --exact --format pretty --color never
 ```
 
+<a id="test-test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant"></a>
+
+### test-realtime-gateway-test-services-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant
+
+テスト位置: [crates/realtime-gateway/tests/trace/game-snapshots-access/access-policy/private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant.rs](../../../crates/realtime-gateway/tests/trace/game-snapshots-access/access-policy/private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant.rs#L9)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
+
+```sh
+cargo test --locked -p realtime-gateway --test services private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade"></a>
+
+### test-realtime-gateway-test-services-shutdown-before-any-connection-refuses-the-first-upgrade
+
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-session-commands-limits/shutdown-contract/shutdown_before_any_connection_refuses_the_first_upgrade.rs](../../../crates/realtime-gateway/tests/trace/realtime-session-commands-limits/shutdown-contract/shutdown_before_any_connection_refuses_the_first_upgrade.rs#L9)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown before any connection.
+
+```sh
+cargo test --locked -p realtime-gateway --test services shutdown_before_any_connection_refuses_the_first_upgrade -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-shutdown-closes-active-connections-and-refuses-new-upgrades"></a>
+
+### test-realtime-gateway-test-services-shutdown-closes-active-connections-and-refuses-new-upgrades
+
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-session-commands-limits/shutdown-contract/shutdown_closes_active_connections_and_refuses_new_upgrades.rs](../../../crates/realtime-gateway/tests/trace/realtime-session-commands-limits/shutdown-contract/shutdown_closes_active_connections_and_refuses_new_upgrades.rs#L9)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown directly.
+
+```sh
+cargo test --locked -p realtime-gateway --test services shutdown_closes_active_connections_and_refuses_new_upgrades -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-snapshot-size-limit-closes-without-sending-a-partial-position"></a>
+
+### test-realtime-gateway-test-services-snapshot-size-limit-closes-without-sending-a-partial-position
+
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-session-commands-limits/outgoing/snapshot_size_limit_closes_without_sending_a_partial_position.rs](../../../crates/realtime-gateway/tests/trace/realtime-session-commands-limits/outgoing/snapshot_size_limit_closes_without_sending_a_partial_position.rs#L9)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Snapshot bytes limit one.
+
+```sh
+cargo test --locked -p realtime-gateway --test services snapshot_size_limit_closes_without_sending_a_partial_position -- --exact --format pretty --color never
+```
+
 ## 検査と根拠の限界
 
 check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
 この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
-位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - The gateway authenticates browser identity; the upstream trusted gRPC service itself accepts claims. Session/access checks bound disclosure at checked operations, not a globally atomic cross-service authorization snapshot.
 - Resource bounds cover configured queues/permits and deadlines; selected tests do not prove every overload or timeout branch. There is no separate handshake/input semaphore beyond the implemented connection and in-flight command permits.
 - Executable startup/configuration/signal behavior is owned by the runtime feature record and is not established by these library router tests.
 - Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review.
+
+## ディレクトリ方式の検査範囲
+
+Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
+全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。

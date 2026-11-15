@@ -2,7 +2,7 @@
 
 このページは `python3 scripts/traceability.py render` で生成する。
 
-元データは [crates/player-http/src/public-record-search.trace.json](../../../crates/player-http/src/public-record-search.trace.json)。
+元データは [crates/player-http/src/trace/public-record-search/feature.rs](../../../crates/player-http/src/trace/public-record-search/feature.rs)。
 [全機能の一覧](../feature-traceability.md)。
 
 ## 対象機能
@@ -42,13 +42,14 @@ flowchart TD
     n7["contract: http-resource-policy"]
     n8["contract: public-keysets"]
     n9["contract: query-boundary"]
-    n10["test: a1"]
-    n11["test: p1"]
-    n12["test: p2"]
-    n13["test: p4"]
-    n14["test: p5"]
-    n15["test: r1"]
-    n16["test: r5"]
+    n10["test: test-game-persistence-test-records-identifier-encoding-preserves-binary-ties-and-cursor-round-trips"]
+    n11["test: test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets"]
+    n12["test: test-game-record-application-lib-game-record-application-tests-bounds-and-cursor-binding"]
+    n13["test: test-game-record-persistence-lib-game-record-persistence-tests-identifier-codec-preserves-storage-escapes-and-rejects-malformed-values"]
+    n14["test: test-player-http-lib-player-http-contract-tests-serialized-response-accepts-one-mib-and-rejects-the-next-byte"]
+    n15["test: test-player-http-lib-player-http-contract-tests-sixteen-active-requests-admit-no-seventeenth-and-release-capacity"]
+    n16["test: test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions"]
+    n17["test: test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage"]
     n0 --> n1
     n1 --> n9
     n1 --> n6
@@ -61,18 +62,19 @@ flowchart TD
     n0 --> n4
     n4 --> n6
     n4 --> n8
-    n5 -->|exercises| n11
-    n5 -->|exercises| n12
-    n6 -->|asserts| n10
-    n6 -->|asserts| n15
-    n7 -->|asserts| n13
+    n5 -->|exercises| n16
+    n5 -->|exercises| n17
+    n6 -->|asserts| n11
+    n6 -->|asserts| n12
     n7 -->|asserts| n14
-    n7 -->|asserts| n12
-    n8 -->|asserts| n15
-    n8 -->|asserts| n16
+    n7 -->|asserts| n15
+    n7 -->|asserts| n17
+    n8 -->|asserts| n10
     n8 -->|asserts| n11
-    n9 -->|asserts| n12
-    n9 -->|asserts| n11
+    n8 -->|unreviewed| n13
+    n8 -->|asserts| n16
+    n9 -->|asserts| n16
+    n9 -->|asserts| n17
 ```
 
 ## コンポーネント契約と根拠
@@ -85,8 +87,8 @@ GameRecords::search passes the typed Search to its RecordRepository and returns 
 
 実装位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L335)。
 
-- [p1](#test-p1) (exercises): The real router traverses this application method to a real PostgreSQL reader.
-- [p2](#test-p2) (exercises): The valid query traverses this method to a repository failure.
+- [test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions](#test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions) (exercises): The real router traverses this application method to a real PostgreSQL reader.
+- [test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage](#test-test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage) (exercises): The valid query traverses this method to a repository failure.
 
 未検証: No independent test asserts unchanged forwarding of arbitrary Search values and repository results.
 
@@ -98,8 +100,8 @@ Search validates interval, limit and ply bounds, and decodes a cursor tied to th
 
 実装位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L61)。
 
-- [a1](#test-a1) (asserts): Direct cases reject bad bounds and malformed cursors, accept changed limit, preserve cursor bytes, and reject changed participant.
-- [r1](#test-r1) (asserts): A repository page cursor is rejected after changing the winner filter.
+- [test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets](#test-test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets) (asserts): A repository page cursor is rejected after changing the winner filter.
+- [test-game-record-application-lib-game-record-application-tests-bounds-and-cursor-binding](#test-test-game-record-application-lib-game-record-application-tests-bounds-and-cursor-binding) (asserts): Direct cases reject bad bounds and malformed cursors, accept changed limit, preserve cursor bytes, and reject changed participant.
 
 未検証: The mapped cases do not mutate every fingerprint field or exhaust cursor byte and UTF-8 boundaries.
 
@@ -111,9 +113,9 @@ The shared adapter takes an immediate semaphore permit and respond maps errors, 
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L224)。
 
-- [p4](#test-p4) (asserts): Sixteen blocked searches enter storage, the seventeenth gets immediate 503 and no-store, and capacity returns after release.
-- [p5](#test-p5) (asserts): Direct response-helper checks accept exactly one MiB and return 422 with a generic error for the next byte.
-- [p2](#test-p2) (asserts): Invalid search requests assert generic 400 JSON bodies and no-store. A valid request reaching the corrupt repository asserts 500 status and no-store, without checking its body.
+- [test-player-http-lib-player-http-contract-tests-serialized-response-accepts-one-mib-and-rejects-the-next-byte](#test-test-player-http-lib-player-http-contract-tests-serialized-response-accepts-one-mib-and-rejects-the-next-byte) (asserts): Direct response-helper checks accept exactly one MiB and return 422 with a generic error for the next byte.
+- [test-player-http-lib-player-http-contract-tests-sixteen-active-requests-admit-no-seventeenth-and-release-capacity](#test-test-player-http-lib-player-http-contract-tests-sixteen-active-requests-admit-no-seventeenth-and-release-capacity) (asserts): Sixteen blocked searches enter storage, the seventeenth gets immediate 503 and no-store, and capacity returns after release.
+- [test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage](#test-test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage) (asserts): Invalid search requests assert generic 400 JSON bodies and no-store. A valid request reaching the corrupt repository asserts 500 status and no-store, without checking its body.
 
 未検証: The size boundary uses strings rather than a maximum real page. No mixed search/detail/ratings exhaustion test is mapped.
 
@@ -125,9 +127,10 @@ The PostgreSQL reader filters public completed metadata, applies all requested f
 
 実装位置: [crates/game-record-persistence/src/lib.rs](../../../crates/game-record-persistence/src/lib.rs#L244)。
 
-- [r1](#test-r1) (asserts): Direct repository assertions cover individual filters, a combined case, c/b ID tie ordering followed by older a, exclusion of an unseen newer row, and omission of a newly hidden row.
-- [r5](#test-r5) (asserts): Stored identifiers with encoding edge cases retain binary tie order and cursor round trips.
-- [p1](#test-p1) (asserts): The anonymous real router returns only public metadata and becomes unavailable after closing the reader.
+- [test-game-persistence-test-records-identifier-encoding-preserves-binary-ties-and-cursor-round-trips](#test-test-game-persistence-test-records-identifier-encoding-preserves-binary-ties-and-cursor-round-trips) (asserts): Stored identifiers with encoding edge cases retain binary tie order and cursor round trips.
+- [test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets](#test-test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets) (asserts): Direct repository assertions cover individual filters, a combined case, c/b ID tie ordering followed by older a, exclusion of an unseen newer row, and omission of a newly hidden row.
+- [test-game-record-persistence-lib-game-record-persistence-tests-identifier-codec-preserves-storage-escapes-and-rejects-malformed-values](#test-test-game-record-persistence-lib-game-record-persistence-tests-identifier-codec-preserves-storage-escapes-and-rejects-malformed-values) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions](#test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions) (asserts): The anonymous real router returns only public metadata and becomes unavailable after closing the reader.
 
 <a id="contract-query-boundary"></a>
 
@@ -137,90 +140,18 @@ RawSearch parses typed fields and rejects invalid, unknown, or repeated query va
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L100)。
 
-- [p2](#test-p2) (asserts): Each invalid request returns 400 and invalid_query with no-store; a valid request reaches the same failing repository and returns 500.
-- [p1](#test-p1) (asserts): A real router and PostgreSQL reader return the one record matching a combined participant/rule/winner/reason/ply query.
+- [test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions](#test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions) (asserts): A real router and PostgreSQL reader return the one record matching a combined participant/rule/winner/reason/ply query.
+- [test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage](#test-test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage) (asserts): Each invalid request returns 400 and invalid_query with no-store; a valid request reaches the same failing repository and returns 500.
 
 ## 実在するテストと実行コマンド
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-a1"></a>
+<a id="test-test-game-persistence-test-records-identifier-encoding-preserves-binary-ties-and-cursor-round-trips"></a>
 
-### a1
+### test-game-persistence-test-records-identifier-encoding-preserves-binary-ties-and-cursor-round-trips
 
-テスト位置: [crates/game-record-application/src/lib.rs](../../../crates/game-record-application/src/lib.rs#L452)。
-
-範囲: Pure Search/filter/cursor value checks without HTTP or PostgreSQL.
-
-```sh
-cargo test --locked -p game-record-application --lib tests::bounds_and_cursor_binding -- --exact --format pretty --color never
-```
-
-<a id="test-p1"></a>
-
-### p1
-
-テスト位置: [crates/player-http/src/tests.rs](../../../crates/player-http/src/tests.rs#L24)。
-
-範囲: Real Axum router, application service and PostgreSQL reader; no player TCP listener.
-
-```sh
-cargo test --locked -p player-http --lib tests::anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions -- --exact --format pretty --color never
-```
-
-<a id="test-p2"></a>
-
-### p2
-
-テスト位置: [crates/player-http/src/tests.rs](../../../crates/player-http/src/tests.rs#L156)。
-
-範囲: Real Axum router with a failing fake repository; invalid cases distinguish rejection before storage.
-
-```sh
-cargo test --locked -p player-http --lib tests::query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage -- --exact --format pretty --color never
-```
-
-<a id="test-p4"></a>
-
-### p4
-
-テスト位置: [crates/player-http/src/contract_tests.rs](../../../crates/player-http/src/contract_tests.rs#L35)。
-
-範囲: In-process Axum admission using a deliberately blocked fake repository.
-
-```sh
-cargo test --locked -p player-http --lib contract_tests::sixteen_active_requests_admit_no_seventeenth_and_release_capacity -- --exact --format pretty --color never
-```
-
-<a id="test-p5"></a>
-
-### p5
-
-テスト位置: [crates/player-http/src/contract_tests.rs](../../../crates/player-http/src/contract_tests.rs#L83)。
-
-範囲: Direct shared response helper with exact serialized byte boundaries; no real record page.
-
-```sh
-cargo test --locked -p player-http --lib contract_tests::serialized_response_accepts_one_mib_and_rejects_the_next_byte -- --exact --format pretty --color never
-```
-
-<a id="test-r1"></a>
-
-### r1
-
-テスト位置: [crates/game-persistence/tests/records.rs](../../../crates/game-persistence/tests/records.rs#L113)。
-
-範囲: Real PostgreSQL reader and writer fixtures exercise filters, visibility and keyset changes.
-
-```sh
-cargo test --locked -p game-persistence --test records public_completed_metadata_only_filters_and_stable_keysets -- --exact --format pretty --color never
-```
-
-<a id="test-r5"></a>
-
-### r5
-
-テスト位置: [crates/game-persistence/tests/records.rs](../../../crates/game-persistence/tests/records.rs#L547)。
+テスト位置: [crates/game-persistence/tests/trace/public-record-search/public-keysets/identifier_encoding_preserves_binary_ties_and_cursor_round_trips.rs](../../../crates/game-persistence/tests/trace/public-record-search/public-keysets/identifier_encoding_preserves_binary_ties_and_cursor_round_trips.rs#L9)。
 
 範囲: Real PostgreSQL identifier ordering and cursor round trips.
 
@@ -228,15 +159,104 @@ cargo test --locked -p game-persistence --test records public_completed_metadata
 cargo test --locked -p game-persistence --test records identifier_encoding_preserves_binary_ties_and_cursor_round_trips -- --exact --format pretty --color never
 ```
 
+<a id="test-test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets"></a>
+
+### test-game-persistence-test-records-public-completed-metadata-only-filters-and-stable-keysets
+
+テスト位置: [crates/game-persistence/tests/trace/public-record-detail/snapshot-history/public_completed_metadata_only_filters_and_stable_keysets.rs](../../../crates/game-persistence/tests/trace/public-record-detail/snapshot-history/public_completed_metadata_only_filters_and_stable_keysets.rs#L9)。
+
+範囲: Real PostgreSQL reader and writer fixtures exercise filters, visibility and keyset changes.
+
+```sh
+cargo test --locked -p game-persistence --test records public_completed_metadata_only_filters_and_stable_keysets -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-record-application-lib-game-record-application-tests-bounds-and-cursor-binding"></a>
+
+### test-game-record-application-lib-game-record-application-tests-bounds-and-cursor-binding
+
+テスト位置: [crates/game-record-application/src/trace/public-record-search/bounds-cursor/bounds_and_cursor_binding.rs](../../../crates/game-record-application/src/trace/public-record-search/bounds-cursor/bounds_and_cursor_binding.rs#L9)。
+
+範囲: Pure Search/filter/cursor value checks without HTTP or PostgreSQL.
+
+```sh
+cargo test --locked -p game-record-application --lib tests::bounds_and_cursor_binding -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-record-persistence-lib-game-record-persistence-tests-identifier-codec-preserves-storage-escapes-and-rejects-malformed-values"></a>
+
+### test-game-record-persistence-lib-game-record-persistence-tests-identifier-codec-preserves-storage-escapes-and-rejects-malformed-values
+
+テスト位置: [crates/game-record-persistence/src/trace/public-record-search/public-keysets/identifier_codec_preserves_storage_escapes_and_rejects_malformed_values.rs](../../../crates/game-record-persistence/src/trace/public-record-search/public-keysets/identifier_codec_preserves_storage_escapes_and_rejects_malformed_values.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p game-record-persistence --lib tests::identifier_codec_preserves_storage_escapes_and_rejects_malformed_values -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-contract-tests-serialized-response-accepts-one-mib-and-rejects-the-next-byte"></a>
+
+### test-player-http-lib-player-http-contract-tests-serialized-response-accepts-one-mib-and-rejects-the-next-byte
+
+テスト位置: [crates/player-http/src/trace/public-record-search/http-resource-policy/serialized_response_accepts_one_mib_and_rejects_the_next_byte.rs](../../../crates/player-http/src/trace/public-record-search/http-resource-policy/serialized_response_accepts_one_mib_and_rejects_the_next_byte.rs#L9)。
+
+範囲: Direct shared response helper with exact serialized byte boundaries; no real record page.
+
+```sh
+cargo test --locked -p player-http --lib contract_tests::serialized_response_accepts_one_mib_and_rejects_the_next_byte -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-contract-tests-sixteen-active-requests-admit-no-seventeenth-and-release-capacity"></a>
+
+### test-player-http-lib-player-http-contract-tests-sixteen-active-requests-admit-no-seventeenth-and-release-capacity
+
+テスト位置: [crates/player-http/src/trace/public-record-search/http-resource-policy/sixteen_active_requests_admit_no_seventeenth_and_release_capacity.rs](../../../crates/player-http/src/trace/public-record-search/http-resource-policy/sixteen_active_requests_admit_no_seventeenth_and_release_capacity.rs#L9)。
+
+範囲: In-process Axum admission using a deliberately blocked fake repository.
+
+```sh
+cargo test --locked -p player-http --lib contract_tests::sixteen_active_requests_admit_no_seventeenth_and_release_capacity -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions"></a>
+
+### test-player-http-lib-player-http-tests-anonymous-list-is-metadata-only-and-detail-contains-only-public-ordered-actions
+
+テスト位置: [crates/player-http/src/trace/public-record-detail/application-forwarding/anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions.rs](../../../crates/player-http/src/trace/public-record-detail/application-forwarding/anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions.rs#L9)。
+
+範囲: Real Axum router, application service and PostgreSQL reader; no player TCP listener.
+
+```sh
+cargo test --locked -p player-http --lib tests::anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions -- --exact --format pretty --color never
+```
+
+<a id="test-test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage"></a>
+
+### test-player-http-lib-player-http-tests-query-boundary-rejects-bad-filters-bounds-and-cursors-before-storage
+
+テスト位置: [crates/player-http/src/trace/public-record-detail/http-boundary/query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage.rs](../../../crates/player-http/src/trace/public-record-detail/http-boundary/query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage.rs#L9)。
+
+範囲: Real Axum router with a failing fake repository; invalid cases distinguish rejection before storage.
+
+```sh
+cargo test --locked -p player-http --lib tests::query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage -- --exact --format pretty --color never
+```
+
 ## 検査と根拠の限界
 
 check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
 この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
-位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - Pages do not promise one fixed database snapshot across requests. Cursors are filter-bound values, not authenticated tokens.
 - No mapped test starts a real player-server TCP listener. Raw framework fallbacks are outside the handled-response no-store guarantee.
 - Reader connection limits, database timeouts and database permissions are mapped by startup-schema-isolation.
 - Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees.
+
+## ディレクトリ方式の検査範囲
+
+Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
+全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。

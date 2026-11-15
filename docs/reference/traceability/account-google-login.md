@@ -2,7 +2,7 @@
 
 このページは `python3 scripts/traceability.py render` で生成する。
 
-元データは [crates/user-http/src/account-google-login.trace.json](../../../crates/user-http/src/account-google-login.trace.json)。
+元データは [crates/user-http/src/trace/account-google-login/feature.rs](../../../crates/user-http/src/trace/account-google-login/feature.rs)。
 [全機能の一覧](../feature-traceability.md)。
 
 ## 対象機能
@@ -43,15 +43,17 @@ flowchart TD
     n8["contract: provider-authorization"]
     n9["contract: provider-exchange"]
     n10["contract: verified-claims"]
-    n11["test: attempt-expiry"]
-    n12["test: browser-attempt"]
-    n13["test: concurrent-login"]
-    n14["test: credential-hashes"]
-    n15["test: login-rollback"]
-    n16["test: oauth-authorization"]
-    n17["test: oauth-exchange"]
-    n18["test: oauth-invalid-claims"]
-    n19["test: oauth-token-integrity"]
+    n11["test: test-user-http-lib-user-http-google-tests-authorization-uses-openid-profile-state-nonce-and-s256-pkce"]
+    n12["test: test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http"]
+    n13["test: test-user-http-lib-user-http-google-tests-signed-valid-token-resolves-only-issuer-and-subject"]
+    n14["test: test-user-http-lib-user-http-google-tests-signed-wrong-issuer-audience-nonce-expiry-or-azp-is-rejected"]
+    n15["test: test-user-http-lib-user-http-google-tests-substituted-access-token-and-tampered-signature-are-rejected"]
+    n16["test: test-user-http-lib-user-http-tests-browser-flow-over-real-tcp-http-routes"]
+    n17["test: test-user-http-lib-user-http-tests-login-is-browser-bound-and-consumed-before-any-exchange"]
+    n18["test: test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values"]
+    n19["test: test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge"]
+    n20["test: test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used"]
+    n21["test: test-user-persistence-lib-user-persistence-tests-failed-session-insert-rolls-back-a-new-identity"]
     n0 --> n1
     n1 --> n5
     n0 --> n2
@@ -63,17 +65,19 @@ flowchart TD
     n0 --> n4
     n4 --> n10
     n4 --> n9
-    n5 -->|asserts| n13
-    n5 -->|asserts| n15
-    n6 -->|asserts| n11
-    n6 -->|asserts| n13
-    n7 -->|asserts| n12
-    n7 -->|asserts| n14
-    n8 -->|asserts| n16
-    n9 -->|asserts| n17
-    n10 -->|asserts| n18
-    n10 -->|asserts| n19
-    n10 -->|asserts| n17
+    n5 -->|asserts| n19
+    n5 -->|asserts| n21
+    n6 -->|asserts| n19
+    n6 -->|asserts| n20
+    n7 -->|unreviewed| n16
+    n7 -->|asserts| n17
+    n7 -->|asserts| n18
+    n8 -->|asserts| n11
+    n9 -->|asserts| n12
+    n10 -->|asserts| n12
+    n10 -->|unreviewed| n13
+    n10 -->|asserts| n14
+    n10 -->|asserts| n15
 ```
 
 ## コンポーネント契約と根拠
@@ -86,8 +90,8 @@ PostgresAccounts::login は issuer・subject のロック下で既存プロフ�
 
 実装位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L382)。
 
-- [concurrent-login](#test-concurrent-login) (asserts): 同じ本人識別で同時ログインした結果が一致し、両セッションが同一ユーザーを認証し、accounts が一行であることを確認する。
-- [login-rollback](#test-login-rollback) (asserts): 新 subject のセッション挿入を重複キーで失敗させ、accounts が増えず、別 token で再試行でき、元 token の本人識別が維持されることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge](#test-test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge) (asserts): 同じ本人識別で同時ログインした結果が一致し、両セッションが同一ユーザーを認証し、accounts が一行であることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-failed-session-insert-rolls-back-a-new-identity](#test-test-user-persistence-lib-user-persistence-tests-failed-session-insert-rolls-back-a-new-identity) (asserts): 新 subject のセッション挿入を重複キーで失敗させ、accounts が増えず、別 token で再試行でき、元 token の本人識別が維持されることを確認する。
 
 未検証: issuer だけが異なる場合の分離や、コミット時失敗などすべてのトランザクション障害は列挙していない。
 
@@ -99,8 +103,8 @@ PostgresAccounts::consume_attempt は state・browser の両ハッシュが一�
 
 実装位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L349)。
 
-- [attempt-expiry](#test-attempt-expiry) (asserts): 期限ちょうどの試行と不一致ブラウザーを Unauthorized とし、有効な試行は一度だけ消費できることを確認する。
-- [concurrent-login](#test-concurrent-login) (asserts): 二つの接続から同じ試行を同時消費して、成功が一つだけであることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge](#test-test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge) (asserts): 二つの接続から同じ試行を同時消費して、成功が一つだけであることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used](#test-test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used) (asserts): 期限ちょうどの試行と不一致ブラウザーを Unauthorized とし、有効な試行は一度だけ消費できることを確認する。
 
 <a id="contract-http-attempt"></a>
 
@@ -110,8 +114,9 @@ start は state とブラウザー値の SHA-256 と nonce・verifier を保存�
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L280)。
 
-- [browser-attempt](#test-browser-attempt) (asserts): ブラウザー Cookie の欠落・不一致では交換回数 0、成功後の再利用は 401、失敗コードでの交換後も再試行不可であることを確認する。
-- [credential-hashes](#test-credential-hashes) (asserts): start が保存する state_hash・browser_hash が生値と異なり SHA-256 に一致すること、callback が 303 を返しセッションもハッシュで保存することを確認する。
+- [test-user-http-lib-user-http-tests-browser-flow-over-real-tcp-http-routes](#test-test-user-http-lib-user-http-tests-browser-flow-over-real-tcp-http-routes) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-user-http-lib-user-http-tests-login-is-browser-bound-and-consumed-before-any-exchange](#test-test-user-http-lib-user-http-tests-login-is-browser-bound-and-consumed-before-any-exchange) (asserts): ブラウザー Cookie の欠落・不一致では交換回数 0、成功後の再利用は 401、失敗コードでの交換後も再試行不可であることを確認する。
+- [test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values](#test-test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values) (asserts): start が保存する state_hash・browser_hash が生値と異なり SHA-256 に一致すること、callback が 303 を返しセッションもハッシュで保存することを確認する。
 
 未検証: callback の state/code 長境界、provider error、code 欠落、重複ログイン Cookie、保存失敗時の HTTP 応答は未確認。既存セッション Cookie を送ると旧セッションを logout する実装だが、そのローテーションを確認する assertion はない。
 
@@ -123,7 +128,7 @@ GoogleProvider::authorize は state・nonce とランダムな S256 PKCE challen
 
 実装位置: [crates/user-http/src/google.rs](../../../crates/user-http/src/google.rs#L85)。
 
-- [oauth-authorization](#test-oauth-authorization) (asserts): scope、response_type、state、nonce、S256 と verifier から再計算した challenge の一致、連続する state の相違を確認する。
+- [test-user-http-lib-user-http-google-tests-authorization-uses-openid-profile-state-nonce-and-s256-pkce](#test-test-user-http-lib-user-http-google-tests-authorization-uses-openid-profile-state-nonce-and-s256-pkce) (asserts): scope、response_type、state、nonce、S256 と verifier から再計算した challenge の一致、連続する state の相違を確認する。
 
 <a id="contract-provider-exchange"></a>
 
@@ -133,7 +138,7 @@ exchange_code は保存済み PKCE verifier を token endpoint に送り、取�
 
 実装位置: [crates/user-http/src/google.rs](../../../crates/user-http/src/google.rs#L128)。
 
-- [oauth-exchange](#test-oauth-exchange) (asserts): ローカル HTTP token endpoint に送る grant_type・code・verifier・redirect_uri と、署名済み応答からの subject を確認する。
+- [test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http](#test-test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http) (asserts): ローカル HTTP token endpoint に送る grant_type・code・verifier・redirect_uri と、署名済み応答からの subject を確認する。
 
 未検証: GoogleProvider::exchange の再ディスカバリー、実 Google 通信、HTTPS 専用クライアントのタイムアウトとリダイレクト拒否をこのテストは通らない。
 
@@ -145,9 +150,10 @@ verify_response はライブラリーの署名・issuer・audience・nonce・期
 
 実装位置: [crates/user-http/src/google.rs](../../../crates/user-http/src/google.rs#L145)。
 
-- [oauth-invalid-claims](#test-oauth-invalid-claims) (asserts): 誤った issuer・audience・nonce、nonce 欠落、期限切れ、誤った azp、複数 audience かつ azp 欠落を拒否し、一致する azp は受け入れる。
-- [oauth-token-integrity](#test-oauth-token-integrity) (asserts): access token の置換と ID token 署名の改変を Unauthorized とする。
-- [oauth-exchange](#test-oauth-exchange) (asserts): 正しく署名した応答を実際の検証関数に通して stable-subject を返すことを確認する。
+- [test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http](#test-test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http) (asserts): 正しく署名した応答を実際の検証関数に通して stable-subject を返すことを確認する。
+- [test-user-http-lib-user-http-google-tests-signed-valid-token-resolves-only-issuer-and-subject](#test-test-user-http-lib-user-http-google-tests-signed-valid-token-resolves-only-issuer-and-subject) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-user-http-lib-user-http-google-tests-signed-wrong-issuer-audience-nonce-expiry-or-azp-is-rejected](#test-test-user-http-lib-user-http-google-tests-signed-wrong-issuer-audience-nonce-expiry-or-azp-is-rejected) (asserts): 誤った issuer・audience・nonce、nonce 欠落、期限切れ、誤った azp、複数 audience かつ azp 欠落を拒否し、一致する azp は受け入れる。
+- [test-user-http-lib-user-http-google-tests-substituted-access-token-and-tampered-signature-are-rejected](#test-test-user-http-lib-user-http-google-tests-substituted-access-token-and-tampered-signature-are-rejected) (asserts): access token の置換と ID token 署名の改変を Unauthorized とする。
 
 未検証: 空 subject の拒否、ID token 欠落、名前がない場合や不正な名前の場合の Player へのフォールバックはこの記録のテストでは直接確認していない。
 
@@ -155,71 +161,11 @@ verify_response はライブラリーの署名・issuer・audience・nonce・期
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-attempt-expiry"></a>
+<a id="test-test-user-http-lib-user-http-google-tests-authorization-uses-openid-profile-state-nonce-and-s256-pkce"></a>
 
-### attempt-expiry
+### test-user-http-lib-user-http-google-tests-authorization-uses-openid-profile-state-nonce-and-s256-pkce
 
-テスト位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L574)。
-
-範囲: 実 PostgreSQL repository に指定時刻を渡し、試行の期限・ブラウザー一致・単回消費を確認する。HTTP は通らない。
-
-```sh
-cargo test --locked -p user-persistence --lib tests::expired_attempts_and_sessions_cannot_be_used -- --exact --format pretty --color never
-```
-
-<a id="test-browser-attempt"></a>
-
-### browser-attempt
-
-テスト位置: [crates/user-http/src/tests.rs](../../../crates/user-http/src/tests.rs#L247)。
-
-範囲: 実 Axum ルーターと PostgreSQL。交換回数を数える偽 IdentityProvider を使い、実 Google には接続しない。
-
-```sh
-cargo test --locked -p user-http --lib tests::login_is_browser_bound_and_consumed_before_any_exchange -- --exact --format pretty --color never
-```
-
-<a id="test-concurrent-login"></a>
-
-### concurrent-login
-
-テスト位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L626)。
-
-範囲: 実 PostgreSQL の二つの接続で login と consume_attempt を競合させる。HTTP と Google は通らない。
-
-```sh
-cargo test --locked -p user-persistence --lib tests::concurrent_first_logins_and_callback_consumption_converge -- --exact --format pretty --color never
-```
-
-<a id="test-credential-hashes"></a>
-
-### credential-hashes
-
-テスト位置: [crates/user-http/src/tests.rs](../../../crates/user-http/src/tests.rs#L473)。
-
-範囲: 実ルーターと PostgreSQL の保存行を比較する。本人確認は偽 provider。
-
-```sh
-cargo test --locked -p user-http --lib tests::persisted_browser_credentials_are_hashes_not_cookie_values -- --exact --format pretty --color never
-```
-
-<a id="test-login-rollback"></a>
-
-### login-rollback
-
-テスト位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L662)。
-
-範囲: 実 PostgreSQL の重複 session key による失敗と再試行を確認する。HTTP のエラー変換は通らない。
-
-```sh
-cargo test --locked -p user-persistence --lib tests::failed_session_insert_rolls_back_a_new_identity -- --exact --format pretty --color never
-```
-
-<a id="test-oauth-authorization"></a>
-
-### oauth-authorization
-
-テスト位置: [crates/user-http/src/google/tests.rs](../../../crates/user-http/src/google/tests.rs#L126)。
+テスト位置: [crates/user-http/src/trace/account-google-login/provider-authorization/authorization_uses_openid_profile_state_nonce_and_s256_pkce.rs](../../../crates/user-http/src/trace/account-google-login/provider-authorization/authorization_uses_openid_profile_state_nonce_and_s256_pkce.rs#L9)。
 
 範囲: ローカル metadata から構成した実 GoogleProvider。認可 URL の生成を確認し、ネットワークは使わない。
 
@@ -227,11 +173,11 @@ cargo test --locked -p user-persistence --lib tests::failed_session_insert_rolls
 cargo test --locked -p user-http --lib google::tests::authorization_uses_openid_profile_state_nonce_and_s256_pkce -- --exact --format pretty --color never
 ```
 
-<a id="test-oauth-exchange"></a>
+<a id="test-test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http"></a>
 
-### oauth-exchange
+### test-user-http-lib-user-http-google-tests-code-exchange-sends-pkce-and-verifies-signed-token-over-http
 
-テスト位置: [crates/user-http/src/google/tests.rs](../../../crates/user-http/src/google/tests.rs#L153)。
+テスト位置: [crates/user-http/src/trace/account-google-login/provider-exchange/code_exchange_sends_pkce_and_verifies_signed_token_over_http.rs](../../../crates/user-http/src/trace/account-google-login/provider-exchange/code_exchange_sends_pkce_and_verifies_signed_token_over_http.rs#L9)。
 
 範囲: ローカル HTTP token endpoint とテスト RSA 署名を使う exchange_code。discovery とブラウザールートは通らない。
 
@@ -239,11 +185,23 @@ cargo test --locked -p user-http --lib google::tests::authorization_uses_openid_
 cargo test --locked -p user-http --lib google::tests::code_exchange_sends_pkce_and_verifies_signed_token_over_http -- --exact --format pretty --color never
 ```
 
-<a id="test-oauth-invalid-claims"></a>
+<a id="test-test-user-http-lib-user-http-google-tests-signed-valid-token-resolves-only-issuer-and-subject"></a>
 
-### oauth-invalid-claims
+### test-user-http-lib-user-http-google-tests-signed-valid-token-resolves-only-issuer-and-subject
 
-テスト位置: [crates/user-http/src/google/tests.rs](../../../crates/user-http/src/google/tests.rs#L83)。
+テスト位置: [crates/user-http/src/trace/account-google-login/verified-claims/signed_valid_token_resolves_only_issuer_and_subject.rs](../../../crates/user-http/src/trace/account-google-login/verified-claims/signed_valid_token_resolves_only_issuer_and_subject.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p user-http --lib google::tests::signed_valid_token_resolves_only_issuer_and_subject -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-google-tests-signed-wrong-issuer-audience-nonce-expiry-or-azp-is-rejected"></a>
+
+### test-user-http-lib-user-http-google-tests-signed-wrong-issuer-audience-nonce-expiry-or-azp-is-rejected
+
+テスト位置: [crates/user-http/src/trace/account-google-login/verified-claims/signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected.rs](../../../crates/user-http/src/trace/account-google-login/verified-claims/signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected.rs#L9)。
 
 範囲: テスト RSA で署名した claims を verify_response に渡す。実プロバイダーと DB は使わない。
 
@@ -251,11 +209,11 @@ cargo test --locked -p user-http --lib google::tests::code_exchange_sends_pkce_a
 cargo test --locked -p user-http --lib google::tests::signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected -- --exact --format pretty --color never
 ```
 
-<a id="test-oauth-token-integrity"></a>
+<a id="test-test-user-http-lib-user-http-google-tests-substituted-access-token-and-tampered-signature-are-rejected"></a>
 
-### oauth-token-integrity
+### test-user-http-lib-user-http-google-tests-substituted-access-token-and-tampered-signature-are-rejected
 
-テスト位置: [crates/user-http/src/google/tests.rs](../../../crates/user-http/src/google/tests.rs#L102)。
+テスト位置: [crates/user-http/src/trace/account-google-login/verified-claims/substituted_access_token_and_tampered_signature_are_rejected.rs](../../../crates/user-http/src/trace/account-google-login/verified-claims/substituted_access_token_and_tampered_signature_are_rejected.rs#L9)。
 
 範囲: 署名済みテスト応答の access token と署名を個別に改変して検証する。
 
@@ -263,15 +221,92 @@ cargo test --locked -p user-http --lib google::tests::signed_wrong_issuer_audien
 cargo test --locked -p user-http --lib google::tests::substituted_access_token_and_tampered_signature_are_rejected -- --exact --format pretty --color never
 ```
 
+<a id="test-test-user-http-lib-user-http-tests-browser-flow-over-real-tcp-http-routes"></a>
+
+### test-user-http-lib-user-http-tests-browser-flow-over-real-tcp-http-routes
+
+テスト位置: [crates/user-http/src/trace/account-google-login/http-attempt/browser_flow_over_real_tcp_http_routes.rs](../../../crates/user-http/src/trace/account-google-login/http-attempt/browser_flow_over_real_tcp_http_routes.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p user-http --lib tests::browser_flow_over_real_tcp_http_routes -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-tests-login-is-browser-bound-and-consumed-before-any-exchange"></a>
+
+### test-user-http-lib-user-http-tests-login-is-browser-bound-and-consumed-before-any-exchange
+
+テスト位置: [crates/user-http/src/trace/account-google-login/http-attempt/login_is_browser_bound_and_consumed_before_any_exchange.rs](../../../crates/user-http/src/trace/account-google-login/http-attempt/login_is_browser_bound_and_consumed_before_any_exchange.rs#L9)。
+
+範囲: 実 Axum ルーターと PostgreSQL。交換回数を数える偽 IdentityProvider を使い、実 Google には接続しない。
+
+```sh
+cargo test --locked -p user-http --lib tests::login_is_browser_bound_and_consumed_before_any_exchange -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values"></a>
+
+### test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values
+
+テスト位置: [crates/user-http/src/trace/account-google-login/http-attempt/persisted_browser_credentials_are_hashes_not_cookie_values.rs](../../../crates/user-http/src/trace/account-google-login/http-attempt/persisted_browser_credentials_are_hashes_not_cookie_values.rs#L9)。
+
+範囲: 実ルーターと PostgreSQL の保存行を比較する。本人確認は偽 provider。
+
+```sh
+cargo test --locked -p user-http --lib tests::persisted_browser_credentials_are_hashes_not_cookie_values -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge"></a>
+
+### test-user-persistence-lib-user-persistence-tests-concurrent-first-logins-and-callback-consumption-converge
+
+テスト位置: [crates/user-persistence/src/trace/account-google-login/account-session-transaction/concurrent_first_logins_and_callback_consumption_converge.rs](../../../crates/user-persistence/src/trace/account-google-login/account-session-transaction/concurrent_first_logins_and_callback_consumption_converge.rs#L9)。
+
+範囲: 実 PostgreSQL の二つの接続で login と consume_attempt を競合させる。HTTP と Google は通らない。
+
+```sh
+cargo test --locked -p user-persistence --lib tests::concurrent_first_logins_and_callback_consumption_converge -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used"></a>
+
+### test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used
+
+テスト位置: [crates/user-persistence/src/trace/account-google-login/attempt-consumption/expired_attempts_and_sessions_cannot_be_used.rs](../../../crates/user-persistence/src/trace/account-google-login/attempt-consumption/expired_attempts_and_sessions_cannot_be_used.rs#L9)。
+
+範囲: 実 PostgreSQL repository に指定時刻を渡し、試行の期限・ブラウザー一致・単回消費を確認する。HTTP は通らない。
+
+```sh
+cargo test --locked -p user-persistence --lib tests::expired_attempts_and_sessions_cannot_be_used -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-persistence-lib-user-persistence-tests-failed-session-insert-rolls-back-a-new-identity"></a>
+
+### test-user-persistence-lib-user-persistence-tests-failed-session-insert-rolls-back-a-new-identity
+
+テスト位置: [crates/user-persistence/src/trace/account-google-login/account-session-transaction/failed_session_insert_rolls_back_a_new_identity.rs](../../../crates/user-persistence/src/trace/account-google-login/account-session-transaction/failed_session_insert_rolls_back_a_new_identity.rs#L9)。
+
+範囲: 実 PostgreSQL の重複 session key による失敗と再試行を確認する。HTTP のエラー変換は通らない。
+
+```sh
+cargo test --locked -p user-persistence --lib tests::failed_session_insert_rolls_back_a_new_identity -- --exact --format pretty --color never
+```
+
 ## 検査と根拠の限界
 
 check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
 この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
-位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - 実 Google の discovery・認可・コード交換からブラウザー Cookie までを通す end-to-end テストはない。署名検証、ローカル token endpoint、偽 provider の HTTP フローは別々の証拠である。
 - ログイン成功時の既存セッションローテーションは未確認。registration_profile_update_csrf_logout_and_restart の二回目のログインは既存セッション Cookie を送らないため、その根拠にはできない。
 - Cookie 属性とセッションの利用・失効は account-session、プロフィールと表示名は account-profile、設定・startup・schema は別の機能記録が扱う。
 - リンクの成立とテストの成功は、記述した保証の意味や網羅性の証明ではない。保証・契約・関連の削除や根拠の過大評価はレビューで確認する。
+
+## ディレクトリ方式の検査範囲
+
+Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
+全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。

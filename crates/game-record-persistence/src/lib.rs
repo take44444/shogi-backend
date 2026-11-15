@@ -443,21 +443,9 @@ fn decode(value: String) -> Result<String, Error> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn identifier_codec_preserves_storage_escapes_and_rejects_malformed_values() {
-        for (raw, stored) in [
-            ("plain", "plain"),
-            ("a\0b", "a\u{1}\u{1}b"),
-            ("a\u{1}b", "a\u{1}\u{2}b"),
-            ("\0\u{1}\0", "\u{1}\u{1}\u{1}\u{2}\u{1}\u{1}"),
-        ] {
-            assert_eq!(encode_id(raw), stored);
-            assert_eq!(decode(stored.to_owned()).unwrap(), raw);
-        }
-        for malformed in ["\u{1}", "a\u{1}x", "a\u{1}\u{2}\u{1}"] {
-            assert_eq!(decode(malformed.to_owned()), Err(Error::Corrupt));
-        }
-    }
+    include!(
+        "trace/public-record-search/public-keysets/identifier_codec_preserves_storage_escapes_and_rejects_malformed_values.rs"
+    );
 
     async fn initialize(url: &str) {
         let pool = PgPool::connect(url).await.unwrap();
@@ -470,92 +458,19 @@ mod tests {
         pool.close().await;
     }
 
-    #[tokio::test]
-    async fn database_role_denies_writes_even_when_read_only_mode_is_disabled() {
-        let database = pg_test_support::TestDatabase::new().await;
-        initialize(database.url()).await;
-        let reader = PostgresGameRecords::connect(&database.reader_url().await)
-            .await
-            .unwrap();
-        let mut connection = reader.connection().await.unwrap();
-        sqlx::query("SET default_transaction_read_only = off")
-            .execute(&mut *connection)
-            .await
-            .unwrap();
-        let (sql, values) = Query::delete()
-            .from_table(a("games"))
-            .build_sqlx(PostgresQueryBuilder);
-        let error = sqlx::query_with(AssertSqlSafe(sql), values)
-            .execute(&mut *connection)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            error.as_database_error().unwrap().code().as_deref(),
-            Some("42501")
-        );
-        drop(connection);
-        reader.close().await;
-    }
+    include!(
+        "trace/startup-schema-isolation/reader-permissions/database_role_denies_writes_even_when_read_only_mode_is_disabled.rs"
+    );
 
-    #[tokio::test]
-    async fn fifth_reader_connection_times_out_until_one_of_four_is_released() {
-        let database = pg_test_support::TestDatabase::new().await;
-        initialize(database.url()).await;
-        let reader = PostgresGameRecords::connect(&database.reader_url().await)
-            .await
-            .unwrap();
-        let mut held = Vec::new();
-        for _ in 0..4 {
-            held.push(reader.connection().await.unwrap());
-        }
-        assert_eq!(reader.pool.size(), 4);
-        assert_eq!(
-            reader.pool.options().get_acquire_timeout(),
-            Duration::from_secs(2)
-        );
-        assert!(matches!(
-            reader.pool.acquire().await,
-            Err(sqlx::Error::PoolTimedOut)
-        ));
-        drop(held.pop());
-        let mut recovered = reader.connection().await.unwrap();
-        sqlx::query("SELECT 1")
-            .execute(&mut *recovered)
-            .await
-            .unwrap();
-        drop(recovered);
-        drop(held);
-        reader.close().await;
-    }
+    include!(
+        "trace/startup-schema-isolation/reader-boundary/fifth_reader_connection_times_out_until_one_of_four_is_released.rs"
+    );
 
-    #[tokio::test]
-    async fn statement_timeout_interrupts_real_database_work_and_connection_recovers() {
-        let database = pg_test_support::TestDatabase::new().await;
-        initialize(database.url()).await;
-        let reader = PostgresGameRecords::connect(&database.reader_url().await)
-            .await
-            .unwrap();
-        let mut connection = reader.connection().await.unwrap();
-        for command in ["SHOW statement_timeout", "SHOW lock_timeout"] {
-            let row = sqlx::query(command)
-                .fetch_one(&mut *connection)
-                .await
-                .unwrap();
-            assert_eq!(row.get::<String, _>(0), "2s");
-        }
-        let error = sqlx::query("SELECT pg_sleep(10)")
-            .execute(&mut *connection)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            error.as_database_error().unwrap().code().as_deref(),
-            Some("57014")
-        );
-        sqlx::query("SELECT 1")
-            .execute(&mut *connection)
-            .await
-            .unwrap();
-        drop(connection);
-        reader.close().await;
-    }
+    include!(
+        "trace/startup-schema-isolation/reader-boundary/statement_timeout_interrupts_real_database_work_and_connection_recovers.rs"
+    );
 }
+
+#[cfg(test)]
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;

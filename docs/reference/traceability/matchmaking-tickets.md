@@ -2,7 +2,7 @@
 
 このページは `python3 scripts/traceability.py render` で生成する。
 
-元データは [crates/game-application/src/matchmaking-tickets.trace.json](../../../crates/game-application/src/matchmaking-tickets.trace.json)。
+元データは [crates/game-application/src/trace/matchmaking-tickets/feature.rs](../../../crates/game-application/src/trace/matchmaking-tickets/feature.rs)。
 [全機能の一覧](../feature-traceability.md)。
 
 ## 対象機能
@@ -45,15 +45,17 @@ flowchart TD
     n10["contract: heartbeat"]
     n11["contract: reads"]
     n12["contract: rpc-boundary"]
-    n13["test: browser"]
-    n14["test: browser-input"]
-    n15["test: cancel-race"]
-    n16["test: cross-pool"]
-    n17["test: durable"]
-    n18["test: heartbeat-test"]
-    n19["test: pair-rollback"]
-    n20["test: rpc"]
-    n21["test: schema"]
+    n13["test: test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results"]
+    n14["test: test-game-persistence-test-matchmaking-cancellation-racing-a-match-has-one-committed-outcome"]
+    n15["test: test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner"]
+    n16["test: test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect"]
+    n17["test: test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives"]
+    n18["test: test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets"]
+    n19["test: test-game-persistence-test-ratings-admission-waits-for-application-and-freezes-the-new-committed-states"]
+    n20["test: test-game-persistence-test-ratings-participation-is-global-and-refused-retries-remain-refused"]
+    n21["test: test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access"]
+    n22["test: test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission"]
+    n23["test: test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes"]
     n0 --> n1
     n1 --> n6
     n1 --> n7
@@ -70,24 +72,26 @@ flowchart TD
     n0 --> n4
     n4 --> n10
     n4 --> n9
-    n5 -->|asserts| n17
+    n5 -->|asserts| n15
     n5 -->|asserts| n16
-    n5 -->|asserts| n19
-    n6 -->|asserts| n13
-    n6 -->|asserts| n14
-    n7 -->|asserts| n13
-    n7 -->|asserts| n14
-    n8 -->|asserts| n21
-    n9 -->|asserts| n17
-    n9 -->|asserts| n15
-    n9 -->|asserts| n20
-    n10 -->|asserts| n18
-    n10 -->|asserts| n13
+    n5 -->|asserts| n18
+    n5 -->|unreviewed| n19
+    n5 -->|unreviewed| n20
+    n6 -->|asserts| n21
+    n6 -->|asserts| n22
+    n7 -->|asserts| n21
+    n7 -->|asserts| n22
+    n8 -->|asserts| n23
+    n9 -->|asserts| n13
+    n9 -->|asserts| n14
+    n9 -->|asserts| n16
+    n10 -->|asserts| n17
+    n10 -->|asserts| n21
+    n11 -->|asserts| n16
     n11 -->|asserts| n17
-    n11 -->|asserts| n18
-    n11 -->|asserts| n13
-    n12 -->|asserts| n20
-    n12 -->|exercises| n13
+    n11 -->|asserts| n21
+    n12 -->|asserts| n13
+    n12 -->|exercises| n21
 ```
 
 ## コンポーネント契約と根拠
@@ -100,9 +104,11 @@ The transaction checks existing owner/UUID first, then global active participati
 
 実装位置: [crates/game-persistence/src/matchmaking.rs](../../../crates/game-persistence/src/matchmaking.rs#L224)。
 
-- [durable](#test-durable) (asserts): The stored already_waiting refusal is replayed after cancellation before reconnect. After reconnect, cancel-before-join tombstones remain Cancelled in both pools; changed-pool retries conflict.
-- [cross-pool](#test-cross-pool) (asserts): Concurrent different-pool joins produce exactly one created admission.
-- [pair-rollback](#test-pair-rollback) (asserts): After game finish the same-pool admission is rating_pending, while another pool remains available.
+- [test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner](#test-test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner) (asserts): Concurrent different-pool joins produce exactly one created admission.
+- [test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect](#test-test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect) (asserts): The stored already_waiting refusal is replayed after cancellation before reconnect. After reconnect, cancel-before-join tombstones remain Cancelled in both pools; changed-pool retries conflict.
+- [test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets](#test-test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets) (asserts): After game finish the same-pool admission is rating_pending, while another pool remains available.
+- [test-game-persistence-test-ratings-admission-waits-for-application-and-freezes-the-new-committed-states](#test-test-game-persistence-test-ratings-admission-waits-for-application-and-freezes-the-new-committed-states) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-persistence-test-ratings-participation-is-global-and-refused-retries-remain-refused](#test-test-game-persistence-test-ratings-participation-is-global-and-refused-retries-remain-refused) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
 
 <a id="contract-browser-owner"></a>
 
@@ -112,8 +118,8 @@ Browser handlers derive owner from session authentication and check exact Host, 
 
 実装位置: [crates/realtime-gateway/src/matchmaking.rs](../../../crates/realtime-gateway/src/matchmaking.rs#L119)。
 
-- [browser](#test-browser) (asserts): Anonymous current is 401, foreign owner is 404 and wrong Origin/Host is 403.
-- [browser-input](#test-browser-input) (asserts): Missing mutation Origin, duplicate cookie, unknown pool and forged user_id are rejected; no rejected admission leaves a ticket.
+- [test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access](#test-test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access) (asserts): Anonymous current is 401, foreign owner is 404 and wrong Origin/Host is 403.
+- [test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission](#test-test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission) (asserts): Missing mutation Origin, duplicate cookie, unknown pool and forged user_id are rejected; no rejected admission leaves a ticket.
 
 未検証: No dedicated assertion covers every malformed UUID, DELETE body rejection, saturated HTTP permit or authentication/backend timeout branch.
 
@@ -125,8 +131,8 @@ Ticket responses preserve server state and distinguish newly created, replayed, 
 
 実装位置: [crates/realtime-gateway/src/matchmaking.rs](../../../crates/realtime-gateway/src/matchmaking.rs#L171)。
 
-- [browser](#test-browser) (asserts): New join is 201 with no-store, replay is 200 with identical JSON, pool conflict is 409, playing cancellation is 409 already_matched with game_id.
-- [browser-input](#test-browser-input) (asserts): Missing-Origin mutation responses include no-store.
+- [test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access](#test-test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access) (asserts): New join is 201 with no-store, replay is 200 with identical JSON, pool conflict is 409, playing cancellation is 409 already_matched with game_id.
+- [test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission](#test-test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission) (asserts): Missing-Origin mutation responses include no-store.
 
 未検証: no-store is asserted for representative successes and Origin failures, not every response class; all DTO corruption and upstream error mappings lack dedicated assertions.
 
@@ -138,7 +144,7 @@ The generated matchmaking OpenAPI includes the five owner-scoped operations and 
 
 実装位置: [crates/realtime-gateway/src/matchmaking.rs](../../../crates/realtime-gateway/src/matchmaking.rs#L344)。
 
-- [schema](#test-schema) (asserts): All five method/path operations and both cookie schemes with alternative requirements are inspected.
+- [test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes](#test-test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes) (asserts): All five method/path operations and both cookie schemes with alternative requirements are inspected.
 
 <a id="contract-cancel"></a>
 
@@ -148,9 +154,9 @@ Cancellation transitions a live waiting ticket or inserts an owner-scoped tombst
 
 実装位置: [crates/game-persistence/src/matchmaking.rs](../../../crates/game-persistence/src/matchmaking.rs#L348)。
 
-- [durable](#test-durable) (asserts): Cancellation before join survives reconnect and both pool joins; cancelling an old identity leaves a newer ticket waiting.
-- [cancel-race](#test-cancel-race) (asserts): Each race commits either cancellation with no game or two Playing tickets for one game.
-- [rpc](#test-rpc) (asserts): Cancel of an already Playing ticket equals its prior ticket.
+- [test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results](#test-test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results) (asserts): Cancel of an already Playing ticket equals its prior ticket.
+- [test-game-persistence-test-matchmaking-cancellation-racing-a-match-has-one-committed-outcome](#test-test-game-persistence-test-matchmaking-cancellation-racing-a-match-has-one-committed-outcome) (asserts): Each race commits either cancellation with no game or two Playing tickets for one game.
+- [test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect](#test-test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect) (asserts): Cancellation before join survives reconnect and both pool joins; cancelling an old identity leaves a newer ticket waiting.
 
 <a id="contract-heartbeat"></a>
 
@@ -160,8 +166,8 @@ Only an unexpired Waiting ticket with a larger sequence gets a fresh database-ti
 
 実装位置: [crates/game-persistence/src/matchmaking.rs](../../../crates/game-persistence/src/matchmaking.rs#L315)。
 
-- [heartbeat-test](#test-heartbeat-test) (asserts): Duplicate sequence returns exactly the same ticket; a newer heartbeat after forced expiry produces Expired and does not revive admission.
-- [browser](#test-browser) (asserts): HTTP rejects sequence zero and duplicate sequence one returns the same ticket.
+- [test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives](#test-test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives) (asserts): Duplicate sequence returns exactly the same ticket; a newer heartbeat after forced expiry produces Expired and does not revive admission.
+- [test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access](#test-test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access) (asserts): HTTP rejects sequence zero and duplicate sequence one returns the same ticket.
 
 未検証: No selected assertion enumerates all older sequences, all non-Waiting states or exact wall-clock timing boundaries.
 
@@ -173,9 +179,9 @@ Current and ticket operations expire stale state transactionally and query the a
 
 実装位置: [crates/game-persistence/src/matchmaking.rs](../../../crates/game-persistence/src/matchmaking.rs#L299)。
 
-- [durable](#test-durable) (asserts): Foreign owner ticket lookup returns NotFound and old cancelled identity cannot alter a newer waiting request.
-- [heartbeat-test](#test-heartbeat-test) (asserts): After forced expiry current becomes Idle.
-- [browser](#test-browser) (asserts): Browser retrieves current playing game and stored refusal by ticket identity.
+- [test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect](#test-test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect) (asserts): Foreign owner ticket lookup returns NotFound and old cancelled identity cannot alter a newer waiting request.
+- [test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives](#test-test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives) (asserts): After forced expiry current becomes Idle.
+- [test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access](#test-test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access) (asserts): Browser retrieves current playing game and stored refusal by ticket identity.
 
 <a id="contract-rpc-boundary"></a>
 
@@ -185,8 +191,8 @@ The five matchmaking RPC methods parse owner/UUID, validate supported pool and p
 
 実装位置: [crates/game-grpc/src/service.rs](../../../crates/game-grpc/src/service.rs#L33)。
 
-- [rpc](#test-rpc) (asserts): Unknown/unspecified pool and nonpositive heartbeat are InvalidArgument, exact retry returns unchanged ticket with created=false, foreign owner is NotFound and playing/cancel responses preserve game identity.
-- [browser](#test-browser) (exercises): All five RPCs are exercised through browser calls and return the asserted current, stored, heartbeat and cancellation outcomes.
+- [test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results](#test-test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results) (asserts): Unknown/unspecified pool and nonpositive heartbeat are InvalidArgument, exact retry returns unchanged ticket with created=false, foreign owner is NotFound and playing/cancel responses preserve game identity.
+- [test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access](#test-test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access) (exercises): All five RPCs are exercised through browser calls and return the asserted current, stored, heartbeat and cancellation outcomes.
 
 未検証: Malformed owner/UUID cases are not enumerated for every RPC; the dedicated TCP test does not assert a successful heartbeat. Browser tests assert successful heartbeat through RPC.
 
@@ -194,95 +200,11 @@ The five matchmaking RPC methods parse owner/UUID, validate supported pool and p
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-browser"></a>
+<a id="test-test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results"></a>
 
-### browser
+### test-game-grpc-test-tcp-matchmaking-rpc-validates-requests-and-recovers-durable-owner-scoped-results
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L983)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
-
-```sh
-cargo test --locked -p realtime-gateway --test services authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access -- --exact --format pretty --color never
-```
-
-<a id="test-browser-input"></a>
-
-### browser-input
-
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L1235)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
-
-```sh
-cargo test --locked -p realtime-gateway --test services matchmaking_checks_cookie_origin_and_input_before_admission -- --exact --format pretty --color never
-```
-
-<a id="test-cancel-race"></a>
-
-### cancel-race
-
-テスト位置: [crates/game-persistence/tests/matchmaking.rs](../../../crates/game-persistence/tests/matchmaking.rs#L277)。
-
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Eight concurrent cancellation/matcher races.
-
-```sh
-cargo test --locked -p game-persistence --test matchmaking cancellation_racing_a_match_has_one_committed_outcome -- --exact --format pretty --color never
-```
-
-<a id="test-cross-pool"></a>
-
-### cross-pool
-
-テスト位置: [crates/game-persistence/tests/matchmaking.rs](../../../crates/game-persistence/tests/matchmaking.rs#L107)。
-
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Concurrent admission and matcher tasks.
-
-```sh
-cargo test --locked -p game-persistence --test matchmaking cross_pool_joins_and_multiple_matchers_have_one_durable_winner -- --exact --format pretty --color never
-```
-
-<a id="test-durable"></a>
-
-### durable
-
-テスト位置: [crates/game-persistence/tests/matchmaking.rs](../../../crates/game-persistence/tests/matchmaking.rs#L54)。
-
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
-
-```sh
-cargo test --locked -p game-persistence --test matchmaking durable_retry_refusal_and_cancel_before_join_survive_reconnect -- --exact --format pretty --color never
-```
-
-<a id="test-heartbeat-test"></a>
-
-### heartbeat-test
-
-テスト位置: [crates/game-persistence/tests/matchmaking.rs](../../../crates/game-persistence/tests/matchmaking.rs#L225)。
-
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Database expiry is forced.
-
-```sh
-cargo test --locked -p game-persistence --test matchmaking heartbeat_retries_do_not_extend_and_expired_waiting_never_revives -- --exact --format pretty --color never
-```
-
-<a id="test-pair-rollback"></a>
-
-### pair-rollback
-
-テスト位置: [crates/game-persistence/tests/matchmaking.rs](../../../crates/game-persistence/tests/matchmaking.rs#L153)。
-
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Injected SQL failures and post-finish rating reservation checks.
-
-```sh
-cargo test --locked -p game-persistence --test matchmaking pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets -- --exact --format pretty --color never
-```
-
-<a id="test-rpc"></a>
-
-### rpc
-
-テスト位置: [crates/game-grpc/tests/tcp.rs](../../../crates/game-grpc/tests/tcp.rs#L621)。
+テスト位置: [crates/game-grpc/tests/trace/matchmaking-tickets/cancel/matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results.rs](../../../crates/game-grpc/tests/trace/matchmaking-tickets/cancel/matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results.rs#L9)。
 
 範囲: Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.
 
@@ -290,11 +212,119 @@ cargo test --locked -p game-persistence --test matchmaking pair_failure_rolls_ba
 cargo test --locked -p game-grpc --test tcp matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results -- --exact --format pretty --color never
 ```
 
-<a id="test-schema"></a>
+<a id="test-test-game-persistence-test-matchmaking-cancellation-racing-a-match-has-one-committed-outcome"></a>
 
-### schema
+### test-game-persistence-test-matchmaking-cancellation-racing-a-match-has-one-committed-outcome
 
-テスト位置: [crates/realtime-gateway/tests/services.rs](../../../crates/realtime-gateway/tests/services.rs#L1213)。
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-tickets/cancel/cancellation_racing_a_match_has_one_committed_outcome.rs](../../../crates/game-persistence/tests/trace/matchmaking-tickets/cancel/cancellation_racing_a_match_has_one_committed_outcome.rs#L9)。
+
+範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Eight concurrent cancellation/matcher races.
+
+```sh
+cargo test --locked -p game-persistence --test matchmaking cancellation_racing_a_match_has_one_committed_outcome -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner"></a>
+
+### test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner
+
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/cross_pool_joins_and_multiple_matchers_have_one_durable_winner.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/cross_pool_joins_and_multiple_matchers_have_one_durable_winner.rs#L9)。
+
+範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Concurrent admission and matcher tasks.
+
+```sh
+cargo test --locked -p game-persistence --test matchmaking cross_pool_joins_and_multiple_matchers_have_one_durable_winner -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect"></a>
+
+### test-game-persistence-test-matchmaking-durable-retry-refusal-and-cancel-before-join-survive-reconnect
+
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-tickets/admission/durable_retry_refusal_and_cancel_before_join_survive_reconnect.rs](../../../crates/game-persistence/tests/trace/matchmaking-tickets/admission/durable_retry_refusal_and_cancel_before_join_survive_reconnect.rs#L9)。
+
+範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
+
+```sh
+cargo test --locked -p game-persistence --test matchmaking durable_retry_refusal_and_cancel_before_join_survive_reconnect -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives"></a>
+
+### test-game-persistence-test-matchmaking-heartbeat-retries-do-not-extend-and-expired-waiting-never-revives
+
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-tickets/heartbeat/heartbeat_retries_do_not_extend_and_expired_waiting_never_revives.rs](../../../crates/game-persistence/tests/trace/matchmaking-tickets/heartbeat/heartbeat_retries_do_not_extend_and_expired_waiting_never_revives.rs#L9)。
+
+範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Database expiry is forced.
+
+```sh
+cargo test --locked -p game-persistence --test matchmaking heartbeat_retries_do_not_extend_and_expired_waiting_never_revives -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets"></a>
+
+### test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets
+
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets.rs#L9)。
+
+範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Injected SQL failures and post-finish rating reservation checks.
+
+```sh
+cargo test --locked -p game-persistence --test matchmaking pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-ratings-admission-waits-for-application-and-freezes-the-new-committed-states"></a>
+
+### test-game-persistence-test-ratings-admission-waits-for-application-and-freezes-the-new-committed-states
+
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-tickets/admission/admission_waits_for_application_and_freezes_the_new_committed_states.rs](../../../crates/game-persistence/tests/trace/matchmaking-tickets/admission/admission_waits_for_application_and_freezes_the_new_committed_states.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p game-persistence --test ratings admission_waits_for_application_and_freezes_the_new_committed_states -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-ratings-participation-is-global-and-refused-retries-remain-refused"></a>
+
+### test-game-persistence-test-ratings-participation-is-global-and-refused-retries-remain-refused
+
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-tickets/admission/participation_is_global_and_refused_retries_remain_refused.rs](../../../crates/game-persistence/tests/trace/matchmaking-tickets/admission/participation_is_global_and_refused_retries_remain_refused.rs#L2)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p game-persistence --test ratings participation_is_global_and_refused_retries_remain_refused -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access"></a>
+
+### test-realtime-gateway-test-services-authenticated-matchmaking-recovers-requests-and-rejects-cross-site-or-foreign-access
+
+テスト位置: [crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access.rs](../../../crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access.rs#L9)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
+
+```sh
+cargo test --locked -p realtime-gateway --test services authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission"></a>
+
+### test-realtime-gateway-test-services-matchmaking-checks-cookie-origin-and-input-before-admission
+
+テスト位置: [crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/matchmaking_checks_cookie_origin_and_input_before_admission.rs](../../../crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/matchmaking_checks_cookie_origin_and_input_before_admission.rs#L9)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
+
+```sh
+cargo test --locked -p realtime-gateway --test services matchmaking_checks_cookie_origin_and_input_before_admission -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes"></a>
+
+### test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes
+
+テスト位置: [crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/matchmaking_openapi_covers_all_owner_scoped_routes.rs](../../../crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/matchmaking_openapi_covers_all_owner_scoped_routes.rs#L9)。
 
 範囲: Inspects generated OpenAPI only; no service fixture or network calls.
 
@@ -307,9 +337,14 @@ cargo test --locked -p realtime-gateway --test services matchmaking_openapi_cove
 check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
 この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
-位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - gRPC accepts caller identity claims and does not authenticate users; authenticated owner derivation belongs to the browser gateway.
 - Selected tests do not exhaust every heartbeat ordering, malformed field, no-store response class or backend failure branch.
 - Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review.
+
+## ディレクトリ方式の検査範囲
+
+Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
+全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。

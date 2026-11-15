@@ -1,31 +1,76 @@
 # 機能の保証とテストの対応を更新する
 
-[機能一覧](../reference/feature-traceability.md)と各機能のページは自動生成する。
-手書きの文書に仕様やテスト一覧を複写せず、元の `*.trace.json` を更新する。
-形式の例は[レート取得の定義](../../crates/player-http/src/ratings.trace.json)を参照する。
+[機能一覧](../reference/feature-traceability.md)と各機能のページは Rust の宣言と実在するテストから生成する。
+保証やテスト一覧を手書きの文書に複写しない。
+[永続イベント配信の定義](../../crates/game-application/src/trace/durable-event-dispatch/feature.rs)と[共通の型とマクロ](../../scripts/traceability_model.rs)を例にする。
 
-1. 変更した実装の近くにある `*.trace.json` を編集し、保証と契約の根拠を実装・テストに結び付ける。
-   source は実装コードの位置に合わせ、根拠のない箇所は `gap` に記録する。
-2. API や処理入口を追加・変更した場合は[操作と入口の台帳](../../scripts/traceability-surfaces.json)も更新する。
-3. リポジトリのルートで再生成する。
+1. 機能の `src/trace/<feature>/feature.rs` または `tests/trace/<feature>/feature.rs` を更新する。
+   `src` と `tests` は Cargo package の直下とする。
+   同じ機能の `feature.rs` は workspace 全体で一つにし、保証、処理の流れ、限界を宣言する。
+   `<feature>/<contract>/contract.rs` にコンポーネントの契約、実装の `source`、未検証事項の `gap` を宣言する。
+   宣言は `#[cfg(test)]` の Rust モジュールとしてコンパイルする。
+2. テストを契約ディレクトリに配置し、通常の Rust モジュールまたは文字列リテラルの `include!` で読み込む。
+   `include!` を元のテスト位置に置く方式では、モジュール名、既存のヘルパー、可視性を保てる。
+   移動するテストに相対パスの `include_str!` などがあれば、同じファイルを指すように直す。
+   package、Cargo target、完全なテスト名、ソース位置、主契約を一覧へ登録する必要はない。
+   到達しない宣言やテストファイルは検査で拒否する。
+3. 通常の `#[test]` と `#[tokio::test]` は、所属する契約の `unreviewed` として自動追加される。
+   所属は、その実装を呼ぶことや assertion の十分さを保証しない。
+   `unreviewed` しかない契約には `gap` が必要となる。
+   レビューした根拠は、元のテストを `trace::case!` で包み、`Case` に `scope`、`reason`、`relationship` を宣言する。
+   `asserts` は記載した事例を直接検証する関係、`exercises` は処理を通る関係を表す。
+4. 一つのテストが複数の契約や機能に関わる場合は、`Case.also` の `Evidence` に追加する。
+   追加先の `feature`、`contract`、その機能での `scope`、関係、理由を明示する。
+   同じ機能における同じテストの `scope` は統一する。
+   テスト本体は複製しない。`run` は共有されたテストを一度だけ実行する。
+5. 製品の契約を検証しないテストは、個別に理由を宣言する。
+   SQL 記述方針やテスト用 DB の検査には `trace::infrastructure!("category", "reason"; <test item>)` を使う。
+   別プロセスから起動する補助テストには `trace::helper!("reason"; <test item>)` を使う。
+   基盤・補助テストの一覧と理由は、機能一覧の生成ページで確認できる。
+   未分類のテストをまとめて除外する仕組みは設けない。
+6. HTTP・gRPC 操作の所属は `Feature.surfaces`、その他の処理入口は `Feature.entrypoints` に宣言する。
+   OpenAPI 出力と proto の操作一覧に照合するため、追加・削除や所有者の重複は検査で拒否する。
+   別の JSON 台帳への登録は不要。
+   Cargo example は名前に関係なく、ソース直下に一つの `example!(Example { kind, reason })` 宣言を置く。
+   [OpenAPI 出力の例](../../crates/player-http/examples/player-openapi.rs)のように共通モデルを読み込み、`ExampleKind::OpenApi` または `ExampleKind::Program` と理由を指定する。
+   全 example をコンパイルし、`OpenApi` の example だけを実行して出力を照合する。
+   `Program` は実行しない。未宣言・重複・条件付きの宣言は拒否する。
+7. リポジトリのルートで再生成し、差分を確認する。
 
    ```sh
    python3 scripts/traceability.py render
    ```
 
-4. 生成差分を読み、各テストの assertion が保証のどの事例を確認するか、未検証事項を隠していないかをレビューする。
-5. 検査ツールのテストと、参照・生成物の検査を実行する。
+8. 検査ツールのテストと、参照・生成物の検査を実行する。
 
    ```sh
    python3 scripts/test-traceability.py
+   python3 scripts/test-directory-traceability.py
    python3 scripts/traceability.py check
    ```
 
-6. 登録した実テストを実行する。
+9. 実テストを実行する。
 
    ```sh
    scripts/test-postgres.sh python3 scripts/traceability.py run
+   scripts/test-postgres.sh cargo test --locked --workspace
    ```
 
-Python 3.11 以上と Rust のビルド環境を使う。最後の手順には Docker Compose も必要となる。
+`render` と `check` は、宣言と生成物、Cargo のコンパイル済みテスト一覧を検査する。
+テスト本体の成功を確認するコマンドは `run` または `cargo test`。
+
+分類の対象は、workspace の各 package にあるデフォルト構成の lib、bin、integration test target。
+新しい package や target も列挙し、未分類のコンパイル済みテストを拒否する。
+テストがない target も検査対象として記録する。
+`test = false` の target は理由付きで記録し、`required-features` を持つ target は構成を推測せず拒否する。
+ディレクトリ規約、ファイルの到達、同一テストの重複、宣言とコンパイル結果の不一致も検査する。
+
+[収集ツール](../../tools/traceability/Cargo.toml) は独立した Rust workspace で、syn による構文解析を使う。
+本体の依存関係には追加しない。
+検査はホスト環境のデフォルト Cargo 構成で行い、別 target・feature・cfg の組合せを網羅するものではない。
+例や doctest、Python・shell の検査は、この Cargo テスト分類の対象外とし、それぞれの CI 検査を継続する。
+保証の意味、テストとの関連の妥当性、検証の十分さは引き続きレビューする。
+
+Python 3.11 以上と Rust のビルド環境を使う。
+実テストを実行する最後の手順には Docker Compose も必要となる。
 既存の検証サービスを使う場合の設定は[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)を参照する。

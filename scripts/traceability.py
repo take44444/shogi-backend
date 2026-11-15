@@ -11,10 +11,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
-import tomllib
 
 
-CATALOG = Path("scripts/traceability-surfaces.json")
 DOCUMENTS = Path("docs/reference/traceability")
 INDEX = Path("docs/reference/feature-traceability.md")
 LEGACY = Path("docs/reference/ratings-traceability.md")
@@ -61,8 +59,8 @@ def no_duplicate_keys(pairs):
     return result
 
 
-def source_location(source, root):
-    fields(source, ("path", "needle"))
+def source_location(source, root, *, parsed_test=False):
+    fields(source, ("path", "needle", "line") if parsed_test else ("path", "needle"))
     path, needle = text(source["path"]), text(source["needle"])
     relative = PurePosixPath(path)
     require(not relative.is_absolute() and ".." not in relative.parts and str(relative) == path,
@@ -70,16 +68,17 @@ def source_location(source, root):
     resolved = (root / path).resolve()
     require(resolved.is_relative_to(root) and resolved.is_file(), f"source file missing or outside repository: {path}")
     content = resolved.read_text(encoding="utf-8")
+    if parsed_test:
+        line = source["line"]
+        content_lines = content.splitlines()
+        require(type(line) is int and 0 < line <= len(content_lines), "invalid parsed Rust source line")
+        require(content_lines[line - 1].strip() == needle, f"parsed Rust source line changed: {path}:{line}")
+        return line
     require(content.count(needle) == 1, f"source needle must occur exactly once: {path}: {needle}")
     return content[:content.index(needle)].count("\n") + 1
 
 
-def read_json(path):
-    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=no_duplicate_keys)
-
-
-def load_trace(root, record):
-    graph = read_json(root / record)
+def validate_graph(root, graph, *, parsed_tests=False):
     fields(graph, ("version", "feature", "guarantees", "contracts", "tests", "limitations"))
     require(type(graph["version"]) is int and graph["version"] == 1, "unsupported version")
     fields(graph["feature"], ("id", "title", "source", "flow"))
@@ -118,9 +117,11 @@ def load_trace(root, record):
         for edge in evidence:
             fields(edge, ("test", "relationship", "reason"))
             require(text(edge["test"]) in tests, f"{contract['id']}: unknown test")
-            require(edge["relationship"] in ("asserts", "exercises"), f"{contract['id']}: invalid relationship")
+            require(edge["relationship"] in ("asserts", "exercises", "unreviewed"), f"{contract['id']}: invalid relationship")
             text(edge["reason"])
             used_tests.add(edge["test"])
+        require(any(edge["relationship"] in ("asserts", "exercises") for edge in evidence) or "gap" in contract,
+                f"{contract['id']}: evidence or explicit gap required; unreviewed ownership is insufficient")
         unique([edge["test"] for edge in evidence], contract["id"])
     require(used_contracts == contracts.keys(), "orphan contract")
     require(used_tests == tests.keys(), "orphan test")
@@ -128,33 +129,52 @@ def load_trace(root, record):
         require(CARGO_NAME.fullmatch(text(test["package"])), f"{test['id']}: invalid package")
         fields(test["target"], ("kind",), ("name",))
         kind = test["target"]["kind"]
-        require(kind in ("lib", "test"), f"{test['id']}: unsupported target kind")
-        require((kind == "test") == ("name" in test["target"]), f"{test['id']}: integration target needs name; lib has none")
-        if kind == "test":
+        require(kind in ("lib", "test", "bin"), f"{test['id']}: unsupported target kind")
+        require((kind != "lib") == ("name" in test["target"]), f"{test['id']}: test and bin targets need name; lib has none")
+        if kind != "lib":
             require(CARGO_NAME.fullmatch(text(test["target"]["name"])), f"{test['id']}: invalid target name")
         require(TEST_NAME.fullmatch(text(test["name"])), f"{test['id']}: expected a complete Rust test identity")
-        fields(test["source"], ("path", "needle"))
+        fields(test["source"], ("path", "needle", "line") if parsed_tests else ("path", "needle"))
         require(f"fn {test['name'].split('::')[-1]}(" in text(test["source"]["needle"]),
                 f"{test['id']}: source needle must name the declared test function")
         text(test["scope"])
     unique([(*target_key(test), test["name"]) for test in tests.values()], "Cargo tests")
-    lines = {node["id"]: source_location(node["source"], root) for node in nodes if "source" in node}
+    lines = {node["id"]: source_location(node["source"], root, parsed_test=parsed_tests and node["id"] in tests) for node in nodes if "source" in node}
     return graph, lines
 
 
+class Traces(list):
+    def __init__(self, bundle):
+        super().__init__()
+        self.directory_bundle = bundle
+
+
+def directory_traces(root):
+    repository = Path(__file__).resolve().parent.parent
+    manifest = repository / "tools/traceability/Cargo.toml"
+    args = ["cargo", "run", "--quiet", "--locked", "--manifest-path", str(manifest)]
+    if "CARGO_TARGET_DIR" not in os.environ:
+        args += ["--target-dir", str(repository / "target")]
+    output = execute(args + ["--", str(root)], root)
+    bundle = json.loads(output, object_pairs_hook=no_duplicate_keys)
+    fields(bundle, ("graphs", "inventories", "classifications", "entrypoints", "surfaces", "excluded_targets", "packages", "examples"))
+    return bundle
+
+
 def load_traces(root):
-    records = sorted(path.relative_to(root) for tree in ("crates", "apps")
-                     for path in (root / tree).rglob("*.trace.json"))
-    require(records, "no feature records under crates/ or apps/")
-    traces = []
-    for record in records:
+    bundle = directory_traces(root)
+    require(bundle.get("graphs"), "no feature declarations under workspace src/trace/ or tests/trace/")
+    traces = Traces(bundle)
+    for fragment in bundle.get("graphs", []):
+        fields(fragment, ("record", "graph"))
         try:
-            graph, lines = load_trace(root, record)
-            traces.append((record, graph, lines))
+            graph, lines = validate_graph(root, fragment["graph"], parsed_tests=True)
+            traces.append((Path(fragment["record"]), graph, lines))
         except (InvalidTrace, OSError, ValueError) as error:
-            raise InvalidTrace(f"{record}: {error}") from error
+            raise InvalidTrace(f"{fragment['record']}: {error}") from error
     unique([graph["feature"]["id"] for _, graph, _ in traces], "global feature IDs")
-    return sorted(traces, key=lambda trace: trace[1]["feature"]["id"])
+    traces.sort(key=lambda trace: trace[1]["feature"]["id"])
+    return traces
 
 
 def target_key(test):
@@ -164,7 +184,7 @@ def target_key(test):
 def cargo_command(test):
     args = ["cargo", "test", "--locked", "-p", test["package"]]
     target = test["target"]
-    return args + (["--lib"] if target["kind"] == "lib" else ["--test", target["name"]])
+    return args + (["--lib"] if target["kind"] == "lib" else ["--" + target["kind"], target["name"]])
 
 
 def execute(args, root):
@@ -175,9 +195,7 @@ def execute(args, root):
 
 
 def check_surfaces(traces, root):
-    catalog = read_json(root / CATALOG)
-    fields(catalog, ("version", "openapi", "grpc", "entrypoints"))
-    require(type(catalog["version"]) is int and catalog["version"] == 1, "unsupported catalog version")
+    bundle = traces.directory_bundle
     features = {graph["feature"]["id"] for _, graph, _ in traces}
     surfaces = {feature: [] for feature in features}
 
@@ -185,31 +203,55 @@ def check_surfaces(traces, root):
         require(text(feature) in features, f"{label}: unknown feature owner {feature}")
         surfaces[feature].append(label)
 
-    exporters = set()
-    for tree in ("crates", "apps"):
-        for example in (root / tree).glob("*/examples/*openapi.rs"):
-            manifest = tomllib.loads((example.parent.parent / "Cargo.toml").read_text(encoding="utf-8"))
-            package = manifest.get("package", {}).get("name")
-            require(isinstance(package, str), f"OpenAPI example needs package name: {example}")
-            exporters.add((package, example.stem))
-    declared = []
-    methods = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
-    for api in sequence(catalog["openapi"], nonempty=False):
-        fields(api, ("package", "example", "operations"))
-        package, example = text(api["package"]), text(api["example"])
-        require(CARGO_NAME.fullmatch(package) and CARGO_NAME.fullmatch(example), "invalid OpenAPI package or example")
-        declared.append((package, example))
-        operations = api["operations"]
-        require(isinstance(operations, dict) and operations, "expected nonempty OpenAPI operations")
-        for operation, feature in operations.items():
+    openapi, grpc = {}, {}
+    for surface in sequence(bundle["surfaces"], nonempty=False):
+        kind = surface.get("kind")
+        if kind == "OpenApi":
+            fields(surface, ("kind", "feature", "package", "example", "operation"))
+            package, example, operation = (text(surface[key]) for key in ("package", "example", "operation"))
+            require(CARGO_NAME.fullmatch(package) and CARGO_NAME.fullmatch(example), "invalid OpenAPI package or example")
             require(re.fullmatch(r"(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE) /\S*", operation),
                     f"invalid OpenAPI operation: {operation}")
-            own(feature, f"{package}: {operation}")
-    unique(declared, "OpenAPI exporters")
-    require(set(declared) == exporters,
-            f"OpenAPI exporter set mismatch: missing {sorted(exporters - set(declared))}; extra {sorted(set(declared) - exporters)}")
-    for api in catalog["openapi"]:
-        output = execute(["cargo", "run", "--quiet", "--locked", "-p", api["package"], "--example", api["example"]], root)
+            key = package, example
+            expected = openapi.setdefault(key, {})
+            require(operation not in expected, f"duplicate OpenAPI operation owner: {key} {operation}")
+            expected[operation] = surface["feature"]
+            own(surface["feature"], f"{package}: {operation}")
+        elif kind == "Grpc":
+            fields(surface, ("kind", "feature", "path", "service", "operation"))
+            path, service, operation = (text(surface[key]) for key in ("path", "service", "operation"))
+            require(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in (service, operation)), "invalid gRPC service or operation")
+            key = path, service, operation
+            require(key not in grpc, f"duplicate gRPC operation owner: {key}")
+            grpc[key] = surface["feature"]
+            own(surface["feature"], f"{service}.{operation}")
+        else:
+            require(False, f"unsupported surface kind: {kind}")
+
+    exporters, example_packages, example_identities = set(), set(), set()
+    for entry in sequence(bundle["examples"], nonempty=False):
+        fields(entry, ("package", "example", "source", "kind", "reason"))
+        package, example, source, kind, _ = (text(entry[key]) for key in ("package", "example", "source", "kind", "reason"))
+        require(CARGO_NAME.fullmatch(package) and CARGO_NAME.fullmatch(example), "invalid Cargo example identity")
+        identity = package, example
+        require(identity not in example_identities, f"duplicate Cargo example: {identity}")
+        example_identities.add(identity)
+        relative = PurePosixPath(source)
+        require(not relative.is_absolute() and ".." not in relative.parts and str(relative) == source,
+                f"example source must be repository-relative: {source}")
+        resolved = (root / source).resolve()
+        require(resolved.is_relative_to(root) and resolved.is_file(), f"example source missing or outside repository: {source}")
+        require(kind in ("OpenApi", "Program"), f"unsupported example kind: {kind}")
+        example_packages.add(package)
+        if kind == "OpenApi":
+            exporters.add(identity)
+    for package in sorted(example_packages):
+        execute(["cargo", "check", "--locked", "-p", package, "--examples"], root)
+    require(set(openapi) == exporters,
+            f"OpenAPI exporter set mismatch: missing {sorted(exporters - openapi.keys())}; extra {sorted(openapi.keys() - exporters)}")
+    methods = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+    for (package, example), operations in sorted(openapi.items()):
+        output = execute(["cargo", "run", "--quiet", "--locked", "-p", package, "--example", example], root)
         document = json.loads(output, object_pairs_hook=no_duplicate_keys)
         require(isinstance(document, dict) and isinstance(document.get("paths"), dict), "OpenAPI output needs paths")
         actual = set()
@@ -219,37 +261,40 @@ def check_surfaces(traces, root):
             for method in item.keys() & methods:
                 require(isinstance(item[method], dict), "invalid OpenAPI operation object")
                 actual.add(f"{method.upper()} {path}")
-        expected = set(api["operations"])
-        require(actual == expected,
-                f"{api['package']}: OpenAPI operation set mismatch: uncataloged {sorted(actual - expected)}; absent {sorted(expected - actual)}")
+        require(actual == set(operations),
+                f"{package}: OpenAPI operation set mismatch: uncataloged {sorted(actual - operations.keys())}; absent {sorted(operations.keys() - actual)}")
 
-    grpc = catalog["grpc"]
-    fields(grpc, ("path", "service", "operations"))
-    service = text(grpc["service"])
-    require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", service), "invalid gRPC service name")
-    source_location({"path": grpc["path"], "needle": f"service {service} {{"}, root)
-    proto = (root / grpc["path"]).read_text(encoding="utf-8")
-    proto = re.sub(r"/\*.*?\*/|//[^\n]*", "", proto, flags=re.DOTALL)
-    blocks = re.findall(r"\bservice\s+" + re.escape(service) + r"\s*\{([^{}]*)\}", proto)
-    require(len(blocks) == 1, f"missing or unsupported gRPC service block: {service}")
+    proto_files = set()
+    for directory in [root / "proto"] + [root / package["path"] / "proto" for package in bundle["packages"]]:
+        if directory.is_dir():
+            for path in directory.rglob("*.proto"):
+                resolved = path.resolve()
+                require(resolved.is_relative_to(root), f"proto source outside repository: {path}")
+                proto_files.add(resolved)
+    actual_grpc = set()
     declaration = r"\brpc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*(?:stream\s+)?[.\w]+\s*\)\s*returns\s*\(\s*(?:stream\s+)?[.\w]+\s*\)\s*;"
-    names = re.findall(declaration, blocks[0])
-    require(names and not re.sub(declaration, "", blocks[0]).strip(), f"unsupported gRPC declarations: {service}")
-    unique(names, "gRPC operations")
-    require(isinstance(grpc["operations"], dict), "expected gRPC operations object")
-    require(set(names) == set(grpc["operations"]),
-            f"gRPC operation set mismatch: uncataloged {sorted(set(names) - grpc['operations'].keys())}; absent {sorted(grpc['operations'].keys() - set(names))}")
-    for operation, feature in grpc["operations"].items():
-        own(feature, f"{service}.{operation}")
+    for path in sorted(proto_files):
+        proto = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.DOTALL)
+        blocks = re.findall(r"\bservice\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([^{}]*)\}", proto)
+        require(len(blocks) == len(re.findall(r"\bservice\b", proto)), f"missing or unsupported gRPC service block: {path.relative_to(root)}")
+        unique([service for service, _ in blocks], "gRPC services")
+        for service, block in blocks:
+            names = re.findall(declaration, block)
+            require(names and not re.sub(declaration, "", block).strip(), f"unsupported gRPC declarations: {service}")
+            unique(names, "gRPC operations")
+            actual_grpc.update((path.relative_to(root).as_posix(), service, name) for name in names)
+    require(actual_grpc == set(grpc),
+            f"gRPC operation set mismatch: uncataloged {sorted(actual_grpc - grpc.keys())}; absent {sorted(grpc.keys() - actual_grpc)}")
+
     entry_names = []
-    for entry in sequence(catalog["entrypoints"], nonempty=False):
+    for entry in sequence(bundle["entrypoints"], nonempty=False):
         fields(entry, ("feature", "name", "source"))
         name = text(entry["name"])
         source_location(entry["source"], root)
         own(entry["feature"], name)
         entry_names.append(name)
     unique(entry_names, "entrypoint names")
-    require(all(surfaces.values()), f"orphan feature without catalog surface: {sorted(feature for feature in features if not surfaces[feature])}")
+    require(all(surfaces.values()), f"orphan feature without surface or entrypoint: {sorted(feature for feature in features if not surfaces[feature])}")
     return surfaces
 
 
@@ -264,24 +309,38 @@ def mapped_tests(traces):
     return tests.values()
 
 
-def check_inventory(tests, root):
+def cargo_inventory(test, root):
+    args = cargo_command(test) + ["--", "--list", "--format", "terse"]
+    output = execute(args, root)
+    names = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(r"(.+): (test|benchmark)", line)
+        require(match is not None, f"unsupported Cargo inventory: {shlex.join(args)}\n{output}")
+        if match[2] == "test":
+            names.append(match[1])
+    return Counter(names)
+
+
+def check_inventory(tests, root, directory_bundle=None):
     inventories = {}
     for test, _ in tests:
         key = target_key(test)
         if key not in inventories:
-            args = cargo_command(test) + ["--", "--list", "--format", "terse"]
-            output = execute(args, root)
-            names = []
-            for line in output.splitlines():
-                if not line.strip():
-                    continue
-                match = re.fullmatch(r"(.+): (test|benchmark)", line)
-                require(match is not None, f"unsupported Cargo inventory: {shlex.join(args)}\n{output}")
-                if match[2] == "test":
-                    names.append(match[1])
-            inventories[key] = Counter(names)
+            inventories[key] = cargo_inventory(test, root)
         require(inventories[key][test["name"]] == 1,
                 f"{test['id']}: expected exactly one compiled test in {key}: {test['name']}")
+    for inventory in (directory_bundle or {}).get("inventories", []):
+        key = target_key(inventory)
+        if key not in inventories:
+            inventories[key] = cargo_inventory(inventory, root)
+        actual = inventories[key]
+        expected = Counter(inventory["tests"])
+        require(actual == expected,
+                f"global classification inventory mismatch in {key}: "
+                f"unclassified compiled {sorted((actual - expected).elements())}; "
+                f"parsed but absent {sorted((expected - actual).elements())}")
 
 
 def run_tests(tests, root):
@@ -329,7 +388,7 @@ def escaped(value):
     return html.escape(value, quote=True).replace("|", "&#124;").replace("`", "&#96;")
 
 
-def markdown(record, graph, lines):
+def markdown(record, graph, lines, directory_bundle=None):
     def link(node):
         path = node["source"]["path"]
         return f"[{escaped(path)}](../../../{path}#L{lines[node['id']]})"
@@ -389,7 +448,13 @@ def markdown(record, graph, lines):
             "位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。",
             "宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。", ""]
     out += [f"- {escaped(item)}" for item in graph["limitations"]]
-    return "\n".join(out) + "\n"
+    if directory_bundle:
+        out += ["", "## ディレクトリ方式の検査範囲", "",
+                "Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。",
+                "src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。",
+                "全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。", ""]
+        out = [line for line in out if not line.startswith("位置の検査は Rust の構文解析ではなく")]
+    return "\n".join(out).rstrip() + "\n"
 
 
 def index_markdown(traces, surfaces):
@@ -403,18 +468,42 @@ def index_markdown(traces, surfaces):
         owned = "<br>".join(escaped(surface) for surface in sorted(surfaces[feature["id"]]))
         out.append(f"| [{escaped(feature['title'])}](traceability/{feature['id']}.md) | {owned} | {len(graph['guarantees'])} | {len(graph['contracts'])} | {len(graph['tests'])} | [{escaped(record.as_posix())}](../../{record.as_posix()}) |")
     out += ["", "## 一覧の検査範囲", "",
-            "[操作と入口の台帳](../../scripts/traceability-surfaces.json) は crates/ と apps/ の既存 examples/*openapi.rs から生成する OpenAPI 操作、指定した gRPC service の rpc 名、ソース位置付きの処理入口を機能に割り当てる。",
+            "入口、保証、操作の所有者はコンパイルされる Feature、Contract、Case、Evidence、Surface 宣言から取得する。",
+            "Cargo が列挙する全 example に、型検査される Example 宣言と理由を必須とする。OpenApi 宣言の example だけを実行し、出力された操作と Surface 宣言の完全一致を検査する。Program 宣言はコンパイルのみ行う。proto/ の全 service・RPC も探索して Surface 宣言と照合する。",
             "check は OpenAPI exporter と操作の追加・削除、gRPC 操作の追加・削除、未割当の所有者、台帳から参照されない機能、参照元データと生成文書の不足・余分を検出する。",
             "新しいバックグラウンド処理や WebSocket メッセージを自動発見すること、機能の分割が適切かを判定することはできない。台帳の入口と source はレビューで保つ。",
             "テスト宣言数は機能内の件数であり、同じ Cargo テストが複数機能で共有されることがある。run は package・target・完全なテスト名が同じものを一度だけ実行する。",
             "asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。位置の一致とテストの成功は、保証の意味や網羅性の証明ではない。", "",
             "更新方法は [仕様とテストの対応を更新する](../how-to/check-traceability.md) を参照する。", ""]
+    bundle = traces.directory_bundle
+    counts = Counter(item["classification"] for item in bundle["classifications"])
+    out += ["## 全 workspace テストの分類", "",
+            f"コンパイル済みテスト {sum(counts.values())} 件。機能に関連付けた固有テスト {counts['evidence']} 件、インフラ {counts['infrastructure']} 件、テスト補助 {counts['helper']} 件。共有テストは機能ごとの宣言数に重複して現れるが、この合計では一度だけ数える。", "",
+            "標準ホストとデフォルト Cargo feature を使用する。test = false の target は Cargo の指定どおり一覧から除く。required-features を持つ target は現在のポリシーでは明示的に拒否する。空の target も一覧照合の対象にする。", ""]
+    for item in bundle["classifications"]:
+        if item["classification"] == "evidence":
+            continue
+        identity, source, semantics = item["identity"], item["source"], item["semantics"]
+        target = identity["target"]
+        category = f" / {semantics['category']}" if "category" in semantics else ""
+        label = f"{identity['package']} / {target['kind']} / {target.get('name', '(lib)')} / {identity['name']}"
+        out.append(f"- `{escaped(label)}` ({item['classification']}{category}) [{escaped(source['path'])}](../../{source['path']}#L{source['line']}): {escaped(semantics['reason'])}")
+    for item in bundle["excluded_targets"]:
+        out.append(f"- Cargo 除外 target `{escaped(item['package'])} / {escaped(str(item['target']))}`: {escaped(item['reason'])}")
+    out += ["", "## Cargo example の分類", ""]
+    for item in bundle["examples"]:
+        label = f"{item['package']} / {item['example']}"
+        out.append(f"- `{escaped(label)}` ({escaped(item['kind'])}) [{escaped(item['source'])}](../../{item['source']}): {escaped(item['reason'])}")
+    out.append("")
     return "\n".join(out)
 
 
 def generated_documents(traces, surfaces):
-    documents = {DOCUMENTS / f"{graph['feature']['id']}.md": markdown(record, graph, lines)
-                 for record, graph, lines in traces}
+    bundle = getattr(traces, "directory_bundle", {})
+    migrated = {fragment["graph"]["feature"]["id"] for fragment in bundle.get("graphs", [])}
+    documents = {DOCUMENTS / f"{graph['feature']['id']}.md": markdown(
+        record, graph, lines, bundle if graph["feature"]["id"] in migrated else None)
+        for record, graph, lines in traces}
     documents[INDEX] = index_markdown(traces, surfaces)
     return documents
 
@@ -449,7 +538,7 @@ def main(argv=None):
         traces = load_traces(root)
         surfaces = check_surfaces(traces, root)
         tests = list(mapped_tests(traces))
-        check_inventory(tests, root)
+        check_inventory(tests, root, traces.directory_bundle)
         documents = generated_documents(traces, surfaces)
         if args.command == "render":
             write_documents(root, documents)

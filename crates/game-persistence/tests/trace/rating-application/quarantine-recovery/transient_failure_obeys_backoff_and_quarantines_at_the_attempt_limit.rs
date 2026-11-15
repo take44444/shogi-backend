@@ -1,0 +1,63 @@
+crate::trace_support::case! {
+    crate::trace_support::Case {
+        scope: "Real PostgreSQL transient backoff and attempt-limit behavior.",
+        reason: "Transient failure cannot be reacquired before backoff and reaches quarantine at the configured attempt limit.",
+        relationship: crate::trace_support::Relationship::Asserts,
+        also: &[],
+    };
+#[tokio::test]
+async fn transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit() {
+    let f = Fixture::new().await;
+    f.create("retry", Pool::TenMinute30).await;
+    f.finish("retry").await;
+    let policy = WorkerPolicy::new(
+        Duration::from_secs(30),
+        NonZeroU32::new(2).unwrap(),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    let first = f.jobs.claim(&owner("one"), &policy).await.unwrap().unwrap();
+    assert_eq!(
+        f.jobs
+            .fail(&first, JobFailure::Transient, &policy)
+            .await
+            .unwrap(),
+        TickOutcome::Deferred
+    );
+    assert!(
+        f.jobs
+            .claim(&owner("early"), &policy)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        f.jobs
+            .fail(&first, JobFailure::Corrupt, &policy)
+            .await
+            .unwrap(),
+        TickOutcome::LostClaim
+    );
+    f.raw
+        .execute_unprepared("UPDATE rating_jobs SET available_at=0")
+        .await
+        .unwrap();
+    let second = f.jobs.claim(&owner("two"), &policy).await.unwrap().unwrap();
+    assert_eq!(
+        f.jobs
+            .fail(&second, JobFailure::Transient, &policy)
+            .await
+            .unwrap(),
+        TickOutcome::Quarantined
+    );
+    assert!(
+        f.jobs
+            .claim(&owner("exhausted"), &policy)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(f.count("rating_slots").await, 2);
+    assert_eq!(f.count("rating_applications").await, 0);
+}
+}

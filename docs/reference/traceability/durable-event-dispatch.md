@@ -2,7 +2,7 @@
 
 このページは `python3 scripts/traceability.py render` で生成する。
 
-元データは [crates/game-application/src/durable-event-dispatch.trace.json](../../../crates/game-application/src/durable-event-dispatch.trace.json)。
+元データは [crates/game-application/src/trace/durable-event-dispatch/feature.rs](../../../crates/game-application/src/trace/durable-event-dispatch/feature.rs)。
 [全機能の一覧](../feature-traceability.md)。
 
 ## 対象機能
@@ -46,22 +46,22 @@ flowchart TD
     n9["contract: exclusive-queue"]
     n10["contract: publisher-process"]
     n11["contract: wire-format"]
-    n12["test: e1"]
-    n13["test: e2"]
-    n14["test: e3"]
-    n15["test: m1"]
-    n16["test: m2"]
-    n17["test: m4"]
-    n18["test: m5"]
-    n19["test: m6"]
-    n20["test: o1"]
-    n21["test: o2"]
-    n22["test: o3"]
-    n23["test: o4"]
-    n24["test: o5"]
-    n25["test: o6"]
-    n26["test: o7"]
-    n27["test: o8"]
+    n12["test: test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events"]
+    n13["test: test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity"]
+    n14["test: test-game-application-lib-game-application-events-tests-confirmed-dispatch-failed-publish-and-uncertain-mark-preserve-identity-and-order"]
+    n15["test: test-game-messaging-lib-game-messaging-tests-wire-format-channels-encode-every-id-byte-without-collisions-or-glob-metacharacters"]
+    n16["test: test-game-messaging-lib-game-messaging-tests-wire-format-version-one-json-has-explicit-moves-results-and-identity"]
+    n17["test: test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-cancelled-publication-cannot-reuse-a-connection-or-reconnect"]
+    n18["test: test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-outbox-marks-only-after-a-valid-publish-response-including-no-subscribers"]
+    n19["test: test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-publication-timeout-leaves-the-outbox-pending"]
+    n20["test: test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"]
+    n21["test: test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"]
+    n22["test: test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once"]
+    n23["test: test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes"]
+    n24["test: test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened"]
+    n25["test: test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue"]
+    n26["test: test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop"]
+    n27["test: test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed"]
     n0 --> n1
     n1 --> n7
     n1 --> n6
@@ -84,11 +84,11 @@ flowchart TD
     n8 -->|asserts| n17
     n8 -->|asserts| n18
     n8 -->|asserts| n19
-    n9 -->|asserts| n20
+    n9 -->|asserts| n21
+    n9 -->|asserts| n23
     n9 -->|asserts| n24
     n9 -->|asserts| n25
     n9 -->|asserts| n26
-    n9 -->|asserts| n23
     n9 -->|asserts| n27
     n11 -->|asserts| n15
     n11 -->|asserts| n16
@@ -104,9 +104,9 @@ The repository commit persists the accepted receipt and frozen outbox rows in th
 
 実装位置: [crates/game-persistence/src/lib.rs](../../../crates/game-persistence/src/lib.rs#L388)。
 
-- [o1](#test-o1) (asserts): Real database assertions count events after replay, rejection and restoration and prove payload remains frozen after journal mutation.
-- [o2](#test-o2) (asserts): An enqueue-failing trigger rolls back game metadata, journal and outbox.
-- [o3](#test-o3) (asserts): Retry after an uncertain real commit yields one outbox row.
+- [test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events](#test-test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events) (asserts): An enqueue-failing trigger rolls back game metadata, journal and outbox.
+- [test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Real database assertions count events after replay, rejection and restoration and prove payload remains frozen after journal mutation.
+- [test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once](#test-test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once) (asserts): Retry after an uncertain real commit yields one outbox row.
 
 <a id="contract-canonical-facts"></a>
 
@@ -116,8 +116,8 @@ StagedGameChange validates sequence bounds and action/result consistency and fre
 
 実装位置: [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L92)。
 
-- [e1](#test-e1) (asserts): Direct assertions compare canonical move, mate and resignation facts and reject inconsistent action/result combinations.
-- [e2](#test-e2) (asserts): Direct sequence cases check storage limits before continuity and reject nonconsecutive accepted sequences.
+- [test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events](#test-test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events) (asserts): Direct assertions compare canonical move, mate and resignation facts and reject inconsistent action/result combinations.
+- [test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity](#test-test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity) (asserts): Direct sequence cases check storage limits before continuity and reject nonconsecutive accepted sequences.
 
 <a id="contract-confirmed-dispatch"></a>
 
@@ -127,10 +127,10 @@ OutboxPublisher publishes before marking. The Valkey adapter accepts only valid 
 
 実装位置: [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L238)。
 
-- [e3](#test-e3) (asserts): Fake queue and transport assert publication sequence order after failed send and uncertain mark, including duplicate publication.
-- [m4](#test-m4) (asserts): A TCP RESP fixture and actual Redis client show marking waits for the response and accepts zero subscribers but rejects invalid responses.
-- [m5](#test-m5) (asserts): Cancelling publication prevents connection reuse or automatic reconnection.
-- [m6](#test-m6) (asserts): Response timeout preserves the pending outbox event.
+- [test-game-application-lib-game-application-events-tests-confirmed-dispatch-failed-publish-and-uncertain-mark-preserve-identity-and-order](#test-test-game-application-lib-game-application-events-tests-confirmed-dispatch-failed-publish-and-uncertain-mark-preserve-identity-and-order) (asserts): Fake queue and transport assert publication sequence order after failed send and uncertain mark, including duplicate publication.
+- [test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-cancelled-publication-cannot-reuse-a-connection-or-reconnect](#test-test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-cancelled-publication-cannot-reuse-a-connection-or-reconnect) (asserts): Cancelling publication prevents connection reuse or automatic reconnection.
+- [test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-outbox-marks-only-after-a-valid-publish-response-including-no-subscribers](#test-test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-outbox-marks-only-after-a-valid-publish-response-including-no-subscribers) (asserts): A TCP RESP fixture and actual Redis client show marking waits for the response and accepts zero subscribers but rejects invalid responses.
+- [test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-publication-timeout-leaves-the-outbox-pending](#test-test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-publication-timeout-leaves-the-outbox-pending) (asserts): Response timeout preserves the pending outbox event.
 
 未検証: Transport tests use a controlled TCP RESP fixture and fake repository, not a deployed Valkey instance or subscriber.
 
@@ -142,12 +142,12 @@ PostgresOutbox uses one nonreconnecting advisory-locked session for ordered read
 
 実装位置: [crates/game-persistence/src/outbox.rs](../../../crates/game-persistence/src/outbox.rs#L118)。
 
-- [o1](#test-o1) (asserts): Real PostgreSQL returns the frozen move before the sequence-two finish; marking the first row twice still leaves the finish pending.
-- [o5](#test-o5) (asserts): A child process cannot acquire the publisher lock until the owner drops it.
-- [o6](#test-o6) (asserts): At the delivery boundary PostgreSQL reports no open transaction and another writer can commit.
-- [o7](#test-o7) (asserts): Terminating the owning database session causes the old queue to fail; a replacement resumes the same pending event.
-- [o4](#test-o4) (asserts): Changing a persisted event encoding version to 99 makes next_pending return Corrupt.
-- [o8](#test-o8) (asserts): A real queue round trip preserves game, request and participant identifiers containing NUL and backslashes.
+- [test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Real PostgreSQL returns the frozen move before the sequence-two finish; marking the first row twice still leaves the finish pending.
+- [test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes](#test-test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes) (asserts): A real queue round trip preserves game, request and participant identifiers containing NUL and backslashes.
+- [test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened](#test-test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened) (asserts): Terminating the owning database session causes the old queue to fail; a replacement resumes the same pending event.
+- [test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue](#test-test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue) (asserts): At the delivery boundary PostgreSQL reports no open transaction and another writer can commit.
+- [test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop](#test-test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop) (asserts): A child process cannot acquire the publisher lock until the owner drops it.
+- [test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed](#test-test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed) (asserts): Changing a persisted event encoding version to 99 makes next_pending return Corrupt.
 
 未検証: The delivery-boundary fixture observes database state and subsequent writes. It is not an all-components test stalled on a real broker.
 
@@ -170,8 +170,8 @@ The messaging adapter encodes schema-version-one JSON with explicit event identi
 
 実装位置: [crates/game-messaging/src/lib.rs](../../../crates/game-messaging/src/lib.rs#L281)。
 
-- [m1](#test-m1) (asserts): JSON shape, event IDs, move/drop values and terminal results are directly compared.
-- [m2](#test-m2) (asserts): Channel examples encode every ID byte without collisions or Pub/Sub glob characters.
+- [test-game-messaging-lib-game-messaging-tests-wire-format-channels-encode-every-id-byte-without-collisions-or-glob-metacharacters](#test-test-game-messaging-lib-game-messaging-tests-wire-format-channels-encode-every-id-byte-without-collisions-or-glob-metacharacters) (asserts): Channel examples encode every ID byte without collisions or Pub/Sub glob characters.
+- [test-game-messaging-lib-game-messaging-tests-wire-format-version-one-json-has-explicit-moves-results-and-identity](#test-test-game-messaging-lib-game-messaging-tests-wire-format-version-one-json-has-explicit-moves-results-and-identity) (asserts): JSON shape, event IDs, move/drop values and terminal results are directly compared.
 
 未検証: Subscriber delivery, subscription lifecycle and notification rejection are mapped by realtime-gameplay rather than asserted by these publication examples.
 
@@ -179,196 +179,196 @@ The messaging adapter encodes schema-version-one JSON with explicit event identi
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-e1"></a>
+<a id="test-test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events"></a>
 
-### e1
+### test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events
 
-テスト位置: [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L301)。
+テスト位置: [crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs](../../../crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs#L11)。
 
 範囲: Pure receipt-to-event construction, no PostgreSQL or transport.
 
 ```sh
-cargo test --locked -p game-application --lib events::tests::canonical_move_mate_and_resignation_events -- --exact --format pretty --color never
+cargo test --locked -p game-application --lib events::tests::canonical_facts::canonical_move_mate_and_resignation_events -- --exact --format pretty --color never
 ```
 
-<a id="test-e2"></a>
+<a id="test-test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity"></a>
 
-### e2
+### test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity
 
-テスト位置: [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L355)。
+テスト位置: [crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs](../../../crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs#L73)。
 
 範囲: Pure staged sequence boundary and continuity cases.
 
 ```sh
-cargo test --locked -p game-application --lib events::tests::staging_checks_sequence_bounds_before_continuity -- --exact --format pretty --color never
+cargo test --locked -p game-application --lib events::tests::canonical_facts::staging_checks_sequence_bounds_before_continuity -- --exact --format pretty --color never
 ```
 
-<a id="test-e3"></a>
+<a id="test-test-game-application-lib-game-application-events-tests-confirmed-dispatch-failed-publish-and-uncertain-mark-preserve-identity-and-order"></a>
 
-### e3
+### test-game-application-lib-game-application-events-tests-confirmed-dispatch-failed-publish-and-uncertain-mark-preserve-identity-and-order
 
-テスト位置: [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L424)。
+テスト位置: [crates/game-application/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs](../../../crates/game-application/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs#L11)。
 
 範囲: Application publisher with fake queue and transport, including uncertain outcomes.
 
 ```sh
-cargo test --locked -p game-application --lib events::tests::failed_publish_and_uncertain_mark_preserve_identity_and_order -- --exact --format pretty --color never
+cargo test --locked -p game-application --lib events::tests::confirmed_dispatch::failed_publish_and_uncertain_mark_preserve_identity_and_order -- --exact --format pretty --color never
 ```
 
-<a id="test-m1"></a>
+<a id="test-test-game-messaging-lib-game-messaging-tests-wire-format-channels-encode-every-id-byte-without-collisions-or-glob-metacharacters"></a>
 
-### m1
+### test-game-messaging-lib-game-messaging-tests-wire-format-channels-encode-every-id-byte-without-collisions-or-glob-metacharacters
 
-テスト位置: [crates/game-messaging/src/lib.rs](../../../crates/game-messaging/src/lib.rs#L378)。
-
-範囲: Pure version-one wire JSON encoding, no socket.
-
-```sh
-cargo test --locked -p game-messaging --lib tests::version_one_json_has_explicit_moves_results_and_identity -- --exact --format pretty --color never
-```
-
-<a id="test-m2"></a>
-
-### m2
-
-テスト位置: [crates/game-messaging/src/lib.rs](../../../crates/game-messaging/src/lib.rs#L437)。
+テスト位置: [crates/game-messaging/src/trace/durable-event-dispatch/wire-format/tests.rs](../../../crates/game-messaging/src/trace/durable-event-dispatch/wire-format/tests.rs#L79)。
 
 範囲: Pure exact-channel byte encoding examples.
 
 ```sh
-cargo test --locked -p game-messaging --lib tests::channels_encode_every_id_byte_without_collisions_or_glob_metacharacters -- --exact --format pretty --color never
+cargo test --locked -p game-messaging --lib tests::wire_format::channels_encode_every_id_byte_without_collisions_or_glob_metacharacters -- --exact --format pretty --color never
 ```
 
-<a id="test-m4"></a>
+<a id="test-test-game-messaging-lib-game-messaging-tests-wire-format-version-one-json-has-explicit-moves-results-and-identity"></a>
 
-### m4
+### test-game-messaging-lib-game-messaging-tests-wire-format-version-one-json-has-explicit-moves-results-and-identity
 
-テスト位置: [crates/game-messaging/src/lib.rs](../../../crates/game-messaging/src/lib.rs#L625)。
+テスト位置: [crates/game-messaging/src/trace/durable-event-dispatch/wire-format/tests.rs](../../../crates/game-messaging/src/trace/durable-event-dispatch/wire-format/tests.rs#L11)。
 
-範囲: TCP RESP fixture plus actual Redis client/ValkeyEventPublisher and fake outbox, no deployed Valkey.
+範囲: Pure version-one wire JSON encoding, no socket.
 
 ```sh
-cargo test --locked -p game-messaging --lib transport_tests::outbox_marks_only_after_a_valid_publish_response_including_no_subscribers -- --exact --format pretty --color never
+cargo test --locked -p game-messaging --lib tests::wire_format::version_one_json_has_explicit_moves_results_and_identity -- --exact --format pretty --color never
 ```
 
-<a id="test-m5"></a>
+<a id="test-test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-cancelled-publication-cannot-reuse-a-connection-or-reconnect"></a>
 
-### m5
+### test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-cancelled-publication-cannot-reuse-a-connection-or-reconnect
 
-テスト位置: [crates/game-messaging/src/lib.rs](../../../crates/game-messaging/src/lib.rs#L657)。
+テスト位置: [crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs](../../../crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs#L52)。
 
 範囲: TCP RESP fixture checks cancellation and absence of connection reuse/reconnect.
 
 ```sh
-cargo test --locked -p game-messaging --lib transport_tests::cancelled_publication_cannot_reuse_a_connection_or_reconnect -- --exact --format pretty --color never
+cargo test --locked -p game-messaging --lib transport_tests::confirmed_dispatch::cancelled_publication_cannot_reuse_a_connection_or_reconnect -- --exact --format pretty --color never
 ```
 
-<a id="test-m6"></a>
+<a id="test-test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-outbox-marks-only-after-a-valid-publish-response-including-no-subscribers"></a>
 
-### m6
+### test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-outbox-marks-only-after-a-valid-publish-response-including-no-subscribers
 
-テスト位置: [crates/game-messaging/src/lib.rs](../../../crates/game-messaging/src/lib.rs#L671)。
+テスト位置: [crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs](../../../crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs#L11)。
+
+範囲: TCP RESP fixture plus actual Redis client/ValkeyEventPublisher and fake outbox, no deployed Valkey.
+
+```sh
+cargo test --locked -p game-messaging --lib transport_tests::confirmed_dispatch::outbox_marks_only_after_a_valid_publish_response_including_no_subscribers -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-publication-timeout-leaves-the-outbox-pending"></a>
+
+### test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-publication-timeout-leaves-the-outbox-pending
+
+テスト位置: [crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs](../../../crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs#L75)。
 
 範囲: TCP RESP fixture checks publication response timeout and pending state.
 
 ```sh
-cargo test --locked -p game-messaging --lib transport_tests::publication_timeout_leaves_the_outbox_pending -- --exact --format pretty --color never
+cargo test --locked -p game-messaging --lib transport_tests::confirmed_dispatch::publication_timeout_leaves_the_outbox_pending -- --exact --format pretty --color never
 ```
 
-<a id="test-o1"></a>
+<a id="test-test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"></a>
 
-### o1
+### test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events
 
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L56)。
-
-範囲: Real PostgreSQL writer/outbox persistence, replay, rejection, restoration and frozen payload.
-
-```sh
-cargo test --locked -p game-persistence --test outbox retry_rejection_restoration_and_frozen_payload -- --exact --format pretty --color never
-```
-
-<a id="test-o2"></a>
-
-### o2
-
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L112)。
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L76)。
 
 範囲: Real PostgreSQL trigger-injected enqueue failure and rollback.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox failed_enqueue_rolls_back_metadata_journal_and_events -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox atomic_outbox::failed_enqueue_rolls_back_metadata_journal_and_events -- --exact --format pretty --color never
 ```
 
-<a id="test-o3"></a>
+<a id="test-test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"></a>
 
-### o3
+### test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload
 
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L172)。
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L11)。
+
+範囲: Real PostgreSQL writer/outbox persistence, replay, rejection, restoration and frozen payload.
+
+```sh
+cargo test --locked -p game-persistence --test outbox atomic_outbox::retry_rejection_restoration_and_frozen_payload -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once"></a>
+
+### test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once
+
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L104)。
 
 範囲: Real PostgreSQL uncertain commit injection and idempotent retry.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox uncertain_commit_and_retry_enqueue_once -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox atomic_outbox::uncertain_commit_and_retry_enqueue_once -- --exact --format pretty --color never
 ```
 
-<a id="test-o4"></a>
+<a id="test-test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes"></a>
 
-### o4
+### test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes
 
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L131)。
-
-範囲: Real PostgreSQL pending-event decoding rejects an unsupported encoding version.
-
-```sh
-cargo test --locked -p game-persistence --test outbox unsupported_frozen_encoding_fails_closed -- --exact --format pretty --color never
-```
-
-<a id="test-o5"></a>
-
-### o5
-
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L198)。
-
-範囲: Real PostgreSQL lock owner and spawned lock-probe process; registers the driver rather than the inert helper.
-
-```sh
-cargo test --locked -p game-persistence --test outbox publisher_session_lock_excludes_a_second_process_and_releases_on_drop -- --exact --format pretty --color never
-```
-
-<a id="test-o6"></a>
-
-### o6
-
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L228)。
-
-範囲: Real PostgreSQL delivery-boundary observation with a test publisher.
-
-```sh
-cargo test --locked -p game-persistence --test outbox publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue -- --exact --format pretty --color never
-```
-
-<a id="test-o7"></a>
-
-### o7
-
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L255)。
-
-範囲: Real PostgreSQL session termination and replacement queue.
-
-```sh
-cargo test --locked -p game-persistence --test outbox lost_publisher_session_fails_closed_and_pending_work_can_be_reopened -- --exact --format pretty --color never
-```
-
-<a id="test-o8"></a>
-
-### o8
-
-テスト位置: [crates/game-persistence/tests/outbox.rs](../../../crates/game-persistence/tests/outbox.rs#L281)。
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L139)。
 
 範囲: Real PostgreSQL frozen-event identifier preservation and exact-row marking.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox frozen_events_preserve_identifiers_with_nul_and_backslashes -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox exclusive_queue::frozen_events_preserve_identifiers_with_nul_and_backslashes -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened"></a>
+
+### test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened
+
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L84)。
+
+範囲: Real PostgreSQL session termination and replacement queue.
+
+```sh
+cargo test --locked -p game-persistence --test outbox exclusive_queue::lost_publisher_session_fails_closed_and_pending_work_can_be_reopened -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue"></a>
+
+### test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue
+
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L49)。
+
+範囲: Real PostgreSQL delivery-boundary observation with a test publisher.
+
+```sh
+cargo test --locked -p game-persistence --test outbox exclusive_queue::publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop"></a>
+
+### test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop
+
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L11)。
+
+範囲: Real PostgreSQL lock owner and spawned lock-probe process; registers the driver rather than the inert helper.
+
+```sh
+cargo test --locked -p game-persistence --test outbox exclusive_queue::publisher_session_lock_excludes_a_second_process_and_releases_on_drop -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed"></a>
+
+### test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed
+
+テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L118)。
+
+範囲: Real PostgreSQL pending-event decoding rejects an unsupported encoding version.
+
+```sh
+cargo test --locked -p game-persistence --test outbox exclusive_queue::unsupported_frozen_encoding_fails_closed -- --exact --format pretty --color never
 ```
 
 ## 検査と根拠の限界
@@ -376,10 +376,15 @@ cargo test --locked -p game-persistence --test outbox frozen_events_preserve_ide
 check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
 この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
-位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - No mapped test traverses a real database, deployed Valkey and live subscriber together. No subscriber delivery or broker persistence is promised.
 - Standalone process startup, restart and signal behavior remain explicit gaps even though queue-lock and adapter cancellation behavior have dedicated tests.
 - Schema validation and database-role policy are mapped by startup-schema-isolation.
 - Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees.
+
+## ディレクトリ方式の検査範囲
+
+Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
+全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。

@@ -90,6 +90,17 @@ fn excluded(attrs: &[syn::Attribute]) -> bool {
                 .is_some_and(|m| cfg_without_tests(&m) == Some(false))
     })
 }
+fn test_function(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        matches!(&a.meta, Meta::Path(path) if path.is_ident("test"))
+            || (matches!(&a.meta, Meta::Path(_) | Meta::List(_))
+                && a.path()
+                    .segments
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .eq(["tokio", "test"]))
+    })
+}
 fn postgres_sql(sql: &str) -> bool {
     if sql
         == "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'shogi_reader') THEN GRANT SELECT ON public.schema_version, public.games, public.journal, public.rating_states TO shogi_reader; END IF; END $$"
@@ -246,6 +257,9 @@ impl<'ast> Visit<'ast> for Policy {
         }
     }
     fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if test_function(&item.attrs) {
+            return;
+        }
         let previous = std::mem::take(&mut self.bindings);
         let wrapper = self.wrapper;
         self.wrapper = item.sig.ident == "postgres_statement"
@@ -425,6 +439,7 @@ fn inspect(root: &Path, path: &Path, errors: &mut Vec<String>) {
         }
     }
 }
+crate::trace_support::infrastructure!("sql-policy", "Scans repository production sources for the SQL construction policy; it does not assert a product contract.";
 #[test]
 fn production_sql_uses_builders_or_reviewed_postgres_operations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -446,6 +461,8 @@ fn production_sql_uses_builders_or_reviewed_postgres_operations() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+);
+crate::trace_support::infrastructure!("sql-policy", "Checks SQL policy diagnostics for forbidden source examples; it is a repository development control.";
 #[test]
 fn policy_rejects_application_sql_and_interpolation() {
     for source in [
@@ -470,6 +487,8 @@ fn policy_rejects_application_sql_and_interpolation() {
         assert!(!violations(source).is_empty(), "accepted {source}");
     }
 }
+);
+crate::trace_support::infrastructure!("sql-policy", "Checks the SQL policy analyzer against permitted fixture and query-builder examples; it is a repository development control.";
 #[test]
 fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
     for source in [
@@ -485,3 +504,40 @@ fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
         assert!(violations(source).is_empty(), "rejected {source}");
     }
 }
+);
+
+#[cfg(test)]
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;
+
+crate::trace_support::infrastructure!("sql-policy", "Keeps test-only fixture SQL out of production diagnostics while retaining checks for ordinary functions and invalid test attributes.";
+#[test]
+fn policy_distinguishes_test_functions_from_production_sql() {
+    let fixture = r#"fn fixture() { db.execute_unprepared("DELETE FROM accounts"); }"#;
+    for (attribute, modifier) in [
+        ("#[test]", ""),
+        ("#[tokio::test]", "async "),
+        (r#"#[tokio::test(flavor = "multi_thread", worker_threads = 2)]"#, "async "),
+    ] {
+        let source = format!("{attribute} {modifier}{fixture}");
+        assert!(violations(&source).is_empty(), "rejected {source}");
+        let source = format!("{source} mod production {{ {fixture} }}");
+        assert_eq!(violations(&source).len(), 1, "accepted production SQL in {source}");
+    }
+    for attribute in [
+        "",
+        "#[test()]",
+        "#[test = true]",
+        "#[tokio::test = true]",
+        "#[other::test]",
+        "#[tokio::other::test]",
+    ] {
+        let source = format!("{attribute} {fixture}");
+        assert_eq!(violations(&source).len(), 1, "accepted {source}");
+    }
+    for attribute in ["#[test]", "#[tokio::test]"] {
+        let source = format!("{attribute} mod production {{ {fixture} }}");
+        assert_eq!(violations(&source).len(), 1, "accepted {source}");
+    }
+}
+);

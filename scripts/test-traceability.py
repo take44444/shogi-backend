@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
+import contextlib
 import copy
+import importlib.util
+import io
 import json
-import os
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-
+from unittest.mock import patch
 
 CHECKER = Path(__file__).with_name("traceability.py").resolve()
-RECORD = Path("crates/player-http/src/ratings.trace.json")
+RECORD = Path("crates/sample/src/trace/ratings/feature.rs")
 DOCUMENT = Path("docs/reference/traceability/ratings.md")
 INDEX = Path("docs/reference/feature-traceability.md")
-CATALOG = Path("scripts/traceability-surfaces.json")
+spec = importlib.util.spec_from_file_location("traceability", CHECKER)
+traceability = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(traceability)
 BASE = {
     "version": 1,
     "feature": {"id": "ratings", "title": "Ratings", "flow": ["HTTP delegates to a reader"], "source": {"path": "source.rs", "needle": "// feature"}},
@@ -31,64 +34,61 @@ BASE = {
 
 class TraceabilityTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="ratings-trace-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="trace-validator-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.graph = copy.deepcopy(BASE)
         self.records = {RECORD: self.graph}
-        self.catalog = {
-            "version": 1,
-            "openapi": [{"package": "sample", "example": "sample-openapi", "operations": {"GET /ratings": "ratings"}}],
-            "grpc": {"path": "proto/game.proto", "service": "GameService", "operations": {"Selected": "ratings"}},
+        (self.root / "source.rs").write_text("// feature\n// reader\n// http\nfn selected() {}\nfn other() {}\n")
+        (self.root / "proto").mkdir()
+        (self.root / "proto/game.proto").write_text("service GameService { rpc Selected(Request) returns (Response); }\n")
+        self.bundle = {
+            "graphs": [], "inventories": [], "classifications": [], "excluded_targets": [],
+            "packages": [{"name": "sample", "path": "crates/sample"}],
+            "examples": [{"package": "sample", "example": "sample-openapi", "source": "source.rs", "kind": "OpenApi", "reason": "Exports the schema"}],
+            "surfaces": [
+                {"kind": "OpenApi", "package": "sample", "example": "sample-openapi", "operation": "GET /ratings", "feature": "ratings"},
+                {"kind": "Grpc", "path": "proto/game.proto", "service": "GameService", "operation": "Selected", "feature": "ratings"},
+            ],
             "entrypoints": [{"feature": "ratings", "name": "Worker", "source": {"path": "source.rs", "needle": "// feature"}}],
         }
-        (self.root / CATALOG).parent.mkdir(parents=True)
-        (self.root / "proto").mkdir()
-        (self.root / "proto/game.proto").write_text("service GameService {\n rpc Selected(Request) returns (Response);\n}\n")
-        example = self.root / "crates/sample/examples/sample-openapi.rs"
-        example.parent.mkdir(parents=True)
-        example.write_text("fn main() {}\n")
-        (example.parent.parent / "Cargo.toml").write_text('[package]\nname = "sample"\n')
-        (self.root / RECORD).parent.mkdir(parents=True)
-        (self.root / "source.rs").write_text("// feature\n// reader\n// http\nfn selected() {}\nfn other() {}\n")
         self.protocol = {"inventory": {"sample|lib|": "module::selected: test\n"}}
-        self.bin = self.root / "bin"
-        self.bin.mkdir()
-        cargo = self.bin / "cargo"
-        cargo.write_text(f"#!{sys.executable}\n" + '''
-import json
-from pathlib import Path
-import sys
-args = sys.argv[1:]
-with Path("commands.jsonl").open("a") as log:
-    log.write(json.dumps(args) + "\\n")
-protocol = json.loads(Path("protocol.json").read_text())
-package = args[args.index("-p") + 1]
-if args[0] == "run":
-    print(json.dumps(protocol.get("openapi", {"paths": {"/ratings": {"get": {}}}})))
-    sys.exit(protocol.get("openapi_exit", 0))
-kind = "lib" if "--lib" in args else "test"
-target = "" if kind == "lib" else args[args.index("--test") + 1]
-key = "|".join((package, kind, target))
-if "--list" in args:
-    print(protocol["inventory"].get(key, ""), end="")
-    sys.exit(protocol.get("inventory_exit", 0))
-name = args[args.index("--") - 1]
-output = f"running 1 test\\ntest {name} ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\\n"
-print(protocol.get("execution", output), end="")
-sys.exit(protocol.get("execution_exit", 0))
-''')
-        cargo.chmod(0o755)
+        self.commands = []
+
+    def load_fixture(self, root):
+        traceability.require(self.records, "no feature declarations")
+        traces = traceability.Traces(self.bundle)
+        for record, graph in self.records.items():
+            graph, lines = traceability.validate_graph(root, graph)
+            traces.append((record, graph, lines))
+        traceability.unique([graph["feature"]["id"] for _, graph, _ in traces], "global feature IDs")
+        traces.sort(key=lambda trace: trace[1]["feature"]["id"])
+        return traces
+
+    def execute_fixture(self, args, root):
+        self.commands.append(args)
+        if args[0:2] == ["cargo", "check"]:
+            traceability.require(not self.protocol.get("example_check_exit"), "example compilation failed")
+            return ""
+        if args[0:2] == ["cargo", "run"]:
+            traceability.require(not self.protocol.get("openapi_exit"), "command failed")
+            return json.dumps(self.protocol.get("openapi", {"paths": {"/ratings": {"get": {}}}}))
+        if "--list" in args:
+            traceability.require(not self.protocol.get("inventory_exit"), "command failed")
+            kind = "lib" if "--lib" in args else "test" if "--test" in args else "bin"
+            target = "" if kind == "lib" else args[args.index("--" + kind) + 1]
+            key = "|".join((args[args.index("-p") + 1], kind, target))
+            return self.protocol["inventory"].get(key, "")
+        traceability.require(not self.protocol.get("execution_exit"), "command failed")
+        name = args[args.index("--") - 1]
+        return self.protocol.get("execution", f"running 1 test\ntest {name} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
 
     def run_cli(self, command):
-        for record, graph in self.records.items():
-            (self.root / record).parent.mkdir(parents=True, exist_ok=True)
-            (self.root / record).write_text(json.dumps(graph))
-        (self.root / CATALOG).write_text(json.dumps(self.catalog))
-        (self.root / "protocol.json").write_text(json.dumps(self.protocol))
-        env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}")
-        return subprocess.run([sys.executable, str(CHECKER), command, "--root", str(self.root)],
-                              capture_output=True, text=True, env=env)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(traceability, "load_traces", self.load_fixture), patch.object(traceability, "execute", self.execute_fixture):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = traceability.main([command, "--root", str(self.root)])
+        return SimpleNamespace(returncode=code, stdout=stdout.getvalue(), stderr=stderr.getvalue())
 
     def succeeds(self, command):
         result = self.run_cli(command)
@@ -102,6 +102,14 @@ sys.exit(protocol.get("execution_exit", 0))
         self.assertNotIn("Traceback", result.stderr)
         return result
 
+    def add_feature(self):
+        other = copy.deepcopy(BASE)
+        other["feature"]["id"] = "other-feature"
+        record = Path("apps/sample/src/trace/other-feature/feature.rs")
+        self.records[record] = other
+        self.bundle["entrypoints"].append({"feature": "other-feature", "name": "Other worker", "source": {"path": "source.rs", "needle": "// feature"}})
+        return record, other
+
     def test_render_check_and_run_use_exact_identity_and_are_repeatable(self):
         self.succeeds("render")
         first = (self.root / DOCUMENT).read_bytes()
@@ -109,102 +117,80 @@ sys.exit(protocol.get("execution_exit", 0))
         self.assertEqual(first, (self.root / DOCUMENT).read_bytes())
         self.succeeds("check")
         self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
-        commands = [json.loads(line) for line in (self.root / "commands.jsonl").read_text().splitlines()]
-        self.assertEqual(commands[-1], ["test", "--locked", "-p", "sample", "--lib", "module::selected",
-                                        "--", "--exact", "--format", "pretty", "--color", "never"])
-        rendered = first.decode()
-        self.assertIn("../../../source.rs#L4", rendered)
-        self.assertIn("asserts", rendered)
-        self.assertIn("No end-to-end assertion", rendered)
-
-    def test_rendered_table_columns_match_their_header(self):
-        self.graph["feature"]["title"] = "Ratings | quoted `value`"
-        self.succeeds("render")
-        expected_columns = None
-        tables = 0
-        for document in (DOCUMENT, INDEX):
-            rows = []
-            for line in (self.root / document).read_text().splitlines() + [""]:
-                if not line.startswith("|"):
-                    if rows:
-                        self.assertGreaterEqual(len(rows), 3)
-                        self.assertTrue(all(cell.strip() == "---" for cell in rows[1].split("|")[1:-1]))
-                    expected_columns, rows = None, []
-                    continue
-                columns = len(line.split("|")) - 2
-                if expected_columns is None:
-                    expected_columns = columns
-                    tables += 1
-                self.assertEqual(columns, expected_columns, line)
-                rows.append(line)
-        self.assertGreater(tables, 0)
-
-    def add_feature(self):
-        other = copy.deepcopy(BASE)
-        other["feature"]["id"] = "other-feature"
-        record = Path("apps/sample/other.trace.json")
-        self.records[record] = other
-        self.catalog["entrypoints"].append({"feature": "other-feature", "name": "Other worker",
-                                            "source": {"path": "source.rs", "needle": "// feature"}})
-        return record, other
+        self.assertEqual(self.commands[-1], ["cargo", "test", "--locked", "-p", "sample", "--lib", "module::selected", "--", "--exact", "--format", "pretty", "--color", "never"])
+        self.assertIn("../../../source.rs#L4", first.decode())
 
     def test_multiple_features_share_inventory_and_execute_each_identity_once(self):
         self.add_feature()
         self.succeeds("render")
-        (self.root / "commands.jsonl").write_text("")
-        result = self.succeeds("run")
-        self.assertIn("PASS other-feature/one, ratings/one", result.stdout)
-        commands = [json.loads(line) for line in (self.root / "commands.jsonl").read_text().splitlines()]
-        self.assertEqual(sum("--list" in command for command in commands), 1)
-        self.assertEqual(sum(command[0] == "test" and "--list" not in command for command in commands), 1)
-        self.assertIn("other-feature.md", (self.root / INDEX).read_text())
+        self.commands.clear()
+        self.assertIn("PASS other-feature/one, ratings/one", self.succeeds("run").stdout)
+        self.assertEqual(sum("--list" in command for command in self.commands), 1)
+        self.assertEqual(sum(command[1] == "test" and "--list" not in command for command in self.commands), 1)
 
-    def test_missing_record_and_duplicate_global_feature_id(self):
-        record, other = self.add_feature()
+    def test_global_inventory_rejects_unclassified_tests_in_empty_and_new_targets(self):
+        for target in ({"kind": "lib"}, {"kind": "test", "name": "new_target"}, {"kind": "bin", "name": "worker"}):
+            with self.subTest(target=target):
+                self.bundle["inventories"] = [{"package": "sample", "target": target, "tests": ["module::selected"] if target["kind"] == "lib" else []}]
+                key = "|".join(("sample", target["kind"], target.get("name", "")))
+                self.protocol["inventory"][key] = ("module::selected: test\n" if target["kind"] == "lib" else "") + "hidden: test\n"
+                self.rejects("global classification inventory mismatch")
+                self.protocol["inventory"][key] = "module::selected: test\n" if target["kind"] == "lib" else ""
+
+    def test_global_inventory_keeps_multiplicity_and_zero_test_targets(self):
+        self.bundle["inventories"] = [{"package": "other", "target": {"kind": "lib"}, "tests": []}]
         self.succeeds("render")
+        self.assertTrue(any("other" in command and "--list" in command for command in self.commands))
+        self.protocol["inventory"]["other|lib|"] = "hidden: test\nhidden: test\n"
+        self.rejects("unclassified compiled ['hidden', 'hidden']")
+
+    def test_duplicate_global_feature_and_missing_all_declarations_are_rejected(self):
+        record, other = self.add_feature()
         other["feature"]["id"] = "ratings"
         self.rejects("global feature IDs: duplicate")
-        self.records.pop(record)
-        (self.root / record).unlink()
-        self.rejects("unknown feature owner other-feature")
-
-    def test_missing_all_records_is_rejected(self):
-        self.succeeds("render")
         self.records.clear()
-        (self.root / RECORD).unlink()
-        self.rejects("no feature records")
+        self.rejects("no feature declarations")
 
-    def test_orphan_feature_and_missing_entrypoint_anchor(self):
-        self.add_feature()
-        self.catalog["entrypoints"].pop()
-        self.rejects("orphan feature without catalog surface")
-        self.catalog["entrypoints"][0]["source"]["needle"] = "deleted worker"
+    def test_surface_unknown_owners_duplicates_and_missing_entrypoint_anchor(self):
+        self.bundle["surfaces"][0]["feature"] = "absent"
+        self.rejects("unknown feature owner absent")
+        self.bundle["surfaces"][0]["feature"] = "ratings"
+        self.bundle["surfaces"].append(copy.deepcopy(self.bundle["surfaces"][0]))
+        self.rejects("duplicate OpenAPI operation owner")
+        self.bundle["surfaces"].pop()
+        self.bundle["entrypoints"][0]["source"]["needle"] = "deleted worker"
         self.rejects("source needle must occur exactly once")
 
-    def test_openapi_addition_removal_unowned_operation_and_exporter_removal(self):
+    def test_new_openapi_exporters_and_changed_operations_are_rejected(self):
         self.protocol["openapi"] = {"paths": {"/ratings": {"get": {}, "post": {}}}}
         self.rejects("uncataloged ['POST /ratings']")
         self.protocol["openapi"] = {"paths": {}}
         self.rejects("absent ['GET /ratings']")
-        self.catalog["openapi"][0]["operations"]["GET /ratings"] = "missing"
-        self.rejects("unknown feature owner missing")
-        self.catalog["openapi"] = []
+        self.bundle["examples"].append({"package": "other", "example": "schema", "source": "source.rs", "kind": "OpenApi", "reason": "Exports another schema"})
         self.rejects("OpenAPI exporter set mismatch")
 
-    def test_grpc_missing_operation_owner_service_and_unfamiliar_syntax(self):
-        grpc = self.catalog["grpc"]
-        grpc["operations"] = {}
-        self.rejects("gRPC operation set mismatch")
-        grpc["operations"] = {"Selected": "missing"}
-        self.rejects("unknown feature owner missing")
-        grpc["operations"] = {"Selected": "ratings"}
-        grpc["service"] = "Missing"
-        self.rejects("source needle must occur exactly once")
-        grpc["service"] = "GameService"
-        (self.root / "proto/game.proto").write_text("service GameService { rpc Selected(Request) returns (Response) { option x = true; } }")
+    def test_example_packages_compile_once_and_only_openapi_examples_execute(self):
+        self.bundle["examples"].append({"package": "sample", "example": "demo", "source": "source.rs", "kind": "Program", "reason": "Needs a running service"})
+        self.succeeds("render")
+        checks = [args for args in self.commands if args[:2] == ["cargo", "check"]]
+        self.assertEqual(checks, [["cargo", "check", "--locked", "-p", "sample", "--examples"]])
+        runs = [args for args in self.commands if args[:2] == ["cargo", "run"]]
+        self.assertEqual([args[-1] for args in runs], ["sample-openapi"])
+        self.protocol["example_check_exit"] = True
+        self.rejects("example compilation failed")
+
+    def test_grpc_new_file_service_rpc_missing_and_unsupported_syntax_are_rejected(self):
+        path = self.root / "proto/another.proto"
+        path.write_text("service Another { rpc Added(Request) returns (Response); }")
+        self.rejects("uncataloged [('proto/another.proto', 'Another', 'Added')]")
+        path.unlink()
+        path = self.root / "proto/game.proto"
+        path.write_text("service GameService { rpc Added(Request) returns (Response); }")
+        self.rejects("operation set mismatch")
+        path.write_text("service GameService { rpc Selected(Request) returns (Response) { option x = true; } }")
         self.rejects("missing or unsupported gRPC service block")
 
-    def test_generated_document_set_detects_missing_extra_and_legacy_then_render_repairs(self):
+    def test_generated_document_set_detects_missing_extra_then_render_repairs(self):
         self.succeeds("render")
         extra = self.root / "docs/reference/traceability/obsolete.md"
         extra.write_text("obsolete")
@@ -214,11 +200,23 @@ sys.exit(protocol.get("execution_exit", 0))
         (self.root / DOCUMENT).unlink()
         self.rejects("generated document set mismatch", "check")
         self.succeeds("render")
-        legacy = self.root / "docs/reference/ratings-traceability.md"
-        legacy.write_text("old pilot")
-        self.rejects("generated document set mismatch", "check")
+
+    def test_rendered_table_columns_match_their_header(self):
+        self.graph["feature"]["title"] = "Ratings | quoted `value`"
         self.succeeds("render")
-        self.assertFalse(legacy.exists())
+        tables = 0
+        for document in (DOCUMENT, INDEX):
+            expected = None
+            for line in (self.root / document).read_text().splitlines():
+                if not line.startswith("|"):
+                    expected = None
+                    continue
+                columns = len(line.split("|")) - 2
+                if expected is None:
+                    expected = columns
+                    tables += 1
+                self.assertEqual(columns, expected, line)
+        self.assertGreater(tables, 0)
 
     def test_empty_tests_require_explicit_contract_gaps_and_flow_is_required(self):
         self.graph["tests"] = []

@@ -30,3 +30,10 @@ async fn run(queue: &mut PostgresOutbox, valkey: &str) -> Result<(), Error> {
         };
     }
 }
+
+#[cfg(test)]
+#[path = "trace/durable-event-dispatch/publisher-process/contract.rs"]
+mod trace_publisher_process_contract;
+#[cfg(test)]
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;

@@ -1,3 +1,11 @@
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;
+
+trace_support::example!(trace_support::Example {
+    kind: trace_support::ExampleKind::Program,
+    reason: "Finishes a game through a running gRPC service to support rating verification.",
+});
+
 mod support;
 use game_grpc::proto::{ResignRequest, game_service_client::GameServiceClient};
 #[tokio::main]

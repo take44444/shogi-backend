@@ -544,198 +544,26 @@ mod tests {
             expires_at: expiry,
         }
     }
-    #[tokio::test]
-    async fn existing_schema_and_data_survive_builder_refactor() {
-        let database = pg_test_support::TestDatabase::new().await;
-        let db = Database::connect(database.url()).await.unwrap();
-        db.execute_unprepared(include_str!("../tests/fixtures/schema-v1.sql"))
-            .await
-            .unwrap();
-        db.execute_unprepared("INSERT INTO accounts VALUES ('existing-user', 'Existing', 100); INSERT INTO external_identities VALUES ('https://accounts.google.com', 'subject', 'existing-user'); INSERT INTO sessions VALUES ('existing-session', 'existing-user', 200)").await.unwrap();
-        let store = PostgresAccounts::connect(database.url()).await.unwrap();
-        let profile = store.authenticate("existing-session", 101).await.unwrap();
-        assert_eq!(profile.id.as_str(), "existing-user");
-        assert_eq!(profile.display_name.as_str(), "Existing");
-        assert_eq!(
-            store
-                .login(identity(), session("new-session", 200), 102)
-                .await
-                .unwrap(),
-            profile
-        );
-        store.close().await.unwrap();
-        let reopened = PostgresAccounts::connect(database.url()).await.unwrap();
-        assert_eq!(
-            reopened.authenticate("new-session", 103).await.unwrap(),
-            profile
-        );
-    }
-    #[tokio::test]
-    async fn expired_attempts_and_sessions_cannot_be_used() {
-        let database = pg_test_support::TestDatabase::new().await;
-        let store = PostgresAccounts::connect(database.url()).await.unwrap();
-        store
-            .save_attempt(attempt("expired", 20), 10)
-            .await
-            .unwrap();
-        assert!(matches!(
-            store.consume_attempt("expired", "browser-hash", 20).await,
-            Err(Error::Unauthorized)
-        ));
-        store.save_attempt(attempt("valid", 30), 20).await.unwrap();
-        assert!(matches!(
-            store.consume_attempt("valid", "wrong-browser", 20).await,
-            Err(Error::Unauthorized)
-        ));
-        assert!(
-            store
-                .consume_attempt("valid", "browser-hash", 20)
-                .await
-                .is_ok()
-        );
-        assert!(matches!(
-            store.consume_attempt("valid", "browser-hash", 20).await,
-            Err(Error::Unauthorized)
-        ));
-        let p = store
-            .login(identity(), session("session-hash", 30), 20)
-            .await
-            .unwrap();
-        assert_eq!(store.authenticate("session-hash", 29).await.unwrap(), p);
-        assert_eq!(
-            store.authenticate("session-hash", 30).await,
-            Err(Error::Unauthorized)
-        );
-        assert_eq!(
-            store
-                .rename(
-                    "session-hash",
-                    DisplayName::new("Changed".into()).unwrap(),
-                    30
-                )
-                .await,
-            Err(Error::Unauthorized)
-        );
-        store.logout("session-hash").await.unwrap();
-        assert_eq!(
-            store.authenticate("session-hash", 20).await,
-            Err(Error::Unauthorized)
-        );
-    }
-    #[tokio::test]
-    async fn concurrent_first_logins_and_callback_consumption_converge() {
-        let database = pg_test_support::TestDatabase::new().await;
-        let url = database.url();
-        let (a, b) = tokio::join!(
-            PostgresAccounts::connect(url),
-            PostgresAccounts::connect(url)
-        );
-        let a = a.unwrap();
-        let b = b.unwrap();
-        let (left, right) = tokio::join!(
-            a.login(identity(), session("hash-a", 200), 100),
-            b.login(identity(), session("hash-b", 200), 100)
-        );
-        assert_eq!(left.unwrap(), right.unwrap());
-        assert_eq!(
-            a.authenticate("hash-a", 100).await.unwrap(),
-            b.authenticate("hash-b", 100).await.unwrap()
-        );
-        let rows =
-            a.db.query_one(
-                Query::select()
-                    .expr_as(Expr::col(Accounts::Id).count(), "n")
-                    .from(Accounts::Table),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(rows.try_get::<i64>("", "n").unwrap(), 1);
-        a.save_attempt(attempt("state", 200), 100).await.unwrap();
-        let (left, right) = tokio::join!(
-            a.consume_attempt("state", "browser-hash", 100),
-            b.consume_attempt("state", "browser-hash", 100)
-        );
-        assert_eq!(left.is_ok() as u8 + right.is_ok() as u8, 1);
-    }
-    #[tokio::test]
-    async fn failed_session_insert_rolls_back_a_new_identity() {
-        let database = pg_test_support::TestDatabase::new().await;
-        let store = PostgresAccounts::connect(database.url()).await.unwrap();
-        let first = store
-            .login(identity(), session("duplicate", 200), 100)
-            .await
-            .unwrap();
-        let mut other = identity();
-        other.subject = "other-subject".into();
-        assert_eq!(
-            store.login(other, session("duplicate", 200), 100).await,
-            Err(Error::Unavailable)
-        );
-        let rows = store
-            .db
-            .query_one(
-                Query::select()
-                    .expr_as(Expr::col(Accounts::Id).count(), "n")
-                    .from(Accounts::Table),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(rows.try_get::<i64>("", "n").unwrap(), 1);
-        let mut other = identity();
-        other.subject = "other-subject".into();
-        let second = store
-            .login(other, session("second", 200), 100)
-            .await
-            .unwrap();
-        assert_ne!(first.id, second.id);
-        assert_eq!(store.authenticate("duplicate", 100).await.unwrap(), first);
-    }
-    #[tokio::test]
-    async fn missing_ledger_or_changed_indexes_fail_closed() {
-        for mutation in [
-            "DELETE FROM account_schema_version",
-            "DROP TABLE account_schema_version",
-            "DROP INDEX sessions_expiry",
-            "ALTER TABLE accounts ALTER COLUMN display_name DROP NOT NULL",
-            "ALTER TABLE external_identities DROP CONSTRAINT external_identities_user_id_fkey",
-            "ALTER TABLE account_schema_version DROP CONSTRAINT account_schema_version_version_check",
-        ] {
-            let database = pg_test_support::TestDatabase::new().await;
-            let store = PostgresAccounts::connect(database.url()).await.unwrap();
-            store.db.execute_unprepared(mutation).await.unwrap();
-            store.close().await.unwrap();
-            assert!(
-                matches!(
-                    PostgresAccounts::connect(database.url()).await,
-                    Err(Error::Corrupt)
-                ),
-                "{mutation}"
-            );
-        }
-    }
-    #[tokio::test]
-    async fn schema_constraints_and_ledger_are_checked_on_reopen() {
-        let database = pg_test_support::TestDatabase::new().await;
-        let url = database.url();
-        let store = PostgresAccounts::connect(url).await.unwrap();
-        store
-            .db
-            .execute_unprepared("DROP TABLE external_identities")
-            .await
-            .unwrap();
-        store
-            .db
-            .execute_unprepared(
-                "CREATE TABLE external_identities (issuer TEXT, subject TEXT, user_id TEXT)",
-            )
-            .await
-            .unwrap();
-        store.close().await.unwrap();
-        assert!(matches!(
-            PostgresAccounts::connect(url).await,
-            Err(Error::Corrupt)
-        ));
-    }
+    include!(
+        "trace/account-profile/existing-identity/existing_schema_and_data_survive_builder_refactor.rs"
+    );
+    include!(
+        "trace/account-google-login/attempt-consumption/expired_attempts_and_sessions_cannot_be_used.rs"
+    );
+    include!(
+        "trace/account-google-login/account-session-transaction/concurrent_first_logins_and_callback_consumption_converge.rs"
+    );
+    include!(
+        "trace/account-google-login/account-session-transaction/failed_session_insert_rolls_back_a_new_identity.rs"
+    );
+    include!(
+        "trace/startup-schema-isolation/contract-account-schema/missing_ledger_or_changed_indexes_fail_closed.rs"
+    );
+    include!(
+        "trace/startup-schema-isolation/contract-account-schema/schema_constraints_and_ledger_are_checked_on_reopen.rs"
+    );
 }
+
+#[cfg(test)]
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;

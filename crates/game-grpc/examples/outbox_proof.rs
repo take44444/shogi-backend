@@ -1,3 +1,11 @@
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;
+
+trace_support::example!(trace_support::Example {
+    kind: trace_support::ExampleKind::Program,
+    reason: "Exercises outbox recovery through gRPC, Valkey and Docker Compose, including service restarts.",
+});
+
 mod support;
 use futures_util::StreamExt;
 use game_application::GameId;
