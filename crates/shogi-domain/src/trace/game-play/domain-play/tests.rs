@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Wrong-turn/illegal rejections preserve board, hands, turn, check, result and legal moves.",
-        reason: "Rejections compare all observable state.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 拒否された場合に、観測可能な状態をすべて比較する。",
+        reason: "拒否された場合に、観測可能な状態をすべて比較する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -24,8 +24,8 @@ fn rejection_preserves_all_observable_state() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Mate sets expected winner/reason and finished-state rejection precedes turn/legality checks.",
-        reason: "Checkmate returns the terminal winner/reason and later errors prioritize GameFinished.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 詰みでは終局の勝者・理由を返し、その後のエラーはGameFinishedを優先する。",
+        reason: "詰みでは終局の勝者・理由を返し、その後のエラーはGameFinishedを優先する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -57,8 +57,8 @@ fn checkmate_finishes_and_finished_precedes_turn_or_legality() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. No legal moves without check leaves game ongoing.",
-        reason: "A side with no legal moves but no check does not automatically lose.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 合法手がなくても王手されていなければ、自動的に負けにはならない。",
+        reason: "合法手がなくても王手されていなければ、自動的に負けにはならない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -86,8 +86,8 @@ fn no_legal_moves_without_check_is_not_checkmate() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Repeated positions and perpetual check continue without automatic adjudication.",
-        reason: "Repeated and perpetual-check positions continue.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 同一局面の繰り返しと連続王手の局面でも対局を継続する。",
+        reason: "同一局面の繰り返しと連続王手の局面でも対局を継続する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

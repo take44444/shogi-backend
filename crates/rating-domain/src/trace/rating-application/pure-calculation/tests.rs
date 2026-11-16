@@ -1,8 +1,8 @@
 use super::*;
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure Elo equal-player example, no persistence.",
-        reason: "Equal unrated players become 1516 and 1484 with the expected completed counts.",
+        scope: "永続層を使わず、同じ強さの両者に対する Elo 計算を検証する例。",
+        reason: "同じ未評価状態の両者が 1516 と 1484 になり、完了対局数も期待どおりになる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -24,8 +24,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure rating-state/calculation examples and arithmetic boundaries.",
-        reason: "Listed starts/winners cover an upset, zero-sum deltas within 32, checked extreme arithmetic and invalid rating-state combinations.",
+        scope: "外部依存のないレーティング状態と計算の例、および算術の境界を検証する。",
+        reason: "列挙した開始状態と勝者で、格上への勝利、絶対値が 32 以内で総和 0 の差分、極端な値に対する検査付き算術、不正なレーティング状態の組み合わせを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[crate::trace_support::Evidence { feature: "user-ratings", contract: "rating-state", scope: "RatingState の不正な組み合わせ 2 例と計算の境界を直接確認する。DB と HTTP は通らない。", relationship: crate::trace_support::Relationship::Asserts, reason: "Some(1500) と対局数 0、および None と対局数 1 の組み合わせを拒否することを確認する。" }],
     };

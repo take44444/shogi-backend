@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.",
-        reason: "The stored already_waiting refusal is replayed after cancellation before reconnect. After reconnect, cancel-before-join tombstones remain Cancelled in both pools; changed-pool retries conflict.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
+        reason: "保存済みの already_waiting による拒否は、取消後も再接続前に再現される。再接続後も、参加前の取消記録は両プールで Cancelled のまま残り、プールを変えた再試行は競合する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.", relationship: crate::trace_support::Relationship::Asserts, reason: "Foreign owner ticket lookup returns NotFound and old cancelled identity cannot alter a newer waiting request." }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "cancel", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.", relationship: crate::trace_support::Relationship::Asserts, reason: "Cancellation before join survives reconnect and both pool joins; cancelling an old identity leaves a newer ticket waiting." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。", relationship: crate::trace_support::Relationship::Asserts, reason: "別の所有者のチケット取得は NotFound となり、古い取消済み識別子では新しい待機リクエストを変更できない。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "cancel", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。", relationship: crate::trace_support::Relationship::Asserts, reason: "参加前の取消は再接続後も両方のプールへの参加時も残る。古い識別子を取り消しても、新しいチケットは待機を続ける。" }],
     };
 #[tokio::test]
 async fn durable_retry_refusal_and_cancel_before_join_survive_reconnect() {

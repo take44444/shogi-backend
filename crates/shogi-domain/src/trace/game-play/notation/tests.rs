@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Coordinates and strict USI forms round-trip or reject invalid syntax.",
-        reason: "Square and move invalid forms reject and valid syntax round-trips.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 升と着手の不正な形式を拒否し、正しい構文は相互変換して元に戻る。",
+        reason: "升と着手の不正な形式を拒否し、正しい構文は相互変換して元に戻る。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

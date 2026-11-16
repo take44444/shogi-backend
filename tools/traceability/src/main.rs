@@ -656,7 +656,7 @@ fn workspace_targets(metadata: &Value) -> Result<(Vec<Target>, Vec<Value>)> {
                 source: nonempty(&target["src_path"])?.into(),
             };
             if target["test"] == false {
-                excluded.push(json!({"package":target_value.package,"target":target_value.value(),"reason":"Cargo test = false excludes this target from the default test harness policy."}));
+                excluded.push(json!({"package":target_value.package,"target":target_value.value(),"reason":"Cargo の test = false 指定に従い、このターゲットを既定のテスト実行対象から除外する。"}));
                 continue;
             }
             if target["required-features"]
@@ -930,7 +930,7 @@ fn collect(root: &Path) -> Result<Value> {
                 test.name()
             ));
         }
-        let semantics = test.classification.as_ref().map(|(_,v)|v.clone()).unwrap_or_else(||json!({"scope":"Contract-directory membership only; runtime dependencies and assertions have not been reviewed.","reason":"Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.","relationship":"unreviewed","also":[]}));
+        let semantics = test.classification.as_ref().map(|(_,v)|v.clone()).unwrap_or_else(||json!({"scope":"契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。","reason":"配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。","relationship":"unreviewed","also":[]}));
         nonempty(&semantics["scope"])?;
         nonempty(&semantics["reason"])?;
         let base_id = test_id(test);

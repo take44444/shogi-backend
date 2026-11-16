@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.",
-        reason: "Exact move/resign retries after finish return original acceptances; changed sequence/user/move/action conflict with no extra advance.",
+        scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。",
+        reason: "終局後の着手・投了の完全に同じ再試行は元の受理結果を返す。連番・ユーザー・着手・操作種別を変更すると競合になり、追加で進行しない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -56,10 +56,10 @@ async fn exact_replay_returns_original_receipt_after_finish_and_conflicts_are_re
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.",
-        reason: "Original receipts survive ongoing and finished state across two server restarts.",
+        scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。",
+        reason: "サーバーを2回再起動しても、進行中・終局済みの状態で元の受理記録を保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-snapshots-access", contract: "snapshot-refresh", scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup. Reopens storage and TCP listener twice.", relationship: crate::trace_support::Relationship::Asserts, reason: "Across two service restarts ongoing and finished snapshots equal saved snapshots." }, crate::trace_support::Evidence { feature: "game-snapshots-access", contract: "restore", scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup. Reopens storage and TCP listener twice.", relationship: crate::trace_support::Relationship::Asserts, reason: "Restored ongoing and finished snapshots equal their earlier snapshots." }],
+        also: &[crate::trace_support::Evidence { feature: "game-snapshots-access", contract: "snapshot-refresh", scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。 保存層とTCPの待ち受けを2回開き直す。", relationship: crate::trace_support::Relationship::Asserts, reason: "サービスを2回再起動しても、進行中・終局済みのスナップショットが保存した値と一致する。" }, crate::trace_support::Evidence { feature: "game-snapshots-access", contract: "restore", scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。 保存層とTCPの待ち受けを2回開き直す。", relationship: crate::trace_support::Relationship::Asserts, reason: "復旧した進行中・終局済みのスナップショットが、それぞれ以前の値と一致する。" }],
     };
 #[tokio::test]
 async fn generated_tcp_client_restores_database_across_two_server_restarts() {

@@ -111,6 +111,7 @@ class TraceabilityTests(unittest.TestCase):
         return record, other
 
     def test_render_check_and_run_use_exact_identity_and_are_repeatable(self):
+        self.graph["contracts"][1]["evidence"][0]["relationship"] = "exercises"
         self.succeeds("render")
         first = (self.root / DOCUMENT).read_bytes()
         self.succeeds("render")
@@ -119,6 +120,9 @@ class TraceabilityTests(unittest.TestCase):
         self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
         self.assertEqual(self.commands[-1], ["cargo", "test", "--locked", "-p", "sample", "--lib", "module::selected", "--", "--exact", "--format", "pretty", "--color", "never"])
         self.assertIn("../../../source.rs#L4", first.decode())
+        self.assertIn('["機能: ratings"]', first.decode())
+        self.assertIn("-->|事例を直接検証|", first.decode())
+        self.assertIn("-->|処理を通る|", first.decode())
 
     def test_multiple_features_share_inventory_and_execute_each_identity_once(self):
         self.add_feature()

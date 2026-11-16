@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL identifier ordering and cursor round trips.",
-        reason: "Stored identifiers with encoding edge cases retain binary tie order and cursor round trips.",
+        scope: "実際の PostgreSQL で、識別子の順序とカーソルの往復を検証する。",
+        reason: "符号化の境界事例を含む保存済み識別子でも、同値時のバイナリー順序とカーソルの往復を保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

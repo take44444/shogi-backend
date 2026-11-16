@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom total/per-user limits.",
-        reason: "Total two/per-user one rejects excess with 429, and reconnect succeeds after disconnect.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 接続全体・ユーザーごとの上限を変更する。",
+        reason: "接続全体の上限2・ユーザーごとの上限1を超える接続を429で拒否し、切断後は再接続できる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Snapshot bytes limit one.",
-        reason: "Snapshot bytes limit one closes without sending a partial position.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 スナップショットのバイト数の上限を1にする。",
+        reason: "スナップショットのバイト数の上限を1にすると、不完全な局面を送らずに接続を閉じる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

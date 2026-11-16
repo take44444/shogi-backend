@@ -5,7 +5,7 @@ crate::trace_support::case! {
         scope: "既存 schema fixture と実 PostgreSQL でプロフィール再利用と再接続後の認証を確認する。HTTP と provider は通らない。",
         reason: "既存 schema の Existing プロフィールに対して initial_name が Player の login を行い、同じプロフィールと再接続後の認証結果を確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "startup-schema-isolation", contract: "contract-account-schema", scope: "Real PostgreSQL version-one fixture, existing identity/session, connect/close/reopen.", relationship: crate::trace_support::Relationship::Asserts, reason: "A preexisting version-one fixture and identity/session survive connect, login, close and reopen." }],
+        also: &[crate::trace_support::Evidence { feature: "startup-schema-isolation", contract: "contract-account-schema", scope: "実 PostgreSQL のバージョン 1 のテスト用スキーマ、既存の本人識別情報とセッションを使い、接続・切断・再接続を確認する。", relationship: crate::trace_support::Relationship::Asserts, reason: "既存のバージョン 1 のテスト用スキーマと本人識別情報・セッションが、接続、ログイン、切断、再接続の後も維持されることを確認する。" }],
     };
 #[tokio::test]
     async fn existing_schema_and_data_survive_builder_refactor() {

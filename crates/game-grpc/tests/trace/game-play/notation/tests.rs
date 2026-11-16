@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.",
-        reason: "Malformed USI over TCP yields InvalidArgument and unchanged snapshots.",
+        scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。",
+        reason: "TCP経由の不正なUSIはInvalidArgumentとなり、スナップショットは変化しない。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-play", contract: "rpc-move", scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.", relationship: crate::trace_support::Relationship::Asserts, reason: "Malformed IDs, absent sequence and malformed USI are InvalidArgument with no snapshot change." }, crate::trace_support::Evidence { feature: "game-play", contract: "rpc-resign", scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.", relationship: crate::trace_support::Relationship::Asserts, reason: "Malformed resignation fields reject without changes." }],
+        also: &[crate::trace_support::Evidence { feature: "game-play", contract: "rpc-move", scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "不正なID、連番の欠落、不正なUSIはInvalidArgumentとなり、スナップショットは変化しない。" }, crate::trace_support::Evidence { feature: "game-play", contract: "rpc-resign", scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "不正な投了フィールドを、状態を変更せずに拒否する。" }],
     };
 #[tokio::test]
 async fn malformed_wire_values_are_invalid_arguments_without_changes() {

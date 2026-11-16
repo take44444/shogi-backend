@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Actor with an in-memory recording repository; asserts staged values before commit, not PostgreSQL atomicity.",
-        reason: "Fake repository observes exact staged move/resignation events before commit and only two writes despite replay/rejection.",
+        scope: "記録用のメモリー内リポジトリを使ったアクター。コミット前のステージ済み値を検証し、PostgreSQL の原子性は検証しない。",
+        reason: "テスト用リポジトリで、コミット前の着手と投了のステージ済みイベントが正確であり、再試行と拒否があっても書き込みは二回だけであることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -71,8 +71,8 @@ async fn actor_supplies_events_before_commit_change_and_skips_retries_and_reject
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Actor with synthetic durable record and fake repository; direct error precedence.",
-        reason: "Synthetic actor cases assert request-conflict before sequence mismatch before finished-game rejection.",
+        scope: "合成した永続記録とテスト用リポジトリを使ったアクターで、エラーの優先順位を直接検証する。",
+        reason: "合成したアクターの事例で、リクエスト競合、シーケンス不一致、終局後の拒否の順に優先されることを検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

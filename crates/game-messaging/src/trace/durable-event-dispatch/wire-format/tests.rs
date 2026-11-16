@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure version-one wire JSON encoding, no socket.",
-        reason: "JSON shape, event IDs, move/drop values and terminal results are directly compared.",
+        scope: "バージョン1の通信用JSONを生成する純粋な処理。ソケットは使わない。",
+        reason: "JSONの構造、イベントID、着手・駒打ちの値、終局結果を直接比較する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -70,8 +70,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure exact-channel byte encoding examples.",
-        reason: "Channel examples encode every ID byte without collisions or Pub/Sub glob characters.",
+        scope: "チャネル名を正確なバイト列へ変換する純粋な処理の事例。",
+        reason: "IDの全バイトをチャネル名に変換し、衝突やPub/Subのグロブ文字を生じない事例を確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

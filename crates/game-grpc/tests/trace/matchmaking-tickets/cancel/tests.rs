@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.",
-        reason: "Cancel of an already Playing ticket equals its prior ticket.",
+        scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。",
+        reason: "既にPlaying状態のチケットをキャンセルすると、それまでのチケットと同じ値を返す。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "rpc-boundary", scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.", relationship: crate::trace_support::Relationship::Asserts, reason: "Unknown/unspecified pool and nonpositive heartbeat are InvalidArgument, exact retry returns unchanged ticket with created=false, foreign owner is NotFound and playing/cancel responses preserve game identity." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "rpc-boundary", scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "未知・未指定のプールと0以下のハートビートはInvalidArgumentとなる。完全に同じ再試行はcreated=falseで変更のないチケットを返し、別の所有者にはNotFoundを返す。対局中・キャンセルの応答は対局の識別情報を保持する。" }],
     };
 #[tokio::test]
 async fn matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results() {

@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.",
-        reason: "Anonymous current is 401, foreign owner is 404 and wrong Origin/Host is 403.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。",
+        reason: "未認証での現在状態の取得は401、別の所有者は404、Origin・Hostの不一致は403となる。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "Browser retrieves current playing game and stored refusal by ticket identity." }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "heartbeat", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "HTTP rejects sequence zero and duplicate sequence one returns the same ticket." }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "rpc-boundary", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Exercises, reason: "All five RPCs are exercised through browser calls and return the asserted current, stored, heartbeat and cancellation outcomes." }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "browser-response", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "New join is 201 with no-store, replay is 200 with identical JSON, pool conflict is 409, playing cancellation is 409 already_matched with game_id." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "ブラウザーが、チケットの識別情報を使って現在の対局中の対局と保存済みの拒否結果を取得する。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "heartbeat", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "HTTPでは連番0を拒否し、連番1の重複リクエストには同じチケットを返す。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "rpc-boundary", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Exercises, reason: "ブラウザーからの呼び出しで5種類すべてのRPCを通し、現在状態、保存済み状態、ハートビート、キャンセルについて検証した結果を返す。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "browser-response", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "新規参加はno-store付きの201、再試行は同じJSONの200、プールの競合は409となる。対局中のキャンセルは、game_id付きの409 already_matchedとなる。" }],
     };
 #[tokio::test]
 async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access() {
@@ -240,10 +240,10 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.",
-        reason: "Missing mutation Origin, duplicate cookie, unknown pool and forged user_id are rejected; no rejected admission leaves a ticket.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。",
+        reason: "変更操作のOrigin欠落、Cookieの重複、未知のプール、偽のuser_idを拒否する。拒否した参加要求ではチケットを残さない。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "browser-response", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "Missing-Origin mutation responses include no-store." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "browser-response", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "Originを欠く変更操作への応答にもno-storeを付ける。" }],
     };
 #[tokio::test]
 async fn matchmaking_checks_cookie_origin_and_input_before_admission() {

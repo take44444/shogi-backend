@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real RatingWorker/PostgreSQL corruption, quarantine, explicit recovery and repair.",
-        reason: "Recovery through RatingWorker does not repair corrupt current state; repaired state is required for a later successful tick.",
+        scope: "実際の RatingWorker と PostgreSQL で、破損、隔離、明示的な復旧、修復を検証する。",
+        reason: "RatingWorker による復旧は、破損した現在状態を修復しない。後の tick を成功させるには、状態を修復する必要がある。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "worker-reconciliation", scope: "Real RatingWorker/PostgreSQL corruption, quarantine, explicit recovery and repair.", relationship: crate::trace_support::Relationship::Asserts, reason: "A real worker quarantines corrupt current state and successful explicit retry still requires repairing that state." }],
+        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "worker-reconciliation", scope: "実際の RatingWorker と PostgreSQL で、破損、隔離、明示的な復旧、修復を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "実際のワーカーは破損した現在状態を隔離し、明示的な再試行を成功させるには、その状態の修復も必要となる。" }],
     };
 #[tokio::test]
 async fn corrupt_current_state_quarantines_and_retry_requires_repair() {
@@ -49,8 +49,8 @@ async fn corrupt_current_state_quarantines_and_retry_requires_repair() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL transient backoff and attempt-limit behavior.",
-        reason: "Transient failure cannot be reacquired before backoff and reaches quarantine at the configured attempt limit.",
+        scope: "実際の PostgreSQL で、一時的な失敗後の待機時間と試行回数の上限を検証する。",
+        reason: "一時的な失敗は待機時間の終了前に再取得できず、設定した試行上限に達すると隔離される。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

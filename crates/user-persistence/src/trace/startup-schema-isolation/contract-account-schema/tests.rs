@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL selected schema/ledger mutations and rejected reopen.",
-        reason: "Selected empty/missing ledger, missing index, nullable field, foreign key and version-check mutations all make reopen return Corrupt.",
+        scope: "実 PostgreSQL で、選択したスキーマ・台帳の変更と、再接続の拒否を確認する。",
+        reason: "台帳の空状態・欠落、索引の欠落、NULL を許すフィールド、外部キー、バージョン制約に対する選択した変更のいずれでも、再接続が Corrupt となることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

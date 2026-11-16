@@ -1,11 +1,11 @@
 use crate::trace_support::{self as trace, Contract};
 trace::contract!(Contract {
-    statement: "The messaging adapter encodes schema-version-one JSON with explicit event identity and a channel derived from every game-ID byte.",
+    statement: "メッセージングアダプターは、スキーマのバージョンが1のJSONにイベント識別子を明示し、対局IDの全バイトから配信先チャネルを生成する。",
     source: trace::Source {
         path: "crates/game-messaging/src/lib.rs",
         needle: "fn encode(event: &CommittedEvent) -> Result<Vec<u8>, PublishError> {"
     },
     gap: Some(
-        "Subscriber delivery, subscription lifecycle and notification rejection are mapped by realtime-gameplay rather than asserted by these publication examples."
+        "購読者への配信、購読のライフサイクル、通知の拒否は realtime-gameplay 側で対応付けており、これらの配信例では検証しない。"
     )
 });

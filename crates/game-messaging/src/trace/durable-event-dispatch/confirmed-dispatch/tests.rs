@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "TCP RESP fixture plus actual Redis client/ValkeyEventPublisher and fake outbox, no deployed Valkey.",
-        reason: "A TCP RESP fixture and actual Redis client show marking waits for the response and accepts zero subscribers but rejects invalid responses.",
+        scope: "TCP上のRESP応答を返すテスト用サーバー、実際のRedisクライアントとValkeyEventPublisher、テスト用Outboxを使う。稼働中のValkeyは使わない。",
+        reason: "TCP上のRESP応答を返すテスト用サーバーと実際のRedisクライアントを使い、配信済みの記録が応答を待つこと、購読者数0は受け入れて不正な応答は拒否することを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -43,8 +43,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "TCP RESP fixture checks cancellation and absence of connection reuse/reconnect.",
-        reason: "Cancelling publication prevents connection reuse or automatic reconnection.",
+        scope: "TCP上のRESP応答を返すテスト用サーバーを使い、キャンセル時に接続を再利用せず、再接続もしないことを確認する。",
+        reason: "配信をキャンセルすると、接続を再利用できず、自動再接続もしない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -66,8 +66,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "TCP RESP fixture checks publication response timeout and pending state.",
-        reason: "Response timeout preserves the pending outbox event.",
+        scope: "TCP上のRESP応答を返すテスト用サーバーを使い、配信応答のタイムアウトと未配信状態を確認する。",
+        reason: "応答がタイムアウトしても、Outboxの未配信イベントを保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

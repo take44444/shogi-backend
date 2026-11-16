@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Both players can resign on/off turn, with opponent winner and subsequent terminal rejection.",
-        reason: "Both sides and on/off-turn combinations assert winner and terminal behavior.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 先後両方について、自分の手番・相手の手番での投了の組み合わせから、勝者と終局時の動作を検証する。",
+        reason: "先後両方について、自分の手番・相手の手番での投了の組み合わせから、勝者と終局時の動作を検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

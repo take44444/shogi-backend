@@ -6,36 +6,36 @@ trace::feature!(trace::Feature {
         needle: "pub fn select_pair(tickets: &[Ticket], now: i64) -> Option<(&Ticket, &Ticket)> {"
     },
     flow: &[
-        "The pure selector filters live waiting tickets, sorts deterministic anchors and checks both rating windows within one pool.",
-        "The durable tick transaction rechecks locked tickets and ratings after lock waits, creates a rated game and changes both tickets to permanent Playing bindings together.",
-        "The game-server matcher invokes tick on a one-second interval, alternates the first pool and performs a bounded batch without requiring another join."
+        "外部依存のない選択処理は、期限内の待機チケットを抽出し、決定的な順序で基準側を並べ、一つのプール内で双方のレーティング許容幅を確認する。",
+        "永続 tick のトランザクションは、ロック待ち後にロック済みチケットとレーティングを再確認し、レーティング対象対局の作成と、両チケットの固定された Playing 割り当てへの遷移を一緒に行う。",
+        "game-server の組合せ処理は一秒間隔で tick を呼び、最初のプールを交互に替える。別の参加要求を必要とせず、回数を制限したバッチを実行する。"
     ],
     guarantees: &[
         trace::Guarantee {
             id: "policy",
-            statement: "Pairing skips an incompatible head, uses the oldest compatible anchor and nearest opponent with age/UUID/owner tie breaks, requires distinct users and one pool, and applies both widening windows.",
+            statement: "組合せ処理は不適合な先頭を読み飛ばし、最も古い適合する基準側と最もレーティング差の小さい相手を選ぶ。同値の場合は時刻・UUID・所有者で順序を決め、別々のユーザーと同一プールを必須とし、双方の拡大した許容幅を適用する。",
             contracts: &["windows", "selection"]
         },
         trace::Guarantee {
             id: "server-ownership",
-            statement: "The server chooses the game and permanent Black/White bindings. Pair formation and two ticket transitions commit together; concurrent matchers have one durable winner.",
+            statement: "サーバーが対局と固定された先手・後手の割り当てを決める。組合せの成立と二枚のチケットの遷移は一緒にコミットされ、同時に動く組合せ処理では一つだけが永続的な結果を確定する。",
             contracts: &["durable-tick"]
         },
         trace::Guarantee {
             id: "expiry",
-            statement: "Expired tickets cannot pair, including when expiry occurs during rating-lock waits.",
+            statement: "レーティングのロック待ち中に失効した場合も含め、期限切れチケットは組み合わせられない。",
             contracts: &["selection", "durable-tick"]
         },
         trace::Guarantee {
             id: "periodic-progress",
-            statement: "The actual game-server runs matching periodically so a waiting pair can become eligible without another join; each batch alternates starting pool, caps attempts at 32 and stops after two empty pools or a failure.",
+            statement: "実際の game-server は定期的に組合せ処理を行うため、追加の参加がなくても待機中の二人が条件を満たして対局を開始できる。各バッチは開始プールを交互に替え、試行を 32 回に制限し、二つのプールがともに空か失敗した時点で止まる。",
             contracts: &["periodic"]
         }
     ],
     limitations: &[
-        "The process test proves periodic progress for its one-pool case; pure tests directly assert tie-break policy and do not prove production fairness or timing under load.",
-        "Pool names do not enable clocks or time-control adjudication.",
-        "Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review."
+        "プロセステストが示すのは、一つのプールの事例で定期的に処理が進むことまでである。外部依存のないテストは同値時の優先順位を直接検証するが、本番負荷での公平性や時機は証明しない。",
+        "プール名は、時計や持ち時間による裁定を有効にしない。",
+        "リンクとテスト成功だけでは意味上の完全性は成立しない。保証、根拠の強さ、分割の変更にはレビューが必要となる。"
     ],
     entrypoints: &[trace::EntryPoint {
         name: "待機チケットの周期的マッチング",

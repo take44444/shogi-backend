@@ -1,11 +1,11 @@
 use crate::trace_support as trace;
 trace::contract!(trace::Contract {
-    statement: "DetailDto emits metadata and ordered action DTOs without internal request, receipt, check or outbox fields.",
+    statement: "DetailDto は内部のリクエスト、受領記録、王手、Outbox のフィールドを含めず、メタデータと順序付きの操作 DTO を出力する。",
     source: trace::Source {
         path: "crates/player-http/src/lib.rs",
         needle: "impl From<Detail> for DetailDto {"
     },
     gap: Some(
-        "This assertion covers one move and one resignation, not every move, drop and terminal-result encoding."
+        "この検証は一つの着手と一つの投了を対象とし、すべての着手・駒打ち・終了結果のエンコードを網羅しない。"
     ),
 });

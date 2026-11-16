@@ -19,6 +19,7 @@ LEGACY = Path("docs/reference/ratings-traceability.md")
 ID = re.compile(r"[a-z][a-z0-9-]*\Z")
 CARGO_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 TEST_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*\Z")
+RELATIONSHIP_LABELS = {"asserts": "事例を直接検証", "exercises": "処理を通る", "unreviewed": "所属のみ・未レビュー"}
 
 
 class InvalidTrace(Exception):
@@ -405,18 +406,18 @@ def markdown(record, graph, lines, directory_bundle=None):
            f"| {feature['id']} | {escaped(feature['title'])} | {link(feature)} |", "",
            "## 保証の成立条件と構成", ""]
     out += [f"{number}. {escaped(step)}" for number, step in enumerate(feature["flow"], 1)]
-    out += ["", "以下の保証には、各行に示す契約が必要となる。テストの assertions は記載した事例の範囲に限られる。", "",
+    out += ["", "以下の保証には、各行に示す契約が必要となる。テストによる検証は記載した事例の範囲に限られる。", "",
             "| ID | アプリケーションの保証と条件 | 必要な契約 |", "| --- | --- | --- |"]
     for guarantee in guarantees:
         refs = ", ".join(f"[{ref}](#contract-{ref})" for ref in guarantee["contracts"])
         out.append(f"| {guarantee['id']} | {escaped(guarantee['statement'])} | {refs} |")
     out += ["", "## 宣言した対応関係", "",
-            "矢印は著者が宣言した関係を示す。asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。", "",
+            "矢印は著者が宣言した関係を示す。「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。「所属のみ・未レビュー」は契約ディレクトリへの配置だけで分類した関係を示す。", "",
             "```mermaid", "flowchart TD"]
     nodes = [feature] + guarantees + contracts + tests
     mermaid_ids = {node["id"]: f"n{index}" for index, node in enumerate(nodes)}
     for node in nodes:
-        layer = "feature" if node is feature else "guarantee" if node in guarantees else "contract" if node in contracts else "test"
+        layer = "機能" if node is feature else "保証" if node in guarantees else "契約" if node in contracts else "テスト"
         label = escaped(f"{layer}: {node['id']}")
         out.append(f'    {mermaid_ids[node["id"]]}["{label}"]')
     for guarantee in guarantees:
@@ -425,13 +426,13 @@ def markdown(record, graph, lines, directory_bundle=None):
             out.append(f"    {mermaid_ids[guarantee['id']]} --> {mermaid_ids[ref]}")
     for contract in contracts:
         for edge in contract["evidence"]:
-            out.append(f"    {mermaid_ids[contract['id']]} -->|{edge['relationship']}| {mermaid_ids[edge['test']]}")
+            out.append(f"    {mermaid_ids[contract['id']]} -->|{RELATIONSHIP_LABELS[edge['relationship']]}| {mermaid_ids[edge['test']]}")
     out += ["```", "", "## コンポーネント契約と根拠", ""]
     for contract in contracts:
         out += [f'<a id="contract-{contract["id"]}"></a>', "", f"### {contract['id']}", "",
                 escaped(contract["statement"]), "", f"実装位置: {link(contract)}。", ""]
         for edge in contract["evidence"]:
-            out.append(f"- [{edge['test']}](#test-{edge['test']}) ({edge['relationship']}): {escaped(edge['reason'])}")
+            out.append(f"- [{edge['test']}](#test-{edge['test']}) ({RELATIONSHIP_LABELS[edge['relationship']]}): {escaped(edge['reason'])}")
         if "gap" in contract:
             out += ["", f"未検証: {escaped(contract['gap'])}"]
         out.append("")
@@ -442,17 +443,17 @@ def markdown(record, graph, lines, directory_bundle=None):
                 f"テスト位置: {link(test)}。", "", f"範囲: {escaped(test['scope'])}", "", "```sh",
                 shlex.join(cargo_command(test) + [test["name"], "--", "--exact", "--format", "pretty", "--color", "never"]), "```", ""]
     out += ["## 検査と根拠の限界", "",
-            "check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。",
+            "check はグラフ、ファイル内の一意なテキスト位置、パッケージとターゲットごとのコンパイル済みテスト名、生成文書の一致を検査する。",
             "run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。",
-            "この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。",
+            "この文書には実行済みの成功状態を保存しない。CI のワークスペース全体のテスト実行結果は、その実行時点の結果となる。",
             "位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。",
             "宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。", ""]
     out += [f"- {escaped(item)}" for item in graph["limitations"]]
     if directory_bundle:
         out += ["", "## ディレクトリ方式の検査範囲", "",
-                "Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。",
-                "src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。",
-                "全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。", ""]
+                "Rust 宣言、通常のモジュールと文字列リテラルの include! から物理ファイルの所属、パッケージ、ターゲット、完全なテスト名と位置を抽出する。ホスト環境で Cargo の既定の機能フラグを使い、ワークスペースのライブラリ、バイナリ、結合テストの全テスト一覧と一致させる。別のターゲット、機能フラグ、cfg の組合せは対象外。",
+                "src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは「所属のみ・未レビュー」として追加する。「事例を直接検証」または「処理を通る」のレビュー済み根拠がない契約には未検証事項の gap 宣言が必要。",
+                "全ターゲットの未分類テストは拒否する。trace ディレクトリ内の未対応の項目マクロと cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト実行補助と基盤の検査の明示分類および理由は全機能の一覧に示す。", ""]
         out = [line for line in out if not line.startswith("位置の検査は Rust の構文解析ではなく")]
     return "\n".join(out).rstrip() + "\n"
 
@@ -469,17 +470,17 @@ def index_markdown(traces, surfaces):
         out.append(f"| [{escaped(feature['title'])}](traceability/{feature['id']}.md) | {owned} | {len(graph['guarantees'])} | {len(graph['contracts'])} | {len(graph['tests'])} | [{escaped(record.as_posix())}](../../{record.as_posix()}) |")
     out += ["", "## 一覧の検査範囲", "",
             "入口、保証、操作の所有者はコンパイルされる Feature、Contract、Case、Evidence、Surface 宣言から取得する。",
-            "Cargo が列挙する全 example に、型検査される Example 宣言と理由を必須とする。OpenApi 宣言の example だけを実行し、出力された操作と Surface 宣言の完全一致を検査する。Program 宣言はコンパイルのみ行う。proto/ の全 service・RPC も探索して Surface 宣言と照合する。",
-            "check は OpenAPI exporter と操作の追加・削除、gRPC 操作の追加・削除、未割当の所有者、台帳から参照されない機能、参照元データと生成文書の不足・余分を検出する。",
-            "新しいバックグラウンド処理や WebSocket メッセージを自動発見すること、機能の分割が適切かを判定することはできない。台帳の入口と source はレビューで保つ。",
-            "テスト宣言数は機能内の件数であり、同じ Cargo テストが複数機能で共有されることがある。run は package・target・完全なテスト名が同じものを一度だけ実行する。",
-            "asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。位置の一致とテストの成功は、保証の意味や網羅性の証明ではない。", "",
+            "Cargo が列挙する全サンプルプログラムに、型検査される Example 宣言と理由を必須とする。OpenApi 宣言のサンプルだけを実行し、出力された操作と Surface 宣言の完全一致を検査する。Program 宣言はコンパイルのみ行う。proto/ の全サービス・RPC も探索して Surface 宣言と照合する。",
+            "check は OpenAPI 出力プログラムと操作の追加・削除、gRPC 操作の追加・削除、未割当の所有者、台帳から参照されない機能、参照元データと生成文書の不足・余分を検出する。",
+            "新しいバックグラウンド処理や WebSocket メッセージを自動発見すること、機能の分割が適切かを判定することはできない。台帳の入口とソース参照はレビューで保つ。",
+            "テスト宣言数は機能内の件数であり、同じ Cargo テストが複数機能で共有されることがある。run はパッケージ・ターゲット・完全なテスト名が同じものを一度だけ実行する。",
+            "「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。位置の一致とテストの成功は、保証の意味や網羅性の証明ではない。", "",
             "更新方法は [仕様とテストの対応を更新する](../how-to/check-traceability.md) を参照する。", ""]
     bundle = traces.directory_bundle
     counts = Counter(item["classification"] for item in bundle["classifications"])
-    out += ["## 全 workspace テストの分類", "",
-            f"コンパイル済みテスト {sum(counts.values())} 件。機能に関連付けた固有テスト {counts['evidence']} 件、インフラ {counts['infrastructure']} 件、テスト補助 {counts['helper']} 件。共有テストは機能ごとの宣言数に重複して現れるが、この合計では一度だけ数える。", "",
-            "標準ホストとデフォルト Cargo feature を使用する。test = false の target は Cargo の指定どおり一覧から除く。required-features を持つ target は現在のポリシーでは明示的に拒否する。空の target も一覧照合の対象にする。", ""]
+    out += ["## ワークスペース全体のテスト分類", "",
+            f"コンパイル済みテスト {sum(counts.values())} 件。機能に関連付けた固有テスト {counts['evidence']} 件、基盤の検査 {counts['infrastructure']} 件、テスト実行補助 {counts['helper']} 件。共有テストは機能ごとの宣言数に重複して現れるが、この合計では一度だけ数える。", "",
+            "標準ホストと Cargo の既定の機能フラグを使用する。test = false のターゲットは Cargo の指定どおり一覧から除く。required-features を持つターゲットは現在の規則では明示的に拒否する。テストがないターゲットも一覧照合の対象にする。", ""]
     for item in bundle["classifications"]:
         if item["classification"] == "evidence":
             continue
@@ -487,13 +488,15 @@ def index_markdown(traces, surfaces):
         target = identity["target"]
         category = f" / {semantics['category']}" if "category" in semantics else ""
         label = f"{identity['package']} / {target['kind']} / {target.get('name', '(lib)')} / {identity['name']}"
-        out.append(f"- `{escaped(label)}` ({item['classification']}{category}) [{escaped(source['path'])}](../../{source['path']}#L{source['line']}): {escaped(semantics['reason'])}")
+        classification = {"infrastructure": "基盤の検査", "helper": "テスト実行補助"}[item['classification']]
+        out.append(f"- `{escaped(label)}` ({classification}{category}) [{escaped(source['path'])}](../../{source['path']}#L{source['line']}): {escaped(semantics['reason'])}")
     for item in bundle["excluded_targets"]:
-        out.append(f"- Cargo 除外 target `{escaped(item['package'])} / {escaped(str(item['target']))}`: {escaped(item['reason'])}")
-    out += ["", "## Cargo example の分類", ""]
+        out.append(f"- Cargo の除外ターゲット `{escaped(item['package'])} / {escaped(str(item['target']))}`: {escaped(item['reason'])}")
+    out += ["", "## Cargo のサンプルプログラムの分類", ""]
     for item in bundle["examples"]:
         label = f"{item['package']} / {item['example']}"
-        out.append(f"- `{escaped(label)}` ({escaped(item['kind'])}) [{escaped(item['source'])}](../../{item['source']}): {escaped(item['reason'])}")
+        kind = {"OpenApi": "OpenAPI 仕様の出力", "Program": "プログラム（コンパイルのみ）"}[item['kind']]
+        out.append(f"- `{escaped(label)}` ({kind}) [{escaped(item['source'])}](../../{item['source']}): {escaped(item['reason'])}")
     out.append("")
     return "\n".join(out)
 

@@ -3,7 +3,7 @@ mod trace_support;
 
 trace_support::example!(trace_support::Example {
     kind: trace_support::ExampleKind::Program,
-    reason: "Plays a game through a running gRPC service and checks move and resignation responses.",
+    reason: "稼働中のgRPCサービスを通して対局を進め、着手と投了の応答を確認する。",
 });
 
 mod support;

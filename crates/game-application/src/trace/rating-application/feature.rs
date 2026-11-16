@@ -6,30 +6,30 @@ trace::feature!(trace::Feature {
         needle: "pub async fn tick(&self, owner: &WorkerId) -> Result<TickOutcome, RatingWorkerError> {"
     },
     flow: &[
-        "A rated terminal receipt atomically creates a durable rating job from immutable admission metadata and committed result, independently of the broker.",
-        "RatingWorker acquires a fenced lease, calculates from frozen pool-specific starts and requests atomic repository application.",
-        "The repository updates both players, records one application ledger, completes the job and releases only that game's reservations in one transaction.",
-        "Transient failures defer with backoff; corruption or exhausted acquisition budget quarantines the still-reserved game until explicit recovery."
+        "レーティング対象対局の終局を受理すると、固定された参加時のメタデータと確定結果から永続レーティングジョブを原子的に作成する。ブローカーには依存しない。",
+        "RatingWorker は取得世代とリースで保護された取得権を確保し、プールごとに固定された開始状態から計算して、リポジトリに原子的な適用を要求する。",
+        "リポジトリは一つのトランザクションで、両者の更新、適用台帳一件の記録、ジョブ完了、その対局の予約枠だけの解放を行う。",
+        "一時的な失敗は待機時間を設けて遅延させる。破損または取得回数の枠の使い切りでは、予約枠を持つ対局を明示的な復旧まで隔離する。"
     ],
     guarantees: &[
         trace::Guarantee {
             id: "terminal-durable-input",
-            statement: "Only a durable terminal rated game produces a rating job, atomically with the accepted receipt and outbox. Calculation uses frozen pool-specific starts and the committed winner.",
+            statement: "永続化されたレーティング対象対局の終局だけが、受理記録と Outbox と原子的にレーティングジョブを生成する。計算にはプールごとに固定された開始状態と確定した勝者を使う。",
             contracts: &["terminal-job", "pure-calculation", "worker-reconciliation"]
         },
         trace::Guarantee {
             id: "zero-sum-checked-elo",
-            statement: "K32 Elo treats unrated players as 1500, rounds one black delta and negates it for white, and checks signed-rating and completed-game-count arithmetic.",
+            statement: "K32 Elo は未評価の両者を 1500 と扱い、先手の差分を一度だけ丸め、後手にはその符号を反転した差分を適用する。符号付きレーティングと完了対局数の算術を検査する。",
             contracts: &["pure-calculation"]
         },
         trace::Guarantee {
             id: "atomic-once-ledger",
-            statement: "A valid current claim updates both ratings, inserts one ledger, completes the job and releases only its own reservations atomically. Matching completed replay reconciles read-only.",
+            statement: "有効な現在の取得権に基づく適用は、両者のレーティング更新、台帳一件の挿入、ジョブ完了、その対局自身の予約枠だけの解放を原子的に行う。一致する完了済み処理の再試行は、読み取りだけで結果を照合する。",
             contracts: &["atomic-application", "worker-reconciliation"]
         },
         trace::Guarantee {
             id: "fenced-retry",
-            statement: "Expired or superseded claims cannot mutate results. Attempts, lease expiry and transient backoff are durable; corruption or exhausted budget quarantines without releasing reservations.",
+            statement: "失効または更新済みの取得権では結果を変更できない。試行回数・リース期限・一時的失敗の待機時間を永続化し、破損や試行枠の使い切りでは予約枠を解放せず隔離する。",
             contracts: &[
                 "claims-fences",
                 "worker-reconciliation",
@@ -38,15 +38,15 @@ trace::feature!(trace::Feature {
         },
         trace::Guarantee {
             id: "explicit-recovery",
-            statement: "Explicit recovery resets a quarantined job's acquisition budget without repairing input or changing frozen starts, ratings or reservations. The worker binary exposes polling and retry-quarantined modes.",
+            statement: "明示的な復旧は、入力の修復や固定された開始状態・レーティング・予約枠の変更をせずに、隔離ジョブの取得回数の枠を戻す。ワーカー実行ファイルは、定期実行と retry-quarantined の両モードを提供する。",
             contracts: &["quarantine-recovery", "worker-process"]
         }
     ],
     limitations: &[
-        "The worker reads durable jobs rather than broker messages. There is no automatic input repair or finite completion-time guarantee.",
-        "Repository integration tests do not assert standalone worker CLI, polling or signal lifecycle.",
-        "Public rating reads are mapped by user-ratings; startup schema and reader permissions are mapped by startup-schema-isolation.",
-        "Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees."
+        "ワーカーはブローカーメッセージではなく永続ジョブを読む。入力の自動修復や、有限時間内の完了は保証しない。",
+        "リポジトリの結合テストでは、独立したワーカー CLI、定期実行、シグナルによるライフサイクルを検証しない。",
+        "公開レーティングの読み取りは user-ratings、起動時スキーマと読み取り権限は startup-schema-isolation に関連付ける。",
+        "ソースへのリンクとテストの実行成功は、追跡できる根拠を示すものであり、これらの保証の意味上の証明や完全な網羅性を示すものではない。"
     ],
     entrypoints: &[
         trace::EntryPoint {

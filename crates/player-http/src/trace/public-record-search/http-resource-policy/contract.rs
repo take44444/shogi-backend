@@ -1,11 +1,11 @@
 use crate::trace_support as trace;
 trace::contract!(trace::Contract {
-    statement: "The shared adapter takes an immediate semaphore permit and respond maps errors, applies no-store, and bounds serialized JSON to one MiB.",
+    statement: "共有アダプターはセマフォの許可を即座に取得する。respond はエラーを変換し、no-store を付け、シリアライズした JSON を 1 MiB 以内に制限する。",
     source: trace::Source {
         path: "crates/player-http/src/lib.rs",
         needle: "fn respond<T: Serialize>(result: Result<T, Error>) -> Response {"
     },
     gap: Some(
-        "The size boundary uses strings rather than a maximum real page. No mixed search/detail/ratings exhaustion test is mapped."
+        "サイズの境界には実際の最大ページではなく文字列を使う。検索・詳細取得・レート取得を混在させて処理枠を使い切るテストは対応付けていない。"
     ),
 });

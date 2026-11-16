@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL writer startup rejects selected malformed ledgers and orphaned outbox schema.",
-        reason: "Malformed version-ledger definitions and an orphaned outbox table cause writer startup to return Corrupt.",
+        scope: "実際の PostgreSQL で、選択した不正な台帳と、他の必要な表がない Outbox スキーマを、書き込み側の起動時に拒否することを検証する。",
+        reason: "不正なバージョン台帳の定義や、他の必要な表がない Outbox テーブルにより、書き込みプロセスの起動は Corrupt を返す。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

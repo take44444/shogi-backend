@@ -2,6 +2,8 @@
 
 [機能一覧](../reference/feature-traceability.md)と各機能のページは Rust の宣言と実在するテストから生成する。
 保証やテスト一覧を手書きの文書に複写しない。
+保証、契約、検証範囲、根拠、未検証事項の説明は日本語で書く。
+機能・契約の ID、列挙値、関数名、パスなどのコード上の識別子は維持する。
 [永続イベント配信の定義](../../crates/game-application/src/trace/durable-event-dispatch/feature.rs)と[共通の型とマクロ](../../scripts/traceability_model.rs)を例にする。
 
 1. 機能の `src/trace/<feature>/feature.rs` または `tests/trace/<feature>/feature.rs` を更新する。
@@ -23,7 +25,7 @@
    package、Cargo target、完全なテスト名、ソース位置、主契約を一覧へ登録する必要はない。
    到達しない宣言やテストファイルは検査で拒否する。
 3. 通常の `#[test]` と `#[tokio::test]` は、所属する契約の `unreviewed` として自動追加される。
-   所属は、その実装を呼ぶことや assertion の十分さを保証しない。
+   所属は、その実装を呼ぶことや 検証の十分さを保証しない。
    `unreviewed` しかない契約には `gap` が必要となる。
    レビューした根拠は、元のテストを `trace::case!` で包み、`Case` に `scope`、`reason`、`relationship` を宣言する。
    `asserts` は記載した事例を直接検証する関係、`exercises` は処理を通る関係を表す。

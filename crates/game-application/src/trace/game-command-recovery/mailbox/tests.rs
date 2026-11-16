@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Actor/fake repository and channel lifecycle; no process shutdown signal.",
-        reason: "Dropped response and closed mailbox still execute queued commands.",
+        scope: "アクター・テスト用リポジトリ・チャネルのライフサイクルを対象とし、プロセスの停止シグナルは扱わない。",
+        reason: "応答の受信側を破棄した場合も、メールボックスを閉じた場合も、キューに入った操作は実行する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -43,8 +43,8 @@ async fn cancelled_reply_and_closed_mailbox_still_drain_commands() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Controlled fake repository/channel capacity boundary.",
-        reason: "A capacity-blocked cancelled send does not execute while an enqueued cancelled call does.",
+        scope: "制御可能なテスト用リポジトリとチャネルを使い、容量の境界を検証する。",
+        reason: "容量待ちの間に取り消した送信は実行されず、キューへの追加後に取り消した呼び出しは実行される。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -84,8 +84,8 @@ async fn cancelled_call_after_enqueue_executes_and_before_enqueue_does_not() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "In-memory RecordStore and sender lifecycle, not process restart.",
-        reason: "Closed actor reloads durable store and final service drop closes senders.",
+        scope: "メモリー内の RecordStore と送信元のライフサイクルを対象とし、プロセス再起動は扱わない。",
+        reason: "終了したアクターは永続ストアから再読み込みし、最後のサービスを破棄すると送信元を閉じる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

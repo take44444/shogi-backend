@@ -6,35 +6,35 @@ trace::feature!(trace::Feature {
         needle: "pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaError> {"
     },
     flow: &[
-        "Executable configuration selects account/game databases, browser origins and service endpoints before application startup.",
-        "Account persistence initializes or validates its own schema; game writers and workers initialize empty game databases or validate schema version seven.",
-        "The public reader requires an existing compatible game schema and uses a bounded read-only pool under separate SELECT-only credentials.",
-        "Compose and initialization SQL provide separate account storage and a credential-free gateway; runtime deployment checks are a separate non-Cargo suite."
+        "実行ファイルの設定は、アプリケーション起動前にアカウント・対局データベース、ブラウザーのオリジン、サービスの接続先を選ぶ。",
+        "アカウント永続層は自身のスキーマを初期化または検証する。対局の書き込みプロセスとワーカーは、空の対局データベースを初期化するか、スキーマのバージョンが 7 であることを検証する。",
+        "公開読み取り処理は互換性のある対局スキーマが既に存在することを必須とし、独立した SELECT 専用の認証情報で、有界な読み取り専用接続プールを使う。",
+        "Compose と初期化 SQL は、独立したアカウントストレージと認証情報を持たないゲートウェイを用意する。実行時の配置検査は、Cargo 以外の別の検査群で行う。"
     ],
     guarantees: &[
         trace::Guarantee {
             id: "browser-config",
-            statement: "BrowserConfig requires a clean HTTPS origin, with HTTP available only through explicit loopback development mode, and derives the exact Google callback URL.",
+            statement: "BrowserConfig は余分な要素のない HTTPS オリジンを必須とする。HTTP はループバックを使う開発モードを明示した場合だけ許可し、Google の正確なコールバック URL を導出する。",
             contracts: &["contract-browser-config"]
         },
         trace::Guarantee {
             id: "account-schema",
-            statement: "Account persistence initializes an empty database, preserves compatible schema/data, and fails closed on tested incompatible schema and ledger definitions.",
+            statement: "アカウント永続層は空のデータベースを初期化し、互換性のあるスキーマとデータを保持する。検証した非互換スキーマや台帳定義には処理を進めず失敗する。",
             contracts: &["contract-account-schema"]
         },
         trace::Guarantee {
             id: "game-schema",
-            statement: "Game startup initializes schema version seven only in an empty database and rejects incompatible required definitions or version without migration or deletion of tested schema/data.",
+            statement: "対局の起動処理は空のデータベースにだけバージョン 7 のスキーマを初期化し、必須定義やバージョンの非互換を、検証対象のスキーマとデータを移行も削除もせず拒否する。",
             contracts: &["contract-game-schema"]
         },
         trace::Guarantee {
             id: "bounded-public-reader",
-            statement: "The public reader creates no schema, requires version seven, admits four database connections with two-second acquisition/statement/lock limits, and relies on a separate SELECT-only role restricted to public tables.",
+            statement: "公開読み取り処理はスキーマを作成せず、バージョン 7 を必須とする。接続は四つまでとし、取得・文実行・ロックの待ち時間を二秒に制限する。公開テーブルに限定した独立の SELECT 専用ロールに依存する。",
             contracts: &["reader-boundary", "reader-permissions"]
         },
         trace::Guarantee {
             id: "deployment-process-config",
-            statement: "Configured services separate account and game storage, give the public reader separate credentials, and give the gateway no database credentials. Account startup validates configuration, connects storage and discovers its provider before listening; game and reader startup parse their addresses and connect compatible storage before serving.",
+            statement: "サービス設定はアカウントと対局のストレージを分離し、公開読み取りプロセスに独立した認証情報を与え、ゲートウェイにはデータベース認証情報を与えない。アカウントは設定の検証、ストレージ接続、プロバイダー情報取得の後に待ち受ける。対局と読み取りの起動処理は、アドレスを解析し、互換ストレージに接続してから要求を受け付ける。",
             contracts: &[
                 "process-config",
                 "account-environment",
@@ -44,11 +44,11 @@ trace::feature!(trace::Feature {
         }
     ],
     limitations: &[
-        "Deployment topology and reader database isolation do have existing automated checks in python3 scripts/test-deployment.py. This trace graph maps only Cargo tests; it does not execute or replace that Docker-based command.",
-        "There is no application health endpoint. Compose PostgreSQL/Valkey probes do not establish application readiness.",
-        "CLI/environment parsing, external Google availability, startup failure propagation and graceful signal/close behavior across all six application binaries remain source-level contracts with explicit runtime test gaps.",
-        "Runtime ownership/configuration for event and rating loops is also documented by durable-event-dispatch and rating-application. No mapped startup test guarantees a process can always connect to its dependencies.",
-        "Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees."
+        "配置構成と読み取り用データベースの分離には、既存の python3 scripts/test-deployment.py による自動検査がある。この対応グラフが関連付けるのは Cargo テストだけであり、その Docker ベースのコマンドを実行したり置き換えたりはしない。",
+        "アプリケーションのヘルス確認用エンドポイントはない。Compose の PostgreSQL と Valkey の疎通検査は、アプリケーションの準備完了を示すものではない。",
+        "CLI と環境変数の解析、外部 Google サービスの可用性、起動失敗の伝播、六つすべてのアプリケーション実行ファイルのシグナル停止と接続終了は、実行時テストの不足を明示したソース上の契約として残る。",
+        "イベントとレーティングのループの実行時所有権・設定は durable-event-dispatch と rating-application でも記述する。プロセスが常に依存先へ接続できると保証する起動テストは、対応付けられていない。",
+        "ソースへのリンクとテストの実行成功は、追跡できる根拠を示すものであり、これらの保証の意味上の証明や完全な網羅性を示すものではない。"
     ],
     entrypoints: &[
         trace::EntryPoint {

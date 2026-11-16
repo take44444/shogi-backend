@@ -18,8 +18,8 @@ impl Drop for Process {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Actual game-server process, real PostgreSQL and generated gRPC client; DB timestamps force eligibility.",
-        reason: "Launches the actual game-server binary and observes waiting tickets become Playing with a sequence-zero snapshot containing both users, without another join.",
+        scope: "実際のgame-serverプロセス、PostgreSQL、生成されたgRPCクライアントを使う。DBの時刻を操作してマッチング条件を満たすようにする。",
+        reason: "実際のgame-server実行ファイルを起動する。追加の参加要求がなくても、待機中のチケットがPlayingとなり、両ユーザーを含む連番0のスナップショットを取得できることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

@@ -44,8 +44,8 @@ async fn current_schema_remains_readable_and_writable_with_query_builders() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL fresh schema catalog compared with the current fixture.",
-        reason: "A newly built schema matches the current schema fixture catalog.",
+        scope: "実際の PostgreSQL で、新規スキーマのカタログを現在のテスト用スキーマと比較する。",
+        reason: "新規作成したスキーマのカタログが、現在のスキーマのテスト用データと一致する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Database expiry is forced.",
-        reason: "Duplicate sequence returns exactly the same ticket; a newer heartbeat after forced expiry produces Expired and does not revive admission.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。データベースの有効期限を強制的に切らす。",
+        reason: "同じシーケンスでは同じチケットをそのまま返す。強制失効後の新しいハートビートは Expired となり、参加を復活させない。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Database expiry is forced.", relationship: crate::trace_support::Relationship::Asserts, reason: "After forced expiry current becomes Idle." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。データベースの有効期限を強制的に切らす。", relationship: crate::trace_support::Relationship::Asserts, reason: "有効期限を強制的に切らすと、現在の参加状態が Idle になる。" }],
     };
 #[tokio::test]
 async fn heartbeat_retries_do_not_extend_and_expired_waiting_never_revives() {

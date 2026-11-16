@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real SELECT-only PostgreSQL role after disabling read-only session default.",
-        reason: "The actual reader role receives insufficient_privilege after disabling default_transaction_read_only and attempting a write.",
+        scope: "読み取り専用セッションの既定値を無効にした、SELECT だけを許可する実 PostgreSQL ロール。",
+        reason: "default_transaction_read_only を無効にして書き込みを試みると、実際の読み取りロールが insufficient_privilege を受け取ることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

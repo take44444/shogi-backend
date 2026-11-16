@@ -12,8 +12,8 @@ fn event(seq: u64, fact: DomainEvent) -> Notification {
 }
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct cursor state transitions over synthetic committed notifications; no socket or played mate.",
-        reason: "Move then matching mate finish deliver, exact duplicates ignore and conflicting same-sequence move resyncs.",
+        scope: "人工的なコミット済み通知を使ったカーソルの状態遷移の直接検証。ソケットも、詰みに至る実際の手順も使わない。",
+        reason: "着手と対応する詰みの終局を順に配信し、完全に同じ重複を無視し、同じ連番で競合する着手では再同期を求める。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -52,8 +52,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct cursor boundary/gap fixtures; no broker or socket.",
-        reason: "Old boundary event ignores; unpaired mate finish and sequence gap resync.",
+        scope: "カーソルの境界・連番欠落を直接検証するテスト用データ。ブローカーやソケットは使わない。",
+        reason: "古い境界イベントは無視し、対応する着手がない詰みの終局と連番の欠落では再同期を求める。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

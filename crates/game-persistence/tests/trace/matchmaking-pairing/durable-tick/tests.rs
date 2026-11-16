@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.",
-        reason: "Concurrent ticks produce exactly one game, one rated_game and two slots, and one user's current participation is Playing. This test does not compare participant or side bindings.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
+        reason: "同時実行した tick によって、対局一件、rated_game 一件、参加枠二件だけが作られ、一人の現在参加状態が Playing になる。このテストでは参加者や先後の割り当てを比較しない。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "admission", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Concurrent admission and matcher tasks.", relationship: crate::trace_support::Relationship::Asserts, reason: "Concurrent different-pool joins produce exactly one created admission." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "admission", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。参加受け入れと組合せ処理を並行実行する。", relationship: crate::trace_support::Relationship::Asserts, reason: "異なるプールへの同時参加で、参加受け入れがちょうど一件だけ作られる。" }],
     };
 #[tokio::test]
 async fn cross_pool_joins_and_multiple_matchers_have_one_durable_winner() {
@@ -56,10 +56,10 @@ async fn cross_pool_joins_and_multiple_matchers_have_one_durable_winner() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.",
-        reason: "Injected slot failure leaves zero game/rated/slot rows and both waiting; successful retry freezes original Unrated states.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
+        reason: "参加枠の作成失敗を注入すると、対局・レーティング対象対局・参加枠の行は 0 件となり、両者は待機を続ける。成功した再試行では、元の Unrated 状態を固定する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "admission", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Injected SQL failures and post-finish rating reservation checks.", relationship: crate::trace_support::Relationship::Asserts, reason: "After game finish the same-pool admission is rating_pending, while another pool remains available." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "admission", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。SQL の失敗を注入し、終局後のレーティング予約枠を確認する。", relationship: crate::trace_support::Relationship::Asserts, reason: "対局終了後、同じプールへの参加は rating_pending となり、別のプールは引き続き利用できる。" }],
     };
 #[tokio::test]
 async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets() {
@@ -136,8 +136,8 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Explicit held rating locks and forced expiry.",
-        reason: "Tickets expire while blocked on rating locks; tick returns None and creates no game.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。レーティングのロックを明示的に保持し、有効期限を強制的に切らす。",
+        reason: "レーティングのロックで待機中にチケットが失効すると、tick は None を返し、対局を作らない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -166,8 +166,8 @@ async fn expiry_after_rating_lock_wait_prevents_match() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Direct tick after forced enqueue aging.",
-        reason: "After aging enqueue times, one/two pair while an incompatible head remains waiting.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。キュー追加時刻を強制的に古くしてから tick を直接呼ぶ。",
+        reason: "キュー追加時刻を過去に変更すると、先頭の不適合な参加者を待機させたまま、一人目と二人目が組み合わされる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

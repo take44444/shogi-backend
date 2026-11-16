@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL public reader privileges and denied internal tables/update.",
-        reason: "The actual reader selects the four public tables, is denied internal rating/matchmaking tables and cannot update rating_states.",
+        scope: "実際の PostgreSQL で、公開読み取り用の権限と、内部テーブルへのアクセスおよび更新の拒否を検証する。",
+        reason: "実際の読み取りプロセスは四つの公開テーブルを SELECT でき、内部のレーティング・組合せテーブルへのアクセスを拒否され、rating_states を更新できない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

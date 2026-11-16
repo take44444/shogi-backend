@@ -17,7 +17,7 @@
 2. PATCH /me は JSON 構造と同一 Origin を検証し、DisplayName で前後の空白と Unicode 文字数・制御文字を扱ってから、セッションに対応するアカウントを更新する。
 3. PostgresAccounts は表示名を保存し、次回の同じ issuer・subject のログインでも既存プロフィールを維持する。共有 UserId は各サービス間の内部本人識別を表す。
 
-以下の保証には、各行に示す契約が必要となる。テストの assertions は記載した事例の範囲に限られる。
+以下の保証には、各行に示す契約が必要となる。テストによる検証は記載した事例の範囲に限られる。
 
 | ID | アプリケーションの保証と条件 | 必要な契約 |
 | --- | --- | --- |
@@ -28,27 +28,27 @@
 
 ## 宣言した対応関係
 
-矢印は著者が宣言した関係を示す。asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。
+矢印は著者が宣言した関係を示す。「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。「所属のみ・未レビュー」は契約ディレクトリへの配置だけで分類した関係を示す。
 
 ```mermaid
 flowchart TD
-    n0["feature: account-profile"]
-    n1["guarantee: browser-input"]
-    n2["guarantee: durable-profile"]
-    n3["guarantee: name-boundaries"]
-    n4["guarantee: own-profile"]
-    n5["contract: display-name"]
-    n6["contract: existing-identity"]
-    n7["contract: http-rename"]
-    n8["contract: profile-response"]
-    n9["contract: profile-update"]
-    n10["contract: user-id"]
-    n11["test: test-user-application-lib-user-application-tests-display-names-are-trimmed-and-bound-in-unicode-characters"]
-    n12["test: test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract"]
-    n13["test: test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart"]
-    n14["test: test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries"]
-    n15["test: test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used"]
-    n16["test: test-user-persistence-lib-user-persistence-tests-account-profile-existing-identity-existing-schema-and-data-survive-builder-refactor"]
+    n0["機能: account-profile"]
+    n1["保証: browser-input"]
+    n2["保証: durable-profile"]
+    n3["保証: name-boundaries"]
+    n4["保証: own-profile"]
+    n5["契約: display-name"]
+    n6["契約: existing-identity"]
+    n7["契約: http-rename"]
+    n8["契約: profile-response"]
+    n9["契約: profile-update"]
+    n10["契約: user-id"]
+    n11["テスト: test-user-application-lib-user-application-tests-display-names-are-trimmed-and-bound-in-unicode-characters"]
+    n12["テスト: test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract"]
+    n13["テスト: test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart"]
+    n14["テスト: test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries"]
+    n15["テスト: test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used"]
+    n16["テスト: test-user-persistence-lib-user-persistence-tests-account-profile-existing-identity-existing-schema-and-data-survive-builder-refactor"]
     n0 --> n1
     n1 --> n7
     n1 --> n9
@@ -61,15 +61,15 @@ flowchart TD
     n0 --> n4
     n4 --> n8
     n4 --> n10
-    n5 -->|asserts| n11
-    n6 -->|asserts| n13
-    n6 -->|asserts| n16
-    n7 -->|asserts| n12
-    n7 -->|asserts| n13
-    n8 -->|asserts| n13
-    n9 -->|asserts| n13
-    n9 -->|asserts| n15
-    n10 -->|asserts| n14
+    n5 -->|事例を直接検証| n11
+    n6 -->|事例を直接検証| n13
+    n6 -->|事例を直接検証| n16
+    n7 -->|事例を直接検証| n12
+    n7 -->|事例を直接検証| n13
+    n8 -->|事例を直接検証| n13
+    n9 -->|事例を直接検証| n13
+    n9 -->|事例を直接検証| n15
+    n10 -->|事例を直接検証| n14
 ```
 
 ## コンポーネント契約と根拠
@@ -82,7 +82,7 @@ DisplayName::new は trim 後の文字列を保持し、空文字・80 Unicode �
 
 実装位置: [crates/user-application/src/lib.rs](../../../crates/user-application/src/lib.rs#L14)。
 
-- [test-user-application-lib-user-application-tests-display-names-are-trimmed-and-bound-in-unicode-characters](#test-test-user-application-lib-user-application-tests-display-names-are-trimmed-and-bound-in-unicode-characters) (asserts): 日本語名の trim、80 文字の受け入れ、空文字・空白・81 文字・改行・NUL の拒否を直接確認する。
+- [test-user-application-lib-user-application-tests-display-names-are-trimmed-and-bound-in-unicode-characters](#test-test-user-application-lib-user-application-tests-display-names-are-trimmed-and-bound-in-unicode-characters) (事例を直接検証): 日本語名の trim、80 文字の受け入れ、空文字・空白・81 文字・改行・NUL の拒否を直接確認する。
 
 <a id="contract-existing-identity"></a>
 
@@ -92,8 +92,8 @@ PostgresAccounts::login は既存 issuer・subject の Profile を再利用し�
 
 実装位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L382)。
 
-- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): New Name に変更した後、初期名 Google Player を返す偽 provider で再ログインしてもプロフィール全体が維持されることを確認する。
-- [test-user-persistence-lib-user-persistence-tests-account-profile-existing-identity-existing-schema-and-data-survive-builder-refactor](#test-test-user-persistence-lib-user-persistence-tests-account-profile-existing-identity-existing-schema-and-data-survive-builder-refactor) (asserts): 既存 schema の Existing プロフィールに対して initial_name が Player の login を行い、同じプロフィールと再接続後の認証結果を確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (事例を直接検証): New Name に変更した後、初期名 Google Player を返す偽 provider で再ログインしてもプロフィール全体が維持されることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-account-profile-existing-identity-existing-schema-and-data-survive-builder-refactor](#test-test-user-persistence-lib-user-persistence-tests-account-profile-existing-identity-existing-schema-and-data-survive-builder-refactor) (事例を直接検証): 既存 schema の Existing プロフィールに対して initial_name が Player の login を行い、同じプロフィールと再接続後の認証結果を確認する。
 
 <a id="contract-http-rename"></a>
 
@@ -103,8 +103,8 @@ rename は serde の未知フィールド拒否を持つ JSON を抽出し、sam
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L387)。
 
-- [test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract) (asserts): 不正 JSON 400、本文過大 413、Content-Type 欠落 415、未知フィールドを持つ構造 422 の text/plain と、空白名 400 の application/json を確認する。
-- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): 有効な session で Origin 欠落と hostile Origin を 401、空白だけの名前を 400 とし、同一 Origin の有効な名前は応答と保存内容に反映する。
+- [test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract) (事例を直接検証): 不正 JSON 400、本文過大 413、Content-Type 欠落 415、未知フィールドを持つ構造 422 の text/plain と、空白名 400 の application/json を確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (事例を直接検証): 有効な session で Origin 欠落と hostile Origin を 401、空白だけの名前を 400 とし、同一 Origin の有効な名前は応答と保存内容に反映する。
 
 未検証: cross-site の Sec-Fetch-Site、正しい JSON・Origin に対する未認証 PATCH、HTTP を通した 80 文字・制御文字・trim 境界の assertion はない。
 
@@ -116,7 +116,7 @@ GET /me は Cookie による認証結果を ProfileBody の id・display_name・
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L339)。
 
-- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): 初回プロフィールの Google Player と UUID、名前変更後・再接続後・同じ本人識別の次回ログイン後の JSON 全体の一致を確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (事例を直接検証): 初回プロフィールの Google Player と UUID、名前変更後・再接続後・同じ本人識別の次回ログイン後の JSON 全体の一致を確認する。
 
 未検証: created_at の値・型・単位を runtime で独立に確認する assertion はなく、変更前後の全体比較に含まれるだけである。Cookie の認証・期限・重複は account-session が扱う。
 
@@ -128,8 +128,8 @@ PostgresAccounts::rename は有効期限内のセッションからアカウン�
 
 実装位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L489)。
 
-- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): 実ルーターで New Name に更新し、store の再接続後の GET /me が同じプロフィールとなることを確認する。
-- [test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used](#test-test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used) (asserts): 期限ちょうどの session で rename が Unauthorized となることを直接確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (事例を直接検証): 実ルーターで New Name に更新し、store の再接続後の GET /me が同じプロフィールとなることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used](#test-test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used) (事例を直接検証): 期限ちょうどの session で rename が Unauthorized となることを直接確認する。
 
 未検証: 名前更新の保存失敗・コミット失敗・別アカウントへの非干渉は直接確認していない。
 
@@ -141,7 +141,7 @@ UserId::new は空でなく 128 UTF-8 バイト以内で Unicode 空白を含ま
 
 実装位置: [crates/user-id/src/lib.rs](../../../crates/user-id/src/lib.rs#L16)。
 
-- [test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries](#test-test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries) (asserts): ASCII・日本語・128 バイトの保持と、空文字・ASCII/Unicode 空白・129 バイト・多バイト長超過の拒否を直接確認する。
+- [test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries](#test-test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries) (事例を直接検証): ASCII・日本語・128 バイトの保持と、空文字・ASCII/Unicode 空白・129 バイト・多バイト長超過の拒否を直接確認する。
 
 ## 実在するテストと実行コマンド
 
@@ -221,9 +221,9 @@ cargo test --locked -p user-persistence --lib tests::account_profile_existing_id
 
 ## 検査と根拠の限界
 
-check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
+check はグラフ、ファイル内の一意なテキスト位置、パッケージとターゲットごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
-この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
+この文書には実行済みの成功状態を保存しない。CI のワークスペース全体のテスト実行結果は、その実行時点の結果となる。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - 表示名境界のドメインテスト、JSON 拒否の HTTP テスト、成功した更新と永続化の統合テストは別々の証拠であり、全入力境界を HTTP から DB まで通していない。
@@ -232,6 +232,6 @@ run は check の後に共有された Cargo テストを一度ずつ実行し�
 
 ## ディレクトリ方式の検査範囲
 
-Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
-src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
-全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。
+Rust 宣言、通常のモジュールと文字列リテラルの include! から物理ファイルの所属、パッケージ、ターゲット、完全なテスト名と位置を抽出する。ホスト環境で Cargo の既定の機能フラグを使い、ワークスペースのライブラリ、バイナリ、結合テストの全テスト一覧と一致させる。別のターゲット、機能フラグ、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは「所属のみ・未レビュー」として追加する。「事例を直接検証」または「処理を通る」のレビュー済み根拠がない契約には未検証事項の gap 宣言が必要。
+全ターゲットの未分類テストは拒否する。trace ディレクトリ内の未対応の項目マクロと cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト実行補助と基盤の検査の明示分類および理由は全機能の一覧に示す。

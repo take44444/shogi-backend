@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct sequence helper, synthetic maximum; no rules execution or DB.",
-        reason: "Direct helper asserts portable maximum and exhausted boundary.",
+        scope: "合成した最大値でシーケンス補助関数を直接検証する。ルール実行や DB は使わない。",
+        reason: "直接呼び出した補助関数で、移植可能な最大値と使い切った境界を検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -23,8 +23,8 @@ fn sequence_cap_is_portable() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Actor state is directly set to maximum sequence for error precedence.",
-        reason: "Synthetic exhausted actor distinguishes stale SequenceMismatch from SequenceExhausted.",
+        scope: "エラーの優先順位を確認するため、アクターの状態を最大シーケンスに直接設定する。",
+        reason: "合成した上限到達済みのアクターで、古いシーケンスに対する SequenceMismatch と SequenceExhausted を区別する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

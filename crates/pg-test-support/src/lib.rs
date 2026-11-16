@@ -96,7 +96,7 @@ mod tests {
     use super::*;
     use sqlx::Row;
 
-    crate::trace_support::infrastructure!("test-support", "Validates isolated temporary PostgreSQL databases supplied to the test harness.";
+    crate::trace_support::infrastructure!("test-support", "テスト実行用に提供する、独立した一時 PostgreSQL データベースを検証する。";
     #[tokio::test]
         async fn test_databases_have_independent_names_and_contents() {
             let first = TestDatabase::new().await;

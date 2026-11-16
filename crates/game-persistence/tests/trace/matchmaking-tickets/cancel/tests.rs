@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Eight concurrent cancellation/matcher races.",
-        reason: "Each race commits either cancellation with no game or two Playing tickets for one game.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。取消と組合せ処理を八回並行させて競合を検証する。",
+        reason: "各競合では、対局を作らず取消をコミットするか、一つの対局に対応する二枚の Playing チケットをコミットする。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

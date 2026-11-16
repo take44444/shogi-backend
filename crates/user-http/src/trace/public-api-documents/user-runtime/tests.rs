@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "In-process HTTPS/development user routers with panic-on-use repository and provider.",
-        reason: "HTTPS and development in-process routers return equal offline JSON with security headers; repository and provider panic if used.",
+        scope: "呼び出されると panic するリポジトリと外部認証プロバイダーを使う、プロセス内の HTTPS 用・開発用ユーザールーター。",
+        reason: "プロセス内の HTTPS 用・開発用ルーターが、セキュリティヘッダー付きでオフライン生成と同じ JSON を返すことを確認する。リポジトリと外部認証プロバイダーは、呼ばれると panic する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

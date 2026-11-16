@@ -37,8 +37,8 @@ async fn snapshot(db: &DatabaseConnection) -> Vec<String> {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL fifteen required game-schema mutations with before/after snapshots.",
-        reason: "Fifteen required-definition mutations are rejected while before/after schema and data snapshots remain equal.",
+        scope: "実際の PostgreSQL で、対局の必須スキーマを十五種類変更し、その前後のスナップショットを確認する。",
+        reason: "必須定義を変更する十五種類の操作を拒否し、変更前後のスキーマとデータのスナップショットが等しいままとなる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -91,8 +91,8 @@ async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() 
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL compatible additional objects and unchanged snapshots.",
-        reason: "Unrelated tables and additional/renamed indexes are accepted unchanged.",
+        scope: "実際の PostgreSQL で、互換性のある追加オブジェクトと、変更されないスナップショットを検証する。",
+        reason: "無関係なテーブルと追加・改名したインデックスは、変更せず受け入れる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -128,8 +128,8 @@ async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL version-five schema fixture rejected without migration/deletion.",
-        reason: "A version-five fixture is rejected without migration or deletion.",
+        scope: "実際の PostgreSQL で、バージョン 5 のテスト用スキーマを移行も削除もせず拒否することを検証する。",
+        reason: "バージョン 5 のテスト用スキーマを、移行も削除もせず拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -152,8 +152,8 @@ async fn version_five_is_rejected_without_migration_or_deletion() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL version-six fixture rejection with unchanged schema/data snapshot.",
-        reason: "A version-six fixture is rejected and its before/after schema/data snapshot remains equal.",
+        scope: "実際の PostgreSQL で、バージョン 6 のテスト用スキーマを拒否し、スキーマとデータのスナップショットを保持することを検証する。",
+        reason: "バージョン 6 のテスト用スキーマを拒否し、その前後でスキーマとデータのスナップショットが等しいままとなる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

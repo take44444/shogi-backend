@@ -13,47 +13,47 @@
 
 ## 保証の成立条件と構成
 
-1. GetSnapshot dispatches to the per-game actor, which reads the durable version and reconstructs changed or invalid state from validated receipts.
-2. GetSnapshotForViewer reads access metadata and history coherently; CheckViewAccess reads current access metadata without requesting the journal.
-3. GameRpc converts the owned application snapshot into board pieces, all hand counters, legal USI moves, permanent participants, turn/check/result and sequence; the browser gateway authenticates viewer claims separately.
+1. GetSnapshot は対局ごとのアクターへ処理を渡す。アクターは永続バージョンを読み、変更または無効化された状態を、検証済み受理記録から復元する。
+2. GetSnapshotForViewer はアクセス用メタデータと履歴を整合した形で読み取る。CheckViewAccess は履歴を要求せず、現在のアクセス用メタデータを読む。
+3. GameRpc はアプリケーションが所有するスナップショットを、盤上の駒、すべての持ち駒カウンター、合法 USI 手、固定された参加者、手番・王手・結果・シーケンスへ変換する。ブラウザーゲートウェイは閲覧者の申告を別途認証する。
 
-以下の保証には、各行に示す契約が必要となる。テストの assertions は記載した事例の範囲に限られる。
+以下の保証には、各行に示す契約が必要となる。テストによる検証は記載した事例の範囲に限られる。
 
 | ID | アプリケーションの保証と条件 | 必要な契約 |
 | --- | --- | --- |
-| recovery | Snapshots refresh durable version, fail closed on read failure and reject corrupt history/metadata; restart restores ongoing and finished snapshots. | [snapshot-refresh](#contract-snapshot-refresh), [restore](#contract-restore), [durable-read](#contract-durable-read) |
-| snapshot-shape | A successful trusted snapshot returns durable sequence, permanent participants, an owned board and 14 hand counters, turn/check/result and legal moves; finished positions are retained with no legal moves. | [snapshot-refresh](#contract-snapshot-refresh), [owned-position](#contract-owned-position), [grpc-shape](#contract-grpc-shape) |
-| viewer-policy | Public games permit authenticated spectators through the gateway. Private games permit participants. Viewer snapshot/access RPCs hide inaccessible and missing games as NotFound. | [viewer-read](#contract-viewer-read), [access-policy](#contract-access-policy), [grpc-viewer](#contract-grpc-viewer) |
+| recovery | スナップショットは永続バージョンを更新し、読み取り失敗時には状態を返さず、破損した履歴やメタデータを拒否する。再起動時には進行中と終局後のスナップショットを復元する。 | [snapshot-refresh](#contract-snapshot-refresh), [restore](#contract-restore), [durable-read](#contract-durable-read) |
+| snapshot-shape | 信頼済み呼び出し元へのスナップショット取得が成功すると、永続シーケンス、固定された参加者、所有する盤面と 14 個の持ち駒カウンター、手番・王手・結果・合法手を返す。終局後も局面を保持し、合法手は空となる。 | [snapshot-refresh](#contract-snapshot-refresh), [owned-position](#contract-owned-position), [grpc-shape](#contract-grpc-shape) |
+| viewer-policy | 公開対局はゲートウェイ経由の認証済み観戦者を許可する。非公開対局は参加者を許可する。閲覧者向けスナップショット・アクセス RPC は、アクセス不能な対局と存在しない対局を同じ NotFound として扱う。 | [viewer-read](#contract-viewer-read), [access-policy](#contract-access-policy), [grpc-viewer](#contract-grpc-viewer) |
 
 ## 宣言した対応関係
 
-矢印は著者が宣言した関係を示す。asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。
+矢印は著者が宣言した関係を示す。「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。「所属のみ・未レビュー」は契約ディレクトリへの配置だけで分類した関係を示す。
 
 ```mermaid
 flowchart TD
-    n0["feature: game-snapshots-access"]
-    n1["guarantee: recovery"]
-    n2["guarantee: snapshot-shape"]
-    n3["guarantee: viewer-policy"]
-    n4["contract: access-policy"]
-    n5["contract: durable-read"]
-    n6["contract: grpc-shape"]
-    n7["contract: grpc-viewer"]
-    n8["contract: owned-position"]
-    n9["contract: restore"]
-    n10["contract: snapshot-refresh"]
-    n11["contract: viewer-read"]
-    n12["test: test-game-application-lib-game-application-actor-tests-game-snapshots-access-snapshot-refresh-unknown-games-never-register-actors"]
-    n13["test: test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts"]
-    n14["test: test-game-grpc-test-tcp-tcp-game-play-domain-play-generated-client-plays-capture-promotion-recapture-drop-and-resignation"]
-    n15["test: test-game-persistence-test-contracts-contracts-game-snapshots-access-durable-read-joined-history-load-remains-coherent-during-concurrent-commits"]
-    n16["test: test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-corrupt-history-and-metadata-fail-closed"]
-    n17["test: test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-reconnecting-restores-position-hands-promotion-and-receipts-even-after-finish"]
-    n18["test: test-game-persistence-test-contracts-contracts-game-snapshots-access-snapshot-refresh-closing-the-pool-makes-the-game-service-unavailable"]
-    n19["test: test-game-persistence-test-records-records-game-snapshots-access-restore-reopening-preserves-current-records-history-and-outbox"]
-    n20["test: test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant"]
-    n21["test: test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-cloned-games-own-their-position-and-terminal-result"]
-    n22["test: test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-initial-position-and-snapshot-independence"]
+    n0["機能: game-snapshots-access"]
+    n1["保証: recovery"]
+    n2["保証: snapshot-shape"]
+    n3["保証: viewer-policy"]
+    n4["契約: access-policy"]
+    n5["契約: durable-read"]
+    n6["契約: grpc-shape"]
+    n7["契約: grpc-viewer"]
+    n8["契約: owned-position"]
+    n9["契約: restore"]
+    n10["契約: snapshot-refresh"]
+    n11["契約: viewer-read"]
+    n12["テスト: test-game-application-lib-game-application-actor-tests-game-snapshots-access-snapshot-refresh-unknown-games-never-register-actors"]
+    n13["テスト: test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts"]
+    n14["テスト: test-game-grpc-test-tcp-tcp-game-play-domain-play-generated-client-plays-capture-promotion-recapture-drop-and-resignation"]
+    n15["テスト: test-game-persistence-test-contracts-contracts-game-snapshots-access-durable-read-joined-history-load-remains-coherent-during-concurrent-commits"]
+    n16["テスト: test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-corrupt-history-and-metadata-fail-closed"]
+    n17["テスト: test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-reconnecting-restores-position-hands-promotion-and-receipts-even-after-finish"]
+    n18["テスト: test-game-persistence-test-contracts-contracts-game-snapshots-access-snapshot-refresh-closing-the-pool-makes-the-game-service-unavailable"]
+    n19["テスト: test-game-persistence-test-records-records-game-snapshots-access-restore-reopening-preserves-current-records-history-and-outbox"]
+    n20["テスト: test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant"]
+    n21["テスト: test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-cloned-games-own-their-position-and-terminal-result"]
+    n22["テスト: test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-initial-position-and-snapshot-independence"]
     n0 --> n1
     n1 --> n10
     n1 --> n9
@@ -66,21 +66,21 @@ flowchart TD
     n3 --> n11
     n3 --> n4
     n3 --> n7
-    n4 -->|asserts| n20
-    n5 -->|asserts| n15
-    n5 -->|exercises| n20
-    n6 -->|asserts| n14
-    n7 -->|asserts| n20
-    n8 -->|asserts| n21
-    n8 -->|asserts| n22
-    n9 -->|asserts| n13
-    n9 -->|asserts| n16
-    n9 -->|unreviewed| n17
-    n9 -->|unreviewed| n19
-    n10 -->|unreviewed| n12
-    n10 -->|asserts| n13
-    n10 -->|asserts| n18
-    n11 -->|asserts| n20
+    n4 -->|事例を直接検証| n20
+    n5 -->|事例を直接検証| n15
+    n5 -->|処理を通る| n20
+    n6 -->|事例を直接検証| n14
+    n7 -->|事例を直接検証| n20
+    n8 -->|事例を直接検証| n21
+    n8 -->|事例を直接検証| n22
+    n9 -->|事例を直接検証| n13
+    n9 -->|事例を直接検証| n16
+    n9 -->|所属のみ・未レビュー| n17
+    n9 -->|所属のみ・未レビュー| n19
+    n10 -->|所属のみ・未レビュー| n12
+    n10 -->|事例を直接検証| n13
+    n10 -->|事例を直接検証| n18
+    n11 -->|事例を直接検証| n20
 ```
 
 ## コンポーネント契約と根拠
@@ -89,98 +89,98 @@ flowchart TD
 
 ### access-policy
 
-Public visibility or permanent participant membership permits access; CheckViewAccess uses metadata without loading history.
+公開状態または固定された参加者への所属によってアクセスを許可する。CheckViewAccess は履歴を読み込まずメタデータを使う。
 
 実装位置: [crates/game-application/src/lib.rs](../../../crates/game-application/src/lib.rs#L120)。
 
-- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Private outsider and missing access RPCs are NotFound; participant access succeeds and existing public spectator closes after privacy changes.
+- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (事例を直接検証): 非公開対局の参加者以外と存在しない対局へのアクセス確認RPCはNotFoundとなる。参加者のアクセスは成功し、公開範囲の変更後は既存の観戦者の接続を閉じる。
 
-未検証: No query-count assertion proves the access-only operation skips history, and every storage/access corruption branch is not enumerated.
+未検証: アクセス可否だけを調べる処理が履歴の読み込みを省くことを示す問い合わせ回数の検証はなく、ストレージやアクセス情報の破損分岐もすべては列挙していない。
 
 <a id="contract-durable-read"></a>
 
 ### durable-read
 
-PostgreSQL joins game metadata and ordered receipts in one coherent read; viewer read applies its visibility filter to that view.
+PostgreSQL は対局メタデータと順序付き受理記録を、一つの整合した読み取りで結合する。閲覧者向け読み取りは、その同じ結果に公開範囲のフィルターを適用する。
 
 実装位置: [crates/game-persistence/src/lib.rs](../../../crates/game-persistence/src/lib.rs#L77)。
 
-- [test-game-persistence-test-contracts-contracts-game-snapshots-access-durable-read-joined-history-load-remains-coherent-during-concurrent-commits](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-durable-read-joined-history-load-remains-coherent-during-concurrent-commits) (asserts): Concurrent writer/read loop compares version with journal length and final result with last receipt; independent snapshot reconstruction succeeds.
-- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (exercises): Viewer read exercises the private/participant access paths.
+- [test-game-persistence-test-contracts-contracts-game-snapshots-access-durable-read-joined-history-load-remains-coherent-during-concurrent-commits](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-durable-read-joined-history-load-remains-coherent-during-concurrent-commits) (事例を直接検証): 書き込みと読み取りの並行ループで、バージョンと履歴長、最終結果と最後の受理記録を比較し、独立したスナップショット復元が成功する。
+- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (処理を通る): 閲覧者用の読み取り処理で、非公開対局と参加者のアクセス確認の経路を通す。
 
-未検証: Concurrent ordinary joined reads are asserted; concurrent viewer visibility/history changes are not independently asserted.
+未検証: 通常の結合読み取りを並行する場合は検証している。閲覧者向けの公開範囲と履歴の同時変更は、独立には検証していない。
 
 <a id="contract-grpc-shape"></a>
 
 ### grpc-shape
 
-Snapshot conversion includes participant bindings, sequence, occupied board squares, both players/all hand kinds, turn/check/result and legal USI moves.
+スナップショットの変換には、参加者の割り当て、シーケンス、駒がある升目、両者のすべての持ち駒、手番・王手・結果、合法 USI 手を含める。
 
 実装位置: [crates/game-grpc/src/conversion.rs](../../../crates/game-grpc/src/conversion.rs#L97)。
 
-- [test-game-grpc-test-tcp-tcp-game-play-domain-play-generated-client-plays-capture-promotion-recapture-drop-and-resignation](#test-test-game-grpc-test-tcp-tcp-game-play-domain-play-generated-client-plays-capture-promotion-recapture-drop-and-resignation) (asserts): TCP assertions check initial sequence/40 pieces/14 zero hands/Black turn/30 moves and selected capture/promotion/drop values; resignation retains position and returns result with empty legal moves.
+- [test-game-grpc-test-tcp-tcp-game-play-domain-play-generated-client-plays-capture-promotion-recapture-drop-and-resignation](#test-test-game-grpc-test-tcp-tcp-game-play-domain-play-generated-client-plays-capture-promotion-recapture-drop-and-resignation) (事例を直接検証): TCP経由で、初期連番、盤上の40枚の駒、14種類の持ち駒数0、先手の手番、30個の合法手と、選択した駒取り・成り・駒打ちの値を検証する。投了では局面を保持し、終局結果と空の合法手を返す。
 
-未検証: The selected transport test does not compare the complete board/hand ordering or every piece/enum conversion branch.
+未検証: 選択した通信テストは、盤面と持ち駒の完全な順序や、すべての駒・列挙型の変換分岐を比較しない。
 
 <a id="contract-grpc-viewer"></a>
 
 ### grpc-viewer
 
-GetSnapshotForViewer and CheckViewAccess validate game/viewer IDs, forward caller viewer claims and map application errors without authenticating the claim.
+GetSnapshotForViewer と CheckViewAccess は対局・閲覧者 ID を検証し、呼び出し元の閲覧者の申告を渡してアプリケーションエラーを変換するが、その申告自体は認証しない。
 
 実装位置: [crates/game-grpc/src/service.rs](../../../crates/game-grpc/src/service.rs#L121)。
 
-- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Generated TCP RPCs assert both private/missing errors and participant success through real gateway fixture services.
+- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (事例を直接検証): 生成されたTCPのRPCを実際のゲートウェイ用テストサービスに通し、非公開・不存在のエラーと参加者の成功を検証する。
 
-未検証: Malformed viewer/game ID boundaries are not individually asserted on both viewer RPCs.
+未検証: 閲覧者向けの両 RPC で、不正な閲覧者 ID と対局 ID の境界をそれぞれ検証してはいない。
 
 <a id="contract-owned-position"></a>
 
 ### owned-position
 
-Domain positions and cloned games own their board, hands and terminal result independently.
+ドメインの局面と複製した対局は、それぞれ独立して盤面・持ち駒・終局結果を所有する。
 
 実装位置: [crates/shogi-domain/src/lib.rs](../../../crates/shogi-domain/src/lib.rs#L120)。
 
-- [test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-cloned-games-own-their-position-and-terminal-result](#test-test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-cloned-games-own-their-position-and-terminal-result) (asserts): Clones retain independent position and result through move/resign mutations.
-- [test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-initial-position-and-snapshot-independence](#test-test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-initial-position-and-snapshot-independence) (asserts): Mutating a game does not change a previously returned position.
+- [test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-cloned-games-own-their-position-and-terminal-result](#test-test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-cloned-games-own-their-position-and-terminal-result) (事例を直接検証): 着手・投了で変更しても、複製した対局は独立した局面と結果を保持する。
+- [test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-initial-position-and-snapshot-independence](#test-test-shogi-domain-lib-shogi-domain-tests-game-snapshots-access-owned-position-initial-position-and-snapshot-independence) (事例を直接検証): 対局を変更しても、以前に返された局面は変化しない。
 
 <a id="contract-restore"></a>
 
 ### restore
 
-Restoration validates receipt sequence, uniqueness, participant legality, acceptance and final metadata while replaying from the standard initial game.
+復元処理は標準初期局面から操作を再現し、受理記録のシーケンス、一意性、参加者の正当性、受理結果、最終メタデータを検証する。
 
 実装位置: [crates/game-application/src/actor.rs](../../../crates/game-application/src/actor.rs#L51)。
 
-- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts) (asserts): Restored ongoing and finished snapshots equal their earlier snapshots.
-- [test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-corrupt-history-and-metadata-fail-closed](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-corrupt-history-and-metadata-fail-closed) (asserts): Changed check/USI/owner/request, version, terminal metadata and deleted receipt all yield Corrupt on restoration.
-- [test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-reconnecting-restores-position-hands-promotion-and-receipts-even-after-finish](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-reconnecting-restores-position-hands-promotion-and-receipts-even-after-finish) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-game-persistence-test-records-records-game-snapshots-access-restore-reopening-preserves-current-records-history-and-outbox](#test-test-game-persistence-test-records-records-game-snapshots-access-restore-reopening-preserves-current-records-history-and-outbox) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts) (事例を直接検証): 復旧した進行中・終局済みのスナップショットが、それぞれ以前の値と一致する。
+- [test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-corrupt-history-and-metadata-fail-closed](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-corrupt-history-and-metadata-fail-closed) (事例を直接検証): 王手・USI・所有者・リクエスト・バージョン・終局メタデータの変更と受理記録の削除は、復元時にいずれも Corrupt となる。
+- [test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-reconnecting-restores-position-hands-promotion-and-receipts-even-after-finish](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-restore-reconnecting-restores-position-hands-promotion-and-receipts-even-after-finish) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
+- [test-game-persistence-test-records-records-game-snapshots-access-restore-reopening-preserves-current-records-history-and-outbox](#test-test-game-persistence-test-records-records-game-snapshots-access-restore-reopening-preserves-current-records-history-and-outbox) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
 
 <a id="contract-snapshot-refresh"></a>
 
 ### snapshot-refresh
 
-Ordinary snapshot requests refresh durable version before serving actor state; storage failure cannot fall back to the cached position.
+通常のスナップショット要求は、アクターの状態を返す前に永続バージョンを確認する。ストレージ失敗時にキャッシュした局面へ切り替えることはない。
 
 実装位置: [crates/game-application/src/actor.rs](../../../crates/game-application/src/actor.rs#L151)。
 
-- [test-game-application-lib-game-application-actor-tests-game-snapshots-access-snapshot-refresh-unknown-games-never-register-actors](#test-test-game-application-lib-game-application-actor-tests-game-snapshots-access-snapshot-refresh-unknown-games-never-register-actors) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts) (asserts): Across two service restarts ongoing and finished snapshots equal saved snapshots.
-- [test-game-persistence-test-contracts-contracts-game-snapshots-access-snapshot-refresh-closing-the-pool-makes-the-game-service-unavailable](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-snapshot-refresh-closing-the-pool-makes-the-game-service-unavailable) (asserts): Closing the real pool makes cached service snapshot return Unavailable.
+- [test-game-application-lib-game-application-actor-tests-game-snapshots-access-snapshot-refresh-unknown-games-never-register-actors](#test-test-game-application-lib-game-application-actor-tests-game-snapshots-access-snapshot-refresh-unknown-games-never-register-actors) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
+- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts) (事例を直接検証): サービスを2回再起動しても、進行中・終局済みのスナップショットが保存した値と一致する。
+- [test-game-persistence-test-contracts-contracts-game-snapshots-access-snapshot-refresh-closing-the-pool-makes-the-game-service-unavailable](#test-test-game-persistence-test-contracts-contracts-game-snapshots-access-snapshot-refresh-closing-the-pool-makes-the-game-service-unavailable) (事例を直接検証): 実際の接続プールを閉じると、キャッシュ済みサービスのスナップショット取得が Unavailable を返す。
 
 <a id="contract-viewer-read"></a>
 
 ### viewer-read
 
-snapshot_for_viewer uses one repository access/history view, rejects access or game-identity mismatch and reconstructs the owned snapshot.
+snapshot_for_viewer は、リポジトリの一つのアクセス情報・履歴の読み取り結果を使う。アクセス不能や対局の識別子不一致を拒否し、所有するスナップショットを復元する。
 
 実装位置: [crates/game-application/src/lib.rs](../../../crates/game-application/src/lib.rs#L104)。
 
-- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (asserts): Private outsider and absent viewer snapshot are NotFound while participant snapshot succeeds.
+- [test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant](#test-test-realtime-gateway-test-services-services-game-snapshots-access-access-policy-private-games-are-hidden-and-spectators-cannot-mutate-or-spoof-a-participant) (事例を直接検証): 非公開対局の参加者以外と存在しない対局の閲覧者用スナップショットはNotFoundとなる。参加者のスナップショット取得は成功する。
 
-未検証: No concurrent privacy plus history mutation test independently establishes the complete coherent viewer-read contract.
+未検証: 公開範囲と履歴を同時に変更する専用テストはなく、閲覧者読み取り全体の整合性の契約を独立には確認していない。
 
 ## 実在するテストと実行コマンド
 
@@ -192,7 +192,7 @@ snapshot_for_viewer uses one repository access/history view, rejects access or g
 
 テスト位置: [crates/game-application/src/trace/game-snapshots-access/snapshot-refresh/tests.rs](../../../crates/game-application/src/trace/game-snapshots-access/snapshot-refresh/tests.rs#L4)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_snapshots_access_snapshot_refresh::unknown_games_never_register_actors -- --exact --format pretty --color never
@@ -204,7 +204,7 @@ cargo test --locked -p game-application --lib actor::tests::game_snapshots_acces
 
 テスト位置: [crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs#L65)。
 
-範囲: Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup. Reopens storage and TCP listener twice.
+範囲: 生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。 保存層とTCPの待ち受けを2回開き直す。
 
 ```sh
 cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_replay::generated_tcp_client_restores_database_across_two_server_restarts -- --exact --format pretty --color never
@@ -216,7 +216,7 @@ cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_replay::g
 
 テスト位置: [crates/game-grpc/tests/trace/game-play/domain-play/tests.rs](../../../crates/game-grpc/tests/trace/game-play/domain-play/tests.rs#L11)。
 
-範囲: Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.
+範囲: 生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。
 
 ```sh
 cargo test --locked -p game-grpc --test tcp tcp::game_play_domain_play::generated_client_plays_capture_promotion_recapture_drop_and_resignation -- --exact --format pretty --color never
@@ -228,7 +228,7 @@ cargo test --locked -p game-grpc --test tcp tcp::game_play_domain_play::generate
 
 テスト位置: [crates/game-persistence/tests/trace/game-snapshots-access/durable-read/tests.rs](../../../crates/game-persistence/tests/trace/game-snapshots-access/durable-read/tests.rs#L11)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Concurrent real commits and ordinary repository loads.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のコミットと通常のリポジトリ読み込みを並行実行する。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_snapshots_access_durable_read::joined_history_load_remains_coherent_during_concurrent_commits -- --exact --format pretty --color never
@@ -240,7 +240,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_snapsho
 
 テスト位置: [crates/game-persistence/tests/trace/game-snapshots-access/restore/contracts.rs](../../../crates/game-persistence/tests/trace/game-snapshots-access/restore/contracts.rs#L62)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Direct SQL corrupts seven journal/metadata cases.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。直接 SQL を使い、履歴とメタデータを七種類破損させる。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_snapshots_access_restore::corrupt_history_and_metadata_fail_closed -- --exact --format pretty --color never
@@ -252,7 +252,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_snapsho
 
 テスト位置: [crates/game-persistence/tests/trace/game-snapshots-access/restore/contracts.rs](../../../crates/game-persistence/tests/trace/game-snapshots-access/restore/contracts.rs#L4)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_snapshots_access_restore::reconnecting_restores_position_hands_promotion_and_receipts_even_after_finish -- --exact --format pretty --color never
@@ -264,7 +264,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_snapsho
 
 テスト位置: [crates/game-persistence/tests/trace/game-snapshots-access/snapshot-refresh/tests.rs](../../../crates/game-persistence/tests/trace/game-snapshots-access/snapshot-refresh/tests.rs#L11)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_snapshots_access_snapshot_refresh::closing_the_pool_makes_the_game_service_unavailable -- --exact --format pretty --color never
@@ -276,7 +276,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_snapsho
 
 テスト位置: [crates/game-persistence/tests/trace/game-snapshots-access/restore/records.rs](../../../crates/game-persistence/tests/trace/game-snapshots-access/restore/records.rs#L4)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-persistence --test records records::game_snapshots_access_restore::reopening_preserves_current_records_history_and_outbox -- --exact --format pretty --color never
@@ -288,7 +288,7 @@ cargo test --locked -p game-persistence --test records records::game_snapshots_a
 
 テスト位置: [crates/realtime-gateway/tests/trace/game-snapshots-access/access-policy/tests.rs](../../../crates/realtime-gateway/tests/trace/game-snapshots-access/access-policy/tests.rs#L11)。
 
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
+範囲: 実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。
 
 ```sh
 cargo test --locked -p realtime-gateway --test services services::game_snapshots_access_access_policy::private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant -- --exact --format pretty --color never
@@ -300,7 +300,7 @@ cargo test --locked -p realtime-gateway --test services services::game_snapshots
 
 テスト位置: [crates/shogi-domain/src/trace/game-snapshots-access/owned-position/tests.rs](../../../crates/shogi-domain/src/trace/game-snapshots-access/owned-position/tests.rs#L50)。
 
-範囲: Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport.
+範囲: shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。
 
 ```sh
 cargo test --locked -p shogi-domain --lib tests::game_snapshots_access_owned_position::cloned_games_own_their_position_and_terminal_result -- --exact --format pretty --color never
@@ -312,7 +312,7 @@ cargo test --locked -p shogi-domain --lib tests::game_snapshots_access_owned_pos
 
 テスト位置: [crates/shogi-domain/src/trace/game-snapshots-access/owned-position/tests.rs](../../../crates/shogi-domain/src/trace/game-snapshots-access/owned-position/tests.rs#L11)。
 
-範囲: Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport.
+範囲: shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。
 
 ```sh
 cargo test --locked -p shogi-domain --lib tests::game_snapshots_access_owned_position::initial_position_and_snapshot_independence -- --exact --format pretty --color never
@@ -320,17 +320,17 @@ cargo test --locked -p shogi-domain --lib tests::game_snapshots_access_owned_pos
 
 ## 検査と根拠の限界
 
-check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
+check はグラフ、ファイル内の一意なテキスト位置、パッケージとターゲットごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
-この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
+この文書には実行済みの成功状態を保存しない。CI のワークスペース全体のテスト実行結果は、その実行時点の結果となる。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
-- Trusted gRPC caller user/viewer IDs are claims; authentication belongs to the gateway. GetSnapshot is an internal trusted read.
-- No independent query-count or concurrent privacy/history assertion covers every viewer-read implementation property.
-- Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review.
+- 信頼済み gRPC 呼び出し元のユーザー ID と閲覧者 ID は申告値であり、認証はゲートウェイが担う。GetSnapshot は内部の信頼済み読み取りである。
+- 閲覧者向け読み取り実装の各性質をすべて確認する、独立した問い合わせ回数の検証や、公開範囲と履歴の同時変更の検証はない。
+- リンクとテスト成功だけでは意味上の完全性は成立しない。保証、根拠の強さ、分割の変更にはレビューが必要となる。
 
 ## ディレクトリ方式の検査範囲
 
-Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
-src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
-全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。
+Rust 宣言、通常のモジュールと文字列リテラルの include! から物理ファイルの所属、パッケージ、ターゲット、完全なテスト名と位置を抽出する。ホスト環境で Cargo の既定の機能フラグを使い、ワークスペースのライブラリ、バイナリ、結合テストの全テスト一覧と一致させる。別のターゲット、機能フラグ、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは「所属のみ・未レビュー」として追加する。「事例を直接検証」または「処理を通る」のレビュー済み根拠がない契約には未検証事項の gap 宣言が必要。
+全ターゲットの未分類テストは拒否する。trace ディレクトリ内の未対応の項目マクロと cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト実行補助と基盤の検査の明示分類および理由は全機能の一覧に示す。

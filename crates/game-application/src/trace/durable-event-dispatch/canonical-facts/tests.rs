@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure receipt-to-event construction, no PostgreSQL or transport.",
-        reason: "Direct assertions compare canonical move, mate and resignation facts and reject inconsistent action/result combinations.",
+        scope: "受理記録からイベントを作る外部依存のない処理を検証し、PostgreSQL や通信は使わない。",
+        reason: "正規の着手・詰み・投了のイベントを直接比較し、矛盾する操作と結果の組み合わせを拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "canonical-events", scope: "Direct StagedGameChange construction with synthetic receipts; no played checkmate or database.", relationship: crate::trace_support::Relationship::Asserts, reason: "Exact normal move, same-sequence move-then-mate-finish and resignation batches are compared; inconsistent action/result cases reject." }],
+        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "canonical-events", scope: "合成した受理記録から StagedGameChange を直接構築する。詰みに至る実際の対局やデータベースは使わない。", relationship: crate::trace_support::Relationship::Asserts, reason: "通常の着手、同一シーケンスでの着手と詰みによる終局、投了の各イベント列を完全に比較する。矛盾する操作と結果は拒否する。" }],
     };
 #[test]
     fn canonical_move_mate_and_resignation_events() {
@@ -64,10 +64,10 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure staged sequence boundary and continuity cases.",
-        reason: "Direct sequence cases check storage limits before continuity and reject nonconsecutive accepted sequences.",
+        scope: "外部依存のない、ステージ済みシーケンスの境界と連続性の事例を検証する。",
+        reason: "受理シーケンスを直接与え、連続性より先に保存範囲の上限を確認し、連続しないシーケンスを拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "canonical-events", scope: "Direct synthetic receipt sequence boundaries.", relationship: crate::trace_support::Relationship::Asserts, reason: "Zero/noncontiguous/max/out-of-range acceptance and expected sequence boundaries are checked." }],
+        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "canonical-events", scope: "合成した受理記録でシーケンス境界を直接検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "0・不連続・最大値・範囲外の受理シーケンスと、予想シーケンスの境界を確認する。" }],
     };
 #[test]
     fn staging_checks_sequence_bounds_before_continuity() {

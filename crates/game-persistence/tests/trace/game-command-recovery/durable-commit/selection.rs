@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Terminal invariant failure via direct DB fixture changes.",
-        reason: "Missing both terminal ticket records prevents result/receipt/outbox/job writes together.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。データベースのテスト用データを直接変更し、終局の不変条件を破る。",
+        reason: "終端チケットの記録が両方とも欠けている場合、結果・受理記録・Outbox・ジョブの書き込みをすべて止める。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL writer/outbox persistence, replay, rejection, restoration and frozen payload.",
-        reason: "Real database assertions count events after replay, rejection and restoration and prove payload remains frozen after journal mutation.",
+        scope: "実際の PostgreSQL の書き込みと Outbox の永続化、再試行、拒否、復元、固定されたイベント内容を検証する。",
+        reason: "実データベースで、再試行・拒否・復元後のイベント数を確認し、履歴を書き換えてもイベント内容が固定されたままであることを検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "durable-event-dispatch", contract: "exclusive-queue", scope: "Real PostgreSQL writer/outbox persistence, replay, rejection, restoration and frozen payload.", relationship: crate::trace_support::Relationship::Asserts, reason: "Real PostgreSQL returns the frozen move before the sequence-two finish; marking the first row twice still leaves the finish pending." }, crate::trace_support::Evidence { feature: "game-command-recovery", contract: "canonical-events", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Reads canonical persisted events; no broker delivery guarantee.", relationship: crate::trace_support::Relationship::Asserts, reason: "Persisted event payload stays frozen; retry/rejection/restoration add no duplicate events." }],
+        also: &[crate::trace_support::Evidence { feature: "durable-event-dispatch", contract: "exclusive-queue", scope: "実際の PostgreSQL の書き込みと Outbox の永続化、再試行、拒否、復元、固定されたイベント内容を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "実際の PostgreSQL は、シーケンス 2 の終局より先に、固定された着手を返す。最初の行を二度処理済みにしても、終局イベントは未処理のまま残る。" }, crate::trace_support::Evidence { feature: "game-command-recovery", contract: "canonical-events", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。永続化した正規イベントを読み取るが、ブローカー経由の配信は保証しない。", relationship: crate::trace_support::Relationship::Asserts, reason: "永続化したイベントの内容は固定され、再試行・拒否・復元でイベントを重複追加しない。" }],
     };
 #[tokio::test]
     async fn retry_rejection_restoration_and_frozen_payload() {
@@ -67,10 +67,10 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL trigger-injected enqueue failure and rollback.",
-        reason: "An enqueue-failing trigger rolls back game metadata, journal and outbox.",
+        scope: "実際の PostgreSQL で、トリガーによるキュー追加失敗の注入とロールバックを検証する。",
+        reason: "キューへの追加を失敗させるトリガーによって、対局メタデータ・履歴・Outbox をロールバックする。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "durable-commit", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Injected outbox enqueue failure.", relationship: crate::trace_support::Relationship::Asserts, reason: "Outbox enqueue failure rolls back game metadata, journal and events." }],
+        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "durable-commit", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。Outbox への追加失敗を注入する。", relationship: crate::trace_support::Relationship::Asserts, reason: "Outbox への追加失敗は、対局メタデータ・履歴・イベントをロールバックする。" }],
     };
 #[tokio::test]
     async fn failed_enqueue_rolls_back_metadata_journal_and_events() {
@@ -95,8 +95,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL uncertain commit injection and idempotent retry.",
-        reason: "Retry after an uncertain real commit yields one outbox row.",
+        scope: "実際の PostgreSQL で、成否不明のコミットを注入し、冪等な再試行を検証する。",
+        reason: "実際のコミットの成否が不明となった後に再試行しても、Outbox の行は一件となる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

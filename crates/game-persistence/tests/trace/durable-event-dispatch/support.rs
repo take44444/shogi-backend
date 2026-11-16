@@ -84,7 +84,7 @@ impl GameRepository for Uncertain {
     }
 }
 
-crate::trace_support::helper! { "Child-process harness invoked only by the publisher lock driver.";
+crate::trace_support::helper! { "配信ロックの駆動テストからだけ呼び出す、子プロセス用の補助テスト。";
 #[test]
 fn publisher_lock_probe() {
     let Ok(url) = std::env::var("OUTBOX_LOCK_PROBE_URL") else {

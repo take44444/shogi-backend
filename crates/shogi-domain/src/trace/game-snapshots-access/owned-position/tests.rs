@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport.",
-        reason: "Mutating a game does not change a previously returned position.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。",
+        reason: "対局を変更しても、以前に返された局面は変化しない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -41,8 +41,8 @@ fn initial_position_and_snapshot_independence() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport.",
-        reason: "Clones retain independent position and result through move/resign mutations.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。",
+        reason: "着手・投了で変更しても、複製した対局は独立した局面と結果を保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

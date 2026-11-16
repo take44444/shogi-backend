@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure BrowserConfig validation; no environment mutation, Google request or process startup.",
-        reason: "Direct cases accept HTTPS and explicit localhost/IPv6 loopback development, reject unsafe origins and compare the HTTPS callback URL.",
+        scope: "BrowserConfig の値を直接検証する。環境変数の変更、Google へのリクエスト、プロセスの起動は行わない。",
+        reason: "HTTPS と、明示的に指定した localhost・IPv6 ループバックでの開発用設定を受け入れること、安全でない Origin を拒否すること、HTTPS のコールバック URL が一致することを直接確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

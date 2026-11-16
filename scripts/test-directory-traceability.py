@@ -122,7 +122,7 @@ trace_support::example!(trace_support::Example {{
         self.assertEqual(relationships, {"asserts", "unreviewed"})
         document = (self.root / "docs/reference/traceability/demo.md").read_text()
         self.assertIn("automatically_discovered", document)
-        self.assertIn("unreviewed", document)
+        self.assertIn("所属のみ・未レビュー", document)
 
     def test_unreviewed_only_contract_requires_gap(self):
         self.tests.write_text("#[test]\nfn ordinary() {}\n")

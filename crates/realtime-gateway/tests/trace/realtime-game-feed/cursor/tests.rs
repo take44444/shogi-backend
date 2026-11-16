@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Publishes controlled invalid/gapped notifications directly.",
-        reason: "Real malformed schema and gapped published event terminate the WebSocket.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 不正な通知や連番が欠落した通知を、制御した内容で直接配信する。",
+        reason: "実際に配信した不正なスキーマと連番が欠落したイベントによって、WebSocketが終了する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "subscription-pump", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Publishes controlled invalid/gapped notifications directly.", relationship: crate::trace_support::Relationship::Asserts, reason: "WebSocket closes on malformed schema or gap, exercising the pump and asserting the connection-level failure response." }],
+        also: &[crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "subscription-pump", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 不正な通知や連番が欠落した通知を、制御した内容で直接配信する。", relationship: crate::trace_support::Relationship::Asserts, reason: "不正なスキーマや連番の欠落でWebSocketが閉じることを確認する。通知の転送処理を通し、接続単位の障害応答を検証する。" }],
     };
 #[tokio::test]
 async fn malformed_or_gapped_broker_notifications_require_a_new_connection() {

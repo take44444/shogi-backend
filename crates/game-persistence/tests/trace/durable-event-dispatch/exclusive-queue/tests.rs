@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL lock owner and spawned lock-probe process; registers the driver rather than the inert helper.",
-        reason: "A child process cannot acquire the publisher lock until the owner drops it.",
+        scope: "実際の PostgreSQL のロック所有者と起動したロック確認用プロセスを検証する。何もしない補助テストではなく、それを駆動するテストを登録する。",
+        reason: "所有者が配信ロックを解放するまで、子プロセスはそのロックを取得できない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -40,8 +40,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL delivery-boundary observation with a test publisher.",
-        reason: "At the delivery boundary PostgreSQL reports no open transaction and another writer can commit.",
+        scope: "テスト用配信先を使い、実際の PostgreSQL を配信呼び出しの境界で観測する。",
+        reason: "配信を呼び出す境界で、PostgreSQL に開いたトランザクションがないことと、別の書き込み処理がコミットできることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -75,8 +75,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL session termination and replacement queue.",
-        reason: "Terminating the owning database session causes the old queue to fail; a replacement resumes the same pending event.",
+        scope: "実際の PostgreSQL で、セッションの強制終了と代替キューを検証する。",
+        reason: "所有するデータベースセッションを強制終了すると、古いキューは失敗する。代替キューは同じ未処理イベントから再開する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -109,8 +109,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL pending-event decoding rejects an unsupported encoding version.",
-        reason: "Changing a persisted event encoding version to 99 makes next_pending return Corrupt.",
+        scope: "実際の PostgreSQL で、未処理イベントの復号が未対応の符号化バージョンを拒否することを検証する。",
+        reason: "保存済みイベントの符号化バージョンを 99 に変えると、next_pending が Corrupt を返す。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -130,8 +130,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL frozen-event identifier preservation and exact-row marking.",
-        reason: "A real queue round trip preserves game, request and participant identifiers containing NUL and backslashes.",
+        scope: "実際の PostgreSQL で、固定イベントの識別子の保持と、対象行だけの処理済み更新を検証する。",
+        reason: "実際のキューを往復しても、NUL とバックスラッシュを含む対局・リクエスト・参加者の識別子を保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

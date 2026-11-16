@@ -30,8 +30,8 @@ async fn concurrent_identical_retries_all_receive_original_acceptance() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.",
-        reason: "Every tested rejection preserves full snapshot and leaves the request ID reusable.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
+        reason: "検証対象のすべての拒否で、スナップショット全体を保持し、リクエスト ID を再利用できる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -136,8 +136,8 @@ async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.",
-        reason: "Same request identity in separate games/services remains independent.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
+        reason: "別の対局やサービスで同じリクエスト識別子を使っても、それぞれ独立している。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

@@ -53,8 +53,8 @@ async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Direct SQL corrupts seven journal/metadata cases.",
-        reason: "Changed check/USI/owner/request, version, terminal metadata and deleted receipt all yield Corrupt on restoration.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。直接 SQL を使い、履歴とメタデータを七種類破損させる。",
+        reason: "王手・USI・所有者・リクエスト・バージョン・終局メタデータの変更と受理記録の削除は、復元時にいずれも Corrupt となる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
