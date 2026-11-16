@@ -440,36 +440,8 @@ fn decode(value: String) -> Result<String, Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    include!(
-        "trace/public-record-search/public-keysets/identifier_codec_preserves_storage_escapes_and_rejects_malformed_values.rs"
-    );
-
-    async fn initialize(url: &str) {
-        let pool = PgPool::connect(url).await.unwrap();
-        sqlx::raw_sql(include_str!(
-            "../../game-persistence/tests/fixtures/schema-v7.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-        pool.close().await;
-    }
-
-    include!(
-        "trace/startup-schema-isolation/reader-permissions/database_role_denies_writes_even_when_read_only_mode_is_disabled.rs"
-    );
-
-    include!(
-        "trace/startup-schema-isolation/reader-boundary/fifth_reader_connection_times_out_until_one_of_four_is_released.rs"
-    );
-
-    include!(
-        "trace/startup-schema-isolation/reader-boundary/statement_timeout_interrupts_real_database_work_and_connection_recovers.rs"
-    );
-}
+#[path = "trace/public-record-search/support.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]

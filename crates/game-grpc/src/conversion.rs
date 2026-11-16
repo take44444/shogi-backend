@@ -143,13 +143,5 @@ impl From<Snapshot> for proto::Snapshot {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tonic::Code;
-
-    include!(
-        "trace/game-play/rpc-errors/infrastructure_and_rules_errors_have_stable_status_codes.rs"
-    );
-
-    include!("trace/game-play/rpc-errors/checkmate_result_preserves_winner_and_reason.rs");
-}
+#[path = "trace/game-play/rpc-errors/tests.rs"]
+mod tests;

@@ -124,13 +124,8 @@ pub fn calculate(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    include!("trace/rating-application/pure-calculation/equal_players_gain_and_lose_sixteen.rs");
-    include!(
-        "trace/rating-application/pure-calculation/expected_upsets_and_extremes_are_zero_sum_and_checked.rs"
-    );
-}
+#[path = "trace/rating-application/pure-calculation/tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]

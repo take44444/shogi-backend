@@ -140,6 +140,7 @@ impl Game {
 }
 
 #[cfg(test)]
+#[path = "trace/game-play/support.rs"]
 mod tests;
 
 #[cfg(test)]

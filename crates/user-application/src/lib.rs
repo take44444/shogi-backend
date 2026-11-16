@@ -81,12 +81,8 @@ pub trait AccountRepository: Send + Sync {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    include!(
-        "trace/account-profile/display-name/display_names_are_trimmed_and_bound_in_unicode_characters.rs"
-    );
-}
+#[path = "trace/account-profile/display-name/tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]

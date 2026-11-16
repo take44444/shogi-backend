@@ -18,7 +18,7 @@ crate::trace_support::case! {
         ));
         assert!(
             std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "publisher_lock_probe", "--nocapture"])
+                .args(["--exact", "outbox::publisher_lock_probe", "--nocapture"])
                 .env("OUTBOX_LOCK_PROBE_URL", url)
                 .env("OUTBOX_LOCK_PROBE_HELD", "1")
                 .status()
@@ -28,7 +28,7 @@ crate::trace_support::case! {
         drop(queue);
         assert!(
             std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "publisher_lock_probe", "--nocapture"])
+                .args(["--exact", "outbox::publisher_lock_probe", "--nocapture"])
                 .env("OUTBOX_LOCK_PROBE_URL", url)
                 .env("OUTBOX_LOCK_PROBE_HELD", "0")
                 .status()

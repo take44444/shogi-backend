@@ -43,14 +43,14 @@ flowchart TD
     n7["contract: event-frame"]
     n8["contract: snapshot-frame"]
     n9["contract: subscription-pump"]
-    n10["test: test-game-messaging-lib-game-messaging-tests-decoder-roundtrips-publisher-and-rejects-mismatches"]
+    n10["test: test-game-messaging-lib-game-messaging-tests-realtime-game-feed-event-frame-decoder-roundtrips-publisher-and-rejects-mismatches"]
     n11["test: test-realtime-gateway-lib-realtime-gateway-cursor-tests-gaps-and-unpaired-checkmate-finish-require-resync"]
     n12["test: test-realtime-gateway-lib-realtime-gateway-cursor-tests-same-sequence-checkmate-pair-and-conflicts"]
-    n13["test: test-realtime-gateway-test-services-bounded-valkey-subscription-overflow-is-terminal"]
-    n14["test: test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot"]
-    n15["test: test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move"]
-    n16["test: test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection"]
-    n17["test: test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation"]
+    n13["test: test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot"]
+    n14["test: test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move"]
+    n15["test: test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation"]
+    n16["test: test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection"]
+    n17["test: test-realtime-gateway-test-services-services-realtime-game-feed-subscription-pump-bounded-valkey-subscription-overflow-is-terminal"]
     n0 --> n1
     n1 --> n5
     n1 --> n8
@@ -63,18 +63,18 @@ flowchart TD
     n0 --> n4
     n4 --> n5
     n4 --> n6
+    n5 -->|asserts| n13
     n5 -->|asserts| n14
     n5 -->|asserts| n15
-    n5 -->|asserts| n17
     n6 -->|asserts| n11
     n6 -->|asserts| n12
     n6 -->|asserts| n16
     n7 -->|unreviewed| n10
-    n7 -->|asserts| n17
-    n8 -->|asserts| n14
-    n8 -->|asserts| n17
-    n9 -->|unreviewed| n13
+    n7 -->|asserts| n15
+    n8 -->|asserts| n13
+    n8 -->|asserts| n15
     n9 -->|asserts| n16
+    n9 -->|unreviewed| n17
 ```
 
 ## コンポーネント契約と根拠
@@ -87,9 +87,9 @@ run_connection subscribes and pumps before viewer snapshot, validates and queues
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L502)。
 
-- [test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot](#test-test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot) (asserts): Holds frozen seq-0 snapshot, verifies real subscriber, commits/publishes seq 1, then receives snapshot 0 followed by event 1.
-- [test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move](#test-test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move) (asserts): Reconnect snapshot is seq 1 and retry returns original accepted seq 1 with one persisted event.
-- [test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): Three real WebSockets receive initial snapshot, two committed moves and resignation.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot](#test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot) (asserts): Holds frozen seq-0 snapshot, verifies real subscriber, commits/publishes seq 1, then receives snapshot 0 followed by event 1.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move](#test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move) (asserts): Reconnect snapshot is seq 1 and retry returns original accepted seq 1 with one persisted event.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): Three real WebSockets receive initial snapshot, two committed moves and resignation.
 
 未検証: No live broker disconnect/reconnect end-to-end assertion proves every subscription-loss path; reconnect does not replay a durable event log.
 
@@ -103,7 +103,7 @@ ConnectionState accepts only contiguous coherent committed facts, drops exact du
 
 - [test-realtime-gateway-lib-realtime-gateway-cursor-tests-gaps-and-unpaired-checkmate-finish-require-resync](#test-test-realtime-gateway-lib-realtime-gateway-cursor-tests-gaps-and-unpaired-checkmate-finish-require-resync) (asserts): Old boundary event ignores; unpaired mate finish and sequence gap resync.
 - [test-realtime-gateway-lib-realtime-gateway-cursor-tests-same-sequence-checkmate-pair-and-conflicts](#test-test-realtime-gateway-lib-realtime-gateway-cursor-tests-same-sequence-checkmate-pair-and-conflicts) (asserts): Move then matching mate finish deliver, exact duplicates ignore and conflicting same-sequence move resyncs.
-- [test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection](#test-test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection) (asserts): Real malformed schema and gapped published event terminate the WebSocket.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection](#test-test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection) (asserts): Real malformed schema and gapped published event terminate the WebSocket.
 
 未検証: No real WebSocket checkmate pair assertion; direct cursor tests use synthetic committed notifications. The close helper allows either resync_required then close or immediate close.
 
@@ -115,8 +115,8 @@ event_json emits stable event identity with game/sequence/kind and move/result f
 
 実装位置: [crates/realtime-gateway/src/cursor.rs](../../../crates/realtime-gateway/src/cursor.rs#L110)。
 
-- [test-game-messaging-lib-game-messaging-tests-decoder-roundtrips-publisher-and-rejects-mismatches](#test-test-game-messaging-lib-game-messaging-tests-decoder-roundtrips-publisher-and-rejects-mismatches) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): Players and spectator assert move/resignation kinds, USI/results, and absence of user_id/request_id.
+- [test-game-messaging-lib-game-messaging-tests-realtime-game-feed-event-frame-decoder-roundtrips-publisher-and-rejects-mismatches](#test-test-game-messaging-lib-game-messaging-tests-realtime-game-feed-event-frame-decoder-roundtrips-publisher-and-rejects-mismatches) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): Players and spectator assert move/resignation kinds, USI/results, and absence of user_id/request_id.
 
 未検証: No direct assertion proves the hex event_id encoding or uniqueness across all game identifiers.
 
@@ -128,8 +128,8 @@ snapshot_json converts viewer snapshot to string sequence, owned board/hands, tu
 
 実装位置: [crates/realtime-gateway/src/game.rs](../../../crates/realtime-gateway/src/game.rs#L242)。
 
-- [test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot](#test-test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot) (asserts): Snapshot sequence zero is observed before the later move frame.
-- [test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): All connected participants and spectator receive snapshot frames with expected game_id/sequence.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot](#test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot) (asserts): Snapshot sequence zero is observed before the later move frame.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation](#test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation) (asserts): All connected participants and spectator receive snapshot frames with expected game_id/sequence.
 
 未検証: Selected WebSocket assertions do not compare every board/hand field or malformed upstream conversion branch; full snapshot component values are covered in game-snapshots-access.
 
@@ -141,8 +141,8 @@ The pump forwards subscription results through a bounded queue and stops on fail
 
 実装位置: [crates/realtime-gateway/src/lib.rs](../../../crates/realtime-gateway/src/lib.rs#L384)。
 
-- [test-realtime-gateway-test-services-bounded-valkey-subscription-overflow-is-terminal](#test-test-realtime-gateway-test-services-bounded-valkey-subscription-overflow-is-terminal) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection](#test-test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection) (asserts): WebSocket closes on malformed schema or gap, exercising the pump and asserting the connection-level failure response.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection](#test-test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection) (asserts): WebSocket closes on malformed schema or gap, exercising the pump and asserting the connection-level failure response.
+- [test-realtime-gateway-test-services-services-realtime-game-feed-subscription-pump-bounded-valkey-subscription-overflow-is-terminal](#test-test-realtime-gateway-test-services-services-realtime-game-feed-subscription-pump-bounded-valkey-subscription-overflow-is-terminal) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
 
 未検証: No selected assertion directly fills the gateway pump queue. Slow-browser output backlog and writer timeout lack dedicated assertions.
 
@@ -150,23 +150,23 @@ The pump forwards subscription results through a bounded queue and stops on fail
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-test-game-messaging-lib-game-messaging-tests-decoder-roundtrips-publisher-and-rejects-mismatches"></a>
+<a id="test-test-game-messaging-lib-game-messaging-tests-realtime-game-feed-event-frame-decoder-roundtrips-publisher-and-rejects-mismatches"></a>
 
-### test-game-messaging-lib-game-messaging-tests-decoder-roundtrips-publisher-and-rejects-mismatches
+### test-game-messaging-lib-game-messaging-tests-realtime-game-feed-event-frame-decoder-roundtrips-publisher-and-rejects-mismatches
 
-テスト位置: [crates/game-messaging/src/trace/realtime-game-feed/event-frame/decoder_roundtrips_publisher_and_rejects_mismatches.rs](../../../crates/game-messaging/src/trace/realtime-game-feed/event-frame/decoder_roundtrips_publisher_and_rejects_mismatches.rs#L2)。
+テスト位置: [crates/game-messaging/src/trace/realtime-game-feed/event-frame/tests.rs](../../../crates/game-messaging/src/trace/realtime-game-feed/event-frame/tests.rs#L4)。
 
 範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
 
 ```sh
-cargo test --locked -p game-messaging --lib tests::decoder_roundtrips_publisher_and_rejects_mismatches -- --exact --format pretty --color never
+cargo test --locked -p game-messaging --lib tests::realtime_game_feed_event_frame::decoder_roundtrips_publisher_and_rejects_mismatches -- --exact --format pretty --color never
 ```
 
 <a id="test-test-realtime-gateway-lib-realtime-gateway-cursor-tests-gaps-and-unpaired-checkmate-finish-require-resync"></a>
 
 ### test-realtime-gateway-lib-realtime-gateway-cursor-tests-gaps-and-unpaired-checkmate-finish-require-resync
 
-テスト位置: [crates/realtime-gateway/src/trace/realtime-game-feed/cursor/gaps_and_unpaired_checkmate_finish_require_resync.rs](../../../crates/realtime-gateway/src/trace/realtime-game-feed/cursor/gaps_and_unpaired_checkmate_finish_require_resync.rs#L9)。
+テスト位置: [crates/realtime-gateway/src/trace/realtime-game-feed/cursor/tests.rs](../../../crates/realtime-gateway/src/trace/realtime-game-feed/cursor/tests.rs#L61)。
 
 範囲: Direct cursor boundary/gap fixtures; no broker or socket.
 
@@ -178,7 +178,7 @@ cargo test --locked -p realtime-gateway --lib cursor::tests::gaps_and_unpaired_c
 
 ### test-realtime-gateway-lib-realtime-gateway-cursor-tests-same-sequence-checkmate-pair-and-conflicts
 
-テスト位置: [crates/realtime-gateway/src/trace/realtime-game-feed/cursor/same_sequence_checkmate_pair_and_conflicts.rs](../../../crates/realtime-gateway/src/trace/realtime-game-feed/cursor/same_sequence_checkmate_pair_and_conflicts.rs#L9)。
+テスト位置: [crates/realtime-gateway/src/trace/realtime-game-feed/cursor/tests.rs](../../../crates/realtime-gateway/src/trace/realtime-game-feed/cursor/tests.rs#L21)。
 
 範囲: Direct cursor state transitions over synthetic committed notifications; no socket or played mate.
 
@@ -186,64 +186,64 @@ cargo test --locked -p realtime-gateway --lib cursor::tests::gaps_and_unpaired_c
 cargo test --locked -p realtime-gateway --lib cursor::tests::same_sequence_checkmate_pair_and_conflicts -- --exact --format pretty --color never
 ```
 
-<a id="test-test-realtime-gateway-test-services-bounded-valkey-subscription-overflow-is-terminal"></a>
+<a id="test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot"></a>
 
-### test-realtime-gateway-test-services-bounded-valkey-subscription-overflow-is-terminal
+### test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot
 
-テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/subscription-pump/bounded_valkey_subscription_overflow_is_terminal.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/subscription-pump/bounded_valkey_subscription_overflow_is_terminal.rs#L2)。
-
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
-
-```sh
-cargo test --locked -p realtime-gateway --test services bounded_valkey_subscription_overflow_is_terminal -- --exact --format pretty --color never
-```
-
-<a id="test-test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot"></a>
-
-### test-realtime-gateway-test-services-committed-move-during-initial-snapshot-arrives-after-the-frozen-snapshot
-
-テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot.rs#L9)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs#L11)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. SnapshotHold freezes initial response while a real subscriber receives a commit.
 
 ```sh
-cargo test --locked -p realtime-gateway --test services committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services services::realtime_game_feed_bootstrap_contract::committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot -- --exact --format pretty --color never
 ```
 
-<a id="test-test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move"></a>
+<a id="test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move"></a>
 
-### test-realtime-gateway-test-services-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move
+### test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-lost-acceptance-replays-original-receipt-after-reconnect-without-a-second-move
 
-テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move.rs#L9)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs#L127)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Drops connection after durable acceptance and retries original identity.
 
 ```sh
-cargo test --locked -p realtime-gateway --test services lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services services::realtime_game_feed_bootstrap_contract::lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move -- --exact --format pretty --color never
 ```
 
-<a id="test-test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection"></a>
+<a id="test-test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation"></a>
 
-### test-realtime-gateway-test-services-malformed-or-gapped-broker-notifications-require-a-new-connection
+### test-realtime-gateway-test-services-services-realtime-game-feed-bootstrap-contract-participants-and-spectator-receive-committed-moves-and-resignation
 
-テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/cursor/malformed_or_gapped_broker_notifications_require_a_new_connection.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/cursor/malformed_or_gapped_broker_notifications_require_a_new_connection.rs#L9)。
-
-範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Publishes controlled invalid/gapped notifications directly.
-
-```sh
-cargo test --locked -p realtime-gateway --test services malformed_or_gapped_broker_notifications_require_a_new_connection -- --exact --format pretty --color never
-```
-
-<a id="test-test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation"></a>
-
-### test-realtime-gateway-test-services-participants-and-spectator-receive-committed-moves-and-resignation
-
-テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/participants_and_spectator_receive_committed_moves_and_resignation.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/participants_and_spectator_receive_committed_moves_and_resignation.rs#L9)。
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs#L69)。
 
 範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.
 
 ```sh
-cargo test --locked -p realtime-gateway --test services participants_and_spectator_receive_committed_moves_and_resignation -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services services::realtime_game_feed_bootstrap_contract::participants_and_spectator_receive_committed_moves_and_resignation -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection"></a>
+
+### test-realtime-gateway-test-services-services-realtime-game-feed-cursor-malformed-or-gapped-broker-notifications-require-a-new-connection
+
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/cursor/tests.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/cursor/tests.rs#L11)。
+
+範囲: Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Publishes controlled invalid/gapped notifications directly.
+
+```sh
+cargo test --locked -p realtime-gateway --test services services::realtime_game_feed_cursor::malformed_or_gapped_broker_notifications_require_a_new_connection -- --exact --format pretty --color never
+```
+
+<a id="test-test-realtime-gateway-test-services-services-realtime-game-feed-subscription-pump-bounded-valkey-subscription-overflow-is-terminal"></a>
+
+### test-realtime-gateway-test-services-services-realtime-game-feed-subscription-pump-bounded-valkey-subscription-overflow-is-terminal
+
+テスト位置: [crates/realtime-gateway/tests/trace/realtime-game-feed/subscription-pump/tests.rs](../../../crates/realtime-gateway/tests/trace/realtime-game-feed/subscription-pump/tests.rs#L4)。
+
+範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+
+```sh
+cargo test --locked -p realtime-gateway --test services services::realtime_game_feed_subscription_pump::bounded_valkey_subscription_overflow_is_terminal -- --exact --format pretty --color never
 ```
 
 ## 検査と根拠の限界

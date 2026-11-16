@@ -421,8 +421,12 @@ impl<'ast> Visit<'ast> for Policy {
     }
 }
 fn violations(source: &str) -> Vec<String> {
+    let file = syn::parse_file(source).expect("valid Rust source");
+    if excluded(&file.attrs) {
+        return vec![];
+    }
     let mut policy = Policy::default();
-    policy.visit_file(&syn::parse_file(source).expect("valid Rust source"));
+    policy.visit_file(&file);
     policy.errors
 }
 fn inspect(root: &Path, path: &Path, errors: &mut Vec<String>) {
@@ -514,6 +518,15 @@ crate::trace_support::infrastructure!("sql-policy", "Keeps test-only fixture SQL
 #[test]
 fn policy_distinguishes_test_functions_from_production_sql() {
     let fixture = r#"fn fixture() { db.execute_unprepared("DELETE FROM accounts"); }"#;
+    for (attribute, expected) in [
+        ("#![cfg(test)]", 0),
+        (r#"#![cfg(all(test, feature = "faults"))]"#, 0),
+        (r#"#![cfg(any(test, feature = "production"))]"#, 1),
+        ("#![cfg(not(test))]", 1),
+    ] {
+        let source = format!("{attribute}\n{fixture}");
+        assert_eq!(violations(&source).len(), expected, "misclassified {source}");
+    }
     for (attribute, modifier) in [
         ("#[test]", ""),
         ("#[tokio::test]", "async "),

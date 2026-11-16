@@ -47,16 +47,16 @@ flowchart TD
     n10["contract: terminal-job"]
     n11["contract: worker-process"]
     n12["contract: worker-reconciliation"]
-    n13["test: test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states"]
-    n14["test: test-game-persistence-test-ratings-completed-replay-is-read-only-and-never-releases-the-next-games-slots"]
-    n15["test: test-game-persistence-test-ratings-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job"]
-    n16["test: test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair"]
-    n17["test: test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots"]
-    n18["test: test-game-persistence-test-ratings-failed-ledger-insert-rolls-back-both-ratings-and-reservations"]
-    n19["test: test-game-persistence-test-ratings-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations"]
-    n20["test: test-game-persistence-test-ratings-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together"]
-    n21["test: test-game-persistence-test-ratings-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit"]
-    n22["test: test-game-persistence-test-ratings-worker-reconciles-errors-before-and-after-a-real-application-commit"]
+    n13["test: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states"]
+    n14["test: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots"]
+    n15["test: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-failed-ledger-insert-rolls-back-both-ratings-and-reservations"]
+    n16["test: test-game-persistence-test-ratings-ratings-rating-application-claims-fences-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job"]
+    n17["test: test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots"]
+    n18["test: test-game-persistence-test-ratings-ratings-rating-application-claims-fences-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations"]
+    n19["test: test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair"]
+    n20["test: test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit"]
+    n21["test: test-game-persistence-test-ratings-ratings-rating-application-terminal-job-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together"]
+    n22["test: test-game-persistence-test-ratings-ratings-rating-application-worker-reconciliation-worker-reconciles-errors-before-and-after-a-real-application-commit"]
     n23["test: test-rating-domain-lib-rating-domain-tests-equal-players-gain-and-lose-sixteen"]
     n24["test: test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked"]
     n0 --> n1
@@ -77,18 +77,18 @@ flowchart TD
     n5 --> n8
     n6 -->|asserts| n13
     n6 -->|asserts| n14
-    n6 -->|asserts| n18
-    n7 -->|asserts| n15
+    n6 -->|asserts| n15
+    n7 -->|asserts| n16
     n7 -->|asserts| n17
-    n7 -->|asserts| n19
+    n7 -->|asserts| n18
     n8 -->|asserts| n23
     n8 -->|asserts| n24
-    n9 -->|asserts| n16
     n9 -->|asserts| n17
-    n9 -->|asserts| n21
-    n10 -->|asserts| n20
+    n9 -->|asserts| n19
+    n9 -->|asserts| n20
+    n10 -->|asserts| n21
     n12 -->|asserts| n13
-    n12 -->|asserts| n16
+    n12 -->|asserts| n19
     n12 -->|asserts| n22
 ```
 
@@ -102,9 +102,9 @@ Apply validates frozen/current state and fencing, updates both players and the a
 
 実装位置: [crates/game-persistence/src/rating.rs](../../../crates/game-persistence/src/rating.rs#L370)。
 
-- [test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states](#test-test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states) (asserts): Two real worker ticks produce independent black ratings of 1516 and 1484 in the two pools, one completed game each, two ledgers and no remaining slots.
-- [test-game-persistence-test-ratings-completed-replay-is-read-only-and-never-releases-the-next-games-slots](#test-test-game-persistence-test-ratings-completed-replay-is-read-only-and-never-releases-the-next-games-slots) (asserts): Completed replay neither adds a ledger nor releases a newer game&#x27;s slots.
-- [test-game-persistence-test-ratings-failed-ledger-insert-rolls-back-both-ratings-and-reservations](#test-test-game-persistence-test-ratings-failed-ledger-insert-rolls-back-both-ratings-and-reservations) (asserts): A forced ledger-insert failure rolls back both ratings and reservations, then succeeds after repair.
+- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states) (asserts): Two real worker ticks produce independent black ratings of 1516 and 1484 in the two pools, one completed game each, two ledgers and no remaining slots.
+- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots) (asserts): Completed replay neither adds a ledger nor releases a newer game&#x27;s slots.
+- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-failed-ledger-insert-rolls-back-both-ratings-and-reservations](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-failed-ledger-insert-rolls-back-both-ratings-and-reservations) (asserts): A forced ledger-insert failure rolls back both ratings and reservations, then succeeds after repair.
 
 <a id="contract-claims-fences"></a>
 
@@ -114,9 +114,9 @@ The durable repository acquires eligible jobs with skip-locked behavior and chec
 
 実装位置: [crates/game-persistence/src/rating.rs](../../../crates/game-persistence/src/rating.rs#L276)。
 
-- [test-game-persistence-test-ratings-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job](#test-test-game-persistence-test-ratings-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job) (asserts): A locked job is skipped; two concurrent claims for the remaining job yield exactly one owner.
-- [test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots](#test-test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots) (asserts): Generations increase, expired/stale apply and fail return LostClaim, acquisition budget exhausts, slots remain reserved and recovery outcomes are checked.
-- [test-game-persistence-test-ratings-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations](#test-test-game-persistence-test-ratings-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations) (asserts): Lease expiry while waiting for a state lock yields LostClaim, no ledger, two retained reservations and an unchanged unrated black state.
+- [test-game-persistence-test-ratings-ratings-rating-application-claims-fences-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job](#test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job) (asserts): A locked job is skipped; two concurrent claims for the remaining job yield exactly one owner.
+- [test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots](#test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots) (asserts): Generations increase, expired/stale apply and fail return LostClaim, acquisition budget exhausts, slots remain reserved and recovery outcomes are checked.
+- [test-game-persistence-test-ratings-ratings-rating-application-claims-fences-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations](#test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations) (asserts): Lease expiry while waiting for a state lock yields LostClaim, no ledger, two retained reservations and an unchanged unrated black state.
 
 <a id="contract-pure-calculation"></a>
 
@@ -139,9 +139,9 @@ The durable fail/recovery operations enforce transient backoff and attempt budge
 
 実装位置: [crates/game-persistence/src/rating.rs](../../../crates/game-persistence/src/rating.rs#L611)。
 
-- [test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair](#test-test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair) (asserts): Recovery through RatingWorker does not repair corrupt current state; repaired state is required for a later successful tick.
-- [test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots](#test-test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots) (asserts): Expired-claim budget exhaustion retains slots; recovery and repeated/unknown recovery outcomes are directly checked.
-- [test-game-persistence-test-ratings-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit](#test-test-game-persistence-test-ratings-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit) (asserts): Transient failure cannot be reacquired before backoff and reaches quarantine at the configured attempt limit.
+- [test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots](#test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots) (asserts): Expired-claim budget exhaustion retains slots; recovery and repeated/unknown recovery outcomes are directly checked.
+- [test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair](#test-test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair) (asserts): Recovery through RatingWorker does not repair corrupt current state; repaired state is required for a later successful tick.
+- [test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit](#test-test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit) (asserts): Transient failure cannot be reacquired before backoff and reaches quarantine at the configured attempt limit.
 
 未検証: Recovery tests assert outcomes, increasing generations, retained reservations and the need to repair corrupt state. They do not compare a complete before/after snapshot of frozen inputs and both ratings during recovery.
 
@@ -153,7 +153,7 @@ The game commit atomically enqueues a job only for a terminal rated game and kee
 
 実装位置: [crates/game-persistence/src/lib.rs](../../../crates/game-persistence/src/lib.rs#L388)。
 
-- [test-game-persistence-test-ratings-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together](#test-test-game-persistence-test-ratings-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together) (asserts): A rating-job trigger failure rolls back metadata, journal and outbox; retry yields one job and casual finish yields none.
+- [test-game-persistence-test-ratings-ratings-rating-application-terminal-job-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together](#test-test-game-persistence-test-ratings-ratings-rating-application-terminal-job-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together) (asserts): A rating-job trigger failure rolls back metadata, journal and outbox; retry yields one job and casual finish yields none.
 
 <a id="contract-worker-process"></a>
 
@@ -174,9 +174,9 @@ RatingWorker routes invalid input and corrupt application to quarantine, retries
 
 実装位置: [crates/game-application/src/rating.rs](../../../crates/game-application/src/rating.rs#L235)。
 
-- [test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states](#test-test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states) (asserts): Real worker application uses independent frozen starts for the two pools.
-- [test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair](#test-test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair) (asserts): A real worker quarantines corrupt current state and successful explicit retry still requires repairing that state.
-- [test-game-persistence-test-ratings-worker-reconciles-errors-before-and-after-a-real-application-commit](#test-test-game-persistence-test-ratings-worker-reconciles-errors-before-and-after-a-real-application-commit) (asserts): Injected unavailable results before and after real commits produce Applied or AlreadyApplied, then Idle, with one ledger.
+- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states) (asserts): Real worker application uses independent frozen starts for the two pools.
+- [test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair](#test-test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair) (asserts): A real worker quarantines corrupt current state and successful explicit retry still requires repairing that state.
+- [test-game-persistence-test-ratings-ratings-rating-application-worker-reconciliation-worker-reconciles-errors-before-and-after-a-real-application-commit](#test-test-game-persistence-test-ratings-ratings-rating-application-worker-reconciliation-worker-reconciles-errors-before-and-after-a-real-application-commit) (asserts): Injected unavailable results before and after real commits produce Applied or AlreadyApplied, then Idle, with one ledger.
 
 未検証: Selected error paths are asserted; there is no independent complete branch matrix or direct dedicated constructor test for WorkerId, WorkerPolicy and ClaimedRatingJob.
 
@@ -184,131 +184,131 @@ RatingWorker routes invalid input and corrupt application to quarantine, retries
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states"></a>
 
-### test-game-persistence-test-ratings-both-pools-update-independently-from-their-frozen-start-states
+### test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/atomic-application/both_pools_update_independently_from_their_frozen_start_states.rs](../../../crates/game-persistence/tests/trace/rating-application/atomic-application/both_pools_update_independently_from_their_frozen_start_states.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs#L75)。
 
 範囲: Real worker, PostgreSQL and read adapter for independent pools.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings both_pools_update_independently_from_their_frozen_start_states -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_atomic_application::both_pools_update_independently_from_their_frozen_start_states -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-ratings-completed-replay-is-read-only-and-never-releases-the-next-games-slots"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots"></a>
 
-### test-game-persistence-test-ratings-completed-replay-is-read-only-and-never-releases-the-next-games-slots
+### test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/atomic-application/completed_replay_is_read_only_and_never_releases_the_next_games_slots.rs](../../../crates/game-persistence/tests/trace/rating-application/atomic-application/completed_replay_is_read_only_and_never_releases_the_next_games_slots.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs#L11)。
 
 範囲: Real PostgreSQL completed replay and later-game reservation preservation.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings completed_replay_is_read_only_and_never_releases_the_next_games_slots -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_atomic_application::completed_replay_is_read_only_and_never_releases_the_next_games_slots -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-ratings-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-failed-ledger-insert-rolls-back-both-ratings-and-reservations"></a>
 
-### test-game-persistence-test-ratings-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job
+### test-game-persistence-test-ratings-ratings-rating-application-atomic-application-failed-ledger-insert-rolls-back-both-ratings-and-reservations
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/claims-fences/concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job.rs](../../../crates/game-persistence/tests/trace/rating-application/claims-fences/concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job.rs#L9)。
-
-範囲: Concurrent real PostgreSQL acquisitions and a held row lock.
-
-```sh
-cargo test --locked -p game-persistence --test ratings concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job -- --exact --format pretty --color never
-```
-
-<a id="test-test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair"></a>
-
-### test-game-persistence-test-ratings-corrupt-current-state-quarantines-and-retry-requires-repair
-
-テスト位置: [crates/game-persistence/tests/trace/rating-application/quarantine-recovery/corrupt_current_state_quarantines_and_retry_requires_repair.rs](../../../crates/game-persistence/tests/trace/rating-application/quarantine-recovery/corrupt_current_state_quarantines_and_retry_requires_repair.rs#L9)。
-
-範囲: Real RatingWorker/PostgreSQL corruption, quarantine, explicit recovery and repair.
-
-```sh
-cargo test --locked -p game-persistence --test ratings corrupt_current_state_quarantines_and_retry_requires_repair -- --exact --format pretty --color never
-```
-
-<a id="test-test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots"></a>
-
-### test-game-persistence-test-ratings-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots
-
-テスト位置: [crates/game-persistence/tests/trace/rating-application/claims-fences/expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots.rs](../../../crates/game-persistence/tests/trace/rating-application/claims-fences/expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots.rs#L9)。
-
-範囲: Real PostgreSQL claims, expired/stale fences, budget and recovery; worker error routing is not the subject.
-
-```sh
-cargo test --locked -p game-persistence --test ratings expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots -- --exact --format pretty --color never
-```
-
-<a id="test-test-game-persistence-test-ratings-failed-ledger-insert-rolls-back-both-ratings-and-reservations"></a>
-
-### test-game-persistence-test-ratings-failed-ledger-insert-rolls-back-both-ratings-and-reservations
-
-テスト位置: [crates/game-persistence/tests/trace/rating-application/atomic-application/failed_ledger_insert_rolls_back_both_ratings_and_reservations.rs](../../../crates/game-persistence/tests/trace/rating-application/atomic-application/failed_ledger_insert_rolls_back_both_ratings_and_reservations.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs#L119)。
 
 範囲: Real PostgreSQL atomic-apply rollback after forced ledger insertion failure.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings failed_ledger_insert_rolls_back_both_ratings_and_reservations -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_atomic_application::failed_ledger_insert_rolls_back_both_ratings_and_reservations -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-ratings-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job"></a>
 
-### test-game-persistence-test-ratings-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations
+### test-game-persistence-test-ratings-ratings-rating-application-claims-fences-concurrent-workers-acquire-disjoint-jobs-and-skip-a-locked-job
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/claims-fences/lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations.rs](../../../crates/game-persistence/tests/trace/rating-application/claims-fences/lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs#L147)。
+
+範囲: Concurrent real PostgreSQL acquisitions and a held row lock.
+
+```sh
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_claims_fences::concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots"></a>
+
+### test-game-persistence-test-ratings-ratings-rating-application-claims-fences-expired-claims-consume-budget-quarantine-and-recover-without-releasing-slots
+
+テスト位置: [crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs#L11)。
+
+範囲: Real PostgreSQL claims, expired/stale fences, budget and recovery; worker error routing is not the subject.
+
+```sh
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_claims_fences::expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-claims-fences-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations"></a>
+
+### test-game-persistence-test-ratings-ratings-rating-application-claims-fences-lease-expiring-while-waiting-for-state-lock-rolls-back-all-mutations
+
+テスト位置: [crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs#L96)。
 
 範囲: Real PostgreSQL lock wait crossing lease expiry; no CLI.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_claims_fences::lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-ratings-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair"></a>
 
-### test-game-persistence-test-ratings-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together
+### test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-corrupt-current-state-quarantines-and-retry-requires-repair
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/terminal-job/terminal_receipt_outbox_and_rating_job_commit_or_rollback_together.rs](../../../crates/game-persistence/tests/trace/rating-application/terminal-job/terminal_receipt_outbox_and_rating_job_commit_or_rollback_together.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/quarantine-recovery/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/quarantine-recovery/tests.rs#L11)。
 
-範囲: Real PostgreSQL receipt/outbox/rating-job atomicity with trigger-injected failure.
+範囲: Real RatingWorker/PostgreSQL corruption, quarantine, explicit recovery and repair.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings terminal_receipt_outbox_and_rating_job_commit_or_rollback_together -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_quarantine_recovery::corrupt_current_state_quarantines_and_retry_requires_repair -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-ratings-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit"></a>
 
-### test-game-persistence-test-ratings-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit
+### test-game-persistence-test-ratings-ratings-rating-application-quarantine-recovery-transient-failure-obeys-backoff-and-quarantines-at-the-attempt-limit
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/quarantine-recovery/transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit.rs](../../../crates/game-persistence/tests/trace/rating-application/quarantine-recovery/transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/quarantine-recovery/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/quarantine-recovery/tests.rs#L58)。
 
 範囲: Real PostgreSQL transient backoff and attempt-limit behavior.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_quarantine_recovery::transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-ratings-worker-reconciles-errors-before-and-after-a-real-application-commit"></a>
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-terminal-job-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together"></a>
 
-### test-game-persistence-test-ratings-worker-reconciles-errors-before-and-after-a-real-application-commit
+### test-game-persistence-test-ratings-ratings-rating-application-terminal-job-terminal-receipt-outbox-and-rating-job-commit-or-rollback-together
 
-テスト位置: [crates/game-persistence/tests/trace/rating-application/worker-reconciliation/worker_reconciles_errors_before_and_after_a_real_application_commit.rs](../../../crates/game-persistence/tests/trace/rating-application/worker-reconciliation/worker_reconciles_errors_before_and_after_a_real_application_commit.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/rating-application/terminal-job/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/terminal-job/tests.rs#L11)。
+
+範囲: Real PostgreSQL receipt/outbox/rating-job atomicity with trigger-injected failure.
+
+```sh
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_terminal_job::terminal_receipt_outbox_and_rating_job_commit_or_rollback_together -- --exact --format pretty --color never
+```
+
+<a id="test-test-game-persistence-test-ratings-ratings-rating-application-worker-reconciliation-worker-reconciles-errors-before-and-after-a-real-application-commit"></a>
+
+### test-game-persistence-test-ratings-ratings-rating-application-worker-reconciliation-worker-reconciles-errors-before-and-after-a-real-application-commit
+
+テスト位置: [crates/game-persistence/tests/trace/rating-application/worker-reconciliation/tests.rs](../../../crates/game-persistence/tests/trace/rating-application/worker-reconciliation/tests.rs#L11)。
 
 範囲: Real RatingWorker and PostgreSQL with unavailable-result injection around actual application commits.
 
 ```sh
-cargo test --locked -p game-persistence --test ratings worker_reconciles_errors_before_and_after_a_real_application_commit -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test ratings ratings::rating_application_worker_reconciliation::worker_reconciles_errors_before_and_after_a_real_application_commit -- --exact --format pretty --color never
 ```
 
 <a id="test-test-rating-domain-lib-rating-domain-tests-equal-players-gain-and-lose-sixteen"></a>
 
 ### test-rating-domain-lib-rating-domain-tests-equal-players-gain-and-lose-sixteen
 
-テスト位置: [crates/rating-domain/src/trace/rating-application/pure-calculation/equal_players_gain_and_lose_sixteen.rs](../../../crates/rating-domain/src/trace/rating-application/pure-calculation/equal_players_gain_and_lose_sixteen.rs#L9)。
+テスト位置: [crates/rating-domain/src/trace/rating-application/pure-calculation/tests.rs](../../../crates/rating-domain/src/trace/rating-application/pure-calculation/tests.rs#L10)。
 
 範囲: Pure Elo equal-player example, no persistence.
 
@@ -320,7 +320,7 @@ cargo test --locked -p rating-domain --lib tests::equal_players_gain_and_lose_si
 
 ### test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked
 
-テスト位置: [crates/rating-domain/src/trace/rating-application/pure-calculation/expected_upsets_and_extremes_are_zero_sum_and_checked.rs](../../../crates/rating-domain/src/trace/rating-application/pure-calculation/expected_upsets_and_extremes_are_zero_sum_and_checked.rs#L9)。
+テスト位置: [crates/rating-domain/src/trace/rating-application/pure-calculation/tests.rs](../../../crates/rating-domain/src/trace/rating-application/pure-calculation/tests.rs#L33)。
 
 範囲: Pure rating-state/calculation examples and arithmetic boundaries.
 

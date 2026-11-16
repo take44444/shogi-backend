@@ -45,16 +45,16 @@ flowchart TD
     n9["contract: gateway-schema"]
     n10["contract: player-runtime"]
     n11["contract: user-runtime"]
-    n12["test: test-player-http-lib-player-http-openapi-tests-document-identifies-this-service-without-dependency-attribution"]
-    n13["test: test-player-http-lib-player-http-openapi-tests-paths-queries-and-error-contract-are-derived-from-routes"]
-    n14["test: test-player-http-lib-player-http-openapi-tests-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers"]
-    n15["test: test-player-http-lib-player-http-openapi-tests-runtime-document-equals-offline-document-without-storage-access"]
-    n16["test: test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes"]
-    n17["test: test-user-http-lib-user-http-openapi-tests-document-distinguishes-json-errors-and-framework-text-rejections"]
-    n18["test: test-user-http-lib-user-http-openapi-tests-document-has-all-routes-real-schemas-and-cookie-security-alternatives"]
-    n19["test: test-user-http-lib-user-http-openapi-tests-document-identifies-this-service-without-dependency-attribution"]
-    n20["test: test-user-http-lib-user-http-openapi-tests-runtime-document-equals-offline-document-without-storage-or-provider-calls"]
-    n21["test: test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract"]
+    n12["test: test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-document-identifies-this-service-without-dependency-attribution"]
+    n13["test: test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-paths-queries-and-error-contract-are-derived-from-routes"]
+    n14["test: test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers"]
+    n15["test: test-player-http-lib-player-http-openapi-tests-public-api-documents-player-runtime-runtime-document-equals-offline-document-without-storage-access"]
+    n16["test: test-realtime-gateway-test-services-services-matchmaking-tickets-browser-schema-matchmaking-openapi-covers-all-owner-scoped-routes"]
+    n17["test: test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract"]
+    n18["test: test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-distinguishes-json-errors-and-framework-text-rejections"]
+    n19["test: test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-has-all-routes-real-schemas-and-cookie-security-alternatives"]
+    n20["test: test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-identifies-this-service-without-dependency-attribution"]
+    n21["test: test-user-http-lib-user-http-openapi-tests-public-api-documents-user-runtime-runtime-document-equals-offline-document-without-storage-or-provider-calls"]
     n0 --> n1
     n1 --> n8
     n0 --> n2
@@ -72,10 +72,10 @@ flowchart TD
     n7 -->|asserts| n17
     n7 -->|asserts| n18
     n7 -->|asserts| n19
-    n7 -->|asserts| n21
+    n7 -->|asserts| n20
     n9 -->|asserts| n16
     n10 -->|asserts| n15
-    n11 -->|asserts| n20
+    n11 -->|asserts| n21
 ```
 
 ## コンポーネント契約と根拠
@@ -88,9 +88,9 @@ Player route-derived OpenAPI 3.1 has package identity, exact method/path set, qu
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L32)。
 
-- [test-player-http-lib-player-http-openapi-tests-document-identifies-this-service-without-dependency-attribution](#test-test-player-http-lib-player-http-openapi-tests-document-identifies-this-service-without-dependency-attribution) (asserts): Package name/version are checked, with absent dependency-derived contact/license.
-- [test-player-http-lib-player-http-openapi-tests-paths-queries-and-error-contract-are-derived-from-routes](#test-test-player-http-lib-player-http-openapi-tests-paths-queries-and-error-contract-are-derived-from-routes) (asserts): OpenAPI 3.1, exact four paths and methods, parameter constraints, enumerated errors and resolvable local refs are asserted.
-- [test-player-http-lib-player-http-openapi-tests-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers](#test-test-player-http-lib-player-http-openapi-tests-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers) (asserts): Assertions compare flattened actions, required nullable cursor and unsigned integer bounds with actual DTO JSON.
+- [test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-document-identifies-this-service-without-dependency-attribution](#test-test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-document-identifies-this-service-without-dependency-attribution) (asserts): Package name/version are checked, with absent dependency-derived contact/license.
+- [test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-paths-queries-and-error-contract-are-derived-from-routes](#test-test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-paths-queries-and-error-contract-are-derived-from-routes) (asserts): OpenAPI 3.1, exact four paths and methods, parameter constraints, enumerated errors and resolvable local refs are asserted.
+- [test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers](#test-test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers) (asserts): Assertions compare flattened actions, required nullable cursor and unsigned integer bounds with actual DTO JSON.
 
 <a id="contract-contract-user-schema"></a>
 
@@ -100,10 +100,10 @@ User route-derived OpenAPI has service identity, the exact six operations, cooki
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L90)。
 
-- [test-user-http-lib-user-http-openapi-tests-document-distinguishes-json-errors-and-framework-text-rejections](#test-test-user-http-lib-user-http-openapi-tests-document-distinguishes-json-errors-and-framework-text-rejections) (asserts): The documented PATCH response status set, JSON ErrorBody references, framework text schemas and callback text rejection are compared directly.
-- [test-user-http-lib-user-http-openapi-tests-document-has-all-routes-real-schemas-and-cookie-security-alternatives](#test-test-user-http-lib-user-http-openapi-tests-document-has-all-routes-real-schemas-and-cookie-security-alternatives) (asserts): Exact paths/methods, cookie alternatives, headers, redirects, DTO fields, error enums and all local references are asserted.
-- [test-user-http-lib-user-http-openapi-tests-document-identifies-this-service-without-dependency-attribution](#test-test-user-http-lib-user-http-openapi-tests-document-identifies-this-service-without-dependency-attribution) (asserts): Package name/version are checked, without contact/license attribution from dependencies.
-- [test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract) (asserts): Runtime framework text rejections and application JSON rejections are checked against documented status/media and no-store.
+- [test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract) (asserts): Runtime framework text rejections and application JSON rejections are checked against documented status/media and no-store.
+- [test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-distinguishes-json-errors-and-framework-text-rejections](#test-test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-distinguishes-json-errors-and-framework-text-rejections) (asserts): The documented PATCH response status set, JSON ErrorBody references, framework text schemas and callback text rejection are compared directly.
+- [test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-has-all-routes-real-schemas-and-cookie-security-alternatives](#test-test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-has-all-routes-real-schemas-and-cookie-security-alternatives) (asserts): Exact paths/methods, cookie alternatives, headers, redirects, DTO fields, error enums and all local references are asserted.
+- [test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-identifies-this-service-without-dependency-attribution](#test-test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-identifies-this-service-without-dependency-attribution) (asserts): Package name/version are checked, without contact/license attribution from dependencies.
 
 未検証: The runtime rejection sample does not cover every response family or all success/error headers. The schema checks do not establish provider availability.
 
@@ -126,7 +126,7 @@ The gateway exports annotated matchmaking paths and two cookie security schemes 
 
 実装位置: [crates/realtime-gateway/src/matchmaking.rs](../../../crates/realtime-gateway/src/matchmaking.rs#L344)。
 
-- [test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes](#test-test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes) (asserts): The generated document contains GET /matchmaking/me, GET/PUT/DELETE ticket and POST heartbeat operations plus both cookie names and OR security alternatives.
+- [test-realtime-gateway-test-services-services-matchmaking-tickets-browser-schema-matchmaking-openapi-covers-all-owner-scoped-routes](#test-test-realtime-gateway-test-services-services-matchmaking-tickets-browser-schema-matchmaking-openapi-covers-all-owner-scoped-routes) (asserts): The generated document contains GET /matchmaking/me, GET/PUT/DELETE ticket and POST heartbeat operations plus both cookie names and OR security alternatives.
 
 未検証: This test checks presence rather than exact equality of the gateway method/path set. The completeness catalog separately reconciles generated operations. Gateway has no runtime /openapi.json route.
 
@@ -138,7 +138,7 @@ The player document route returns the same generated OpenAPI as player_http::ope
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L29)。
 
-- [test-player-http-lib-player-http-openapi-tests-runtime-document-equals-offline-document-without-storage-access](#test-test-player-http-lib-player-http-openapi-tests-runtime-document-equals-offline-document-without-storage-access) (asserts): Anonymous router response equals offline JSON and panic-on-use record/rating repositories remain untouched.
+- [test-player-http-lib-player-http-openapi-tests-public-api-documents-player-runtime-runtime-document-equals-offline-document-without-storage-access](#test-test-player-http-lib-player-http-openapi-tests-public-api-documents-player-runtime-runtime-document-equals-offline-document-without-storage-access) (asserts): Anonymous router response equals offline JSON and panic-on-use record/rating repositories remain untouched.
 
 <a id="contract-user-runtime"></a>
 
@@ -148,130 +148,130 @@ The user document route returns offline OpenAPI without storage or identity-prov
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L45)。
 
-- [test-user-http-lib-user-http-openapi-tests-runtime-document-equals-offline-document-without-storage-or-provider-calls](#test-test-user-http-lib-user-http-openapi-tests-runtime-document-equals-offline-document-without-storage-or-provider-calls) (asserts): HTTPS and development in-process routers return equal offline JSON with security headers; repository and provider panic if used.
+- [test-user-http-lib-user-http-openapi-tests-public-api-documents-user-runtime-runtime-document-equals-offline-document-without-storage-or-provider-calls](#test-test-user-http-lib-user-http-openapi-tests-public-api-documents-user-runtime-runtime-document-equals-offline-document-without-storage-or-provider-calls) (asserts): HTTPS and development in-process routers return equal offline JSON with security headers; repository and provider panic if used.
 
 ## 実在するテストと実行コマンド
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-test-player-http-lib-player-http-openapi-tests-document-identifies-this-service-without-dependency-attribution"></a>
+<a id="test-test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-document-identifies-this-service-without-dependency-attribution"></a>
 
-### test-player-http-lib-player-http-openapi-tests-document-identifies-this-service-without-dependency-attribution
+### test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-document-identifies-this-service-without-dependency-attribution
 
-テスト位置: [crates/player-http/src/trace/public-api-documents/contract-player-schema/document_identifies_this_service_without_dependency_attribution.rs](../../../crates/player-http/src/trace/public-api-documents/contract-player-schema/document_identifies_this_service_without_dependency_attribution.rs#L9)。
+テスト位置: [crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs](../../../crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs#L11)。
 
 範囲: Offline player OpenAPI JSON, no HTTP/database.
 
 ```sh
-cargo test --locked -p player-http --lib openapi_tests::document_identifies_this_service_without_dependency_attribution -- --exact --format pretty --color never
+cargo test --locked -p player-http --lib openapi_tests::public_api_documents_contract_player_schema::document_identifies_this_service_without_dependency_attribution -- --exact --format pretty --color never
 ```
 
-<a id="test-test-player-http-lib-player-http-openapi-tests-paths-queries-and-error-contract-are-derived-from-routes"></a>
+<a id="test-test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-paths-queries-and-error-contract-are-derived-from-routes"></a>
 
-### test-player-http-lib-player-http-openapi-tests-paths-queries-and-error-contract-are-derived-from-routes
+### test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-paths-queries-and-error-contract-are-derived-from-routes
 
-テスト位置: [crates/player-http/src/trace/public-api-documents/contract-player-schema/paths_queries_and_error_contract_are_derived_from_routes.rs](../../../crates/player-http/src/trace/public-api-documents/contract-player-schema/paths_queries_and_error_contract_are_derived_from_routes.rs#L9)。
+テスト位置: [crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs](../../../crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs#L28)。
 
 範囲: Offline player route and schema assertions, no service startup.
 
 ```sh
-cargo test --locked -p player-http --lib openapi_tests::paths_queries_and_error_contract_are_derived_from_routes -- --exact --format pretty --color never
+cargo test --locked -p player-http --lib openapi_tests::public_api_documents_contract_player_schema::paths_queries_and_error_contract_are_derived_from_routes -- --exact --format pretty --color never
 ```
 
-<a id="test-test-player-http-lib-player-http-openapi-tests-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers"></a>
+<a id="test-test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers"></a>
 
-### test-player-http-lib-player-http-openapi-tests-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers
+### test-player-http-lib-player-http-openapi-tests-public-api-documents-contract-player-schema-response-schemas-preserve-flattened-actions-required-null-and-unsigned-integers
 
-テスト位置: [crates/player-http/src/trace/public-api-documents/contract-player-schema/response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers.rs](../../../crates/player-http/src/trace/public-api-documents/contract-player-schema/response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers.rs#L9)。
+テスト位置: [crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs](../../../crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs#L133)。
 
 範囲: Player OpenAPI and actual DTO serialization, no storage.
 
 ```sh
-cargo test --locked -p player-http --lib openapi_tests::response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers -- --exact --format pretty --color never
+cargo test --locked -p player-http --lib openapi_tests::public_api_documents_contract_player_schema::response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers -- --exact --format pretty --color never
 ```
 
-<a id="test-test-player-http-lib-player-http-openapi-tests-runtime-document-equals-offline-document-without-storage-access"></a>
+<a id="test-test-player-http-lib-player-http-openapi-tests-public-api-documents-player-runtime-runtime-document-equals-offline-document-without-storage-access"></a>
 
-### test-player-http-lib-player-http-openapi-tests-runtime-document-equals-offline-document-without-storage-access
+### test-player-http-lib-player-http-openapi-tests-public-api-documents-player-runtime-runtime-document-equals-offline-document-without-storage-access
 
-テスト位置: [crates/player-http/src/trace/public-api-documents/player-runtime/runtime_document_equals_offline_document_without_storage_access.rs](../../../crates/player-http/src/trace/public-api-documents/player-runtime/runtime_document_equals_offline_document_without_storage_access.rs#L9)。
+テスト位置: [crates/player-http/src/trace/public-api-documents/player-runtime/tests.rs](../../../crates/player-http/src/trace/public-api-documents/player-runtime/tests.rs#L12)。
 
 範囲: In-process player router with panic-on-use repositories.
 
 ```sh
-cargo test --locked -p player-http --lib openapi_tests::runtime_document_equals_offline_document_without_storage_access -- --exact --format pretty --color never
+cargo test --locked -p player-http --lib openapi_tests::public_api_documents_player_runtime::runtime_document_equals_offline_document_without_storage_access -- --exact --format pretty --color never
 ```
 
-<a id="test-test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes"></a>
+<a id="test-test-realtime-gateway-test-services-services-matchmaking-tickets-browser-schema-matchmaking-openapi-covers-all-owner-scoped-routes"></a>
 
-### test-realtime-gateway-test-services-matchmaking-openapi-covers-all-owner-scoped-routes
+### test-realtime-gateway-test-services-services-matchmaking-tickets-browser-schema-matchmaking-openapi-covers-all-owner-scoped-routes
 
-テスト位置: [crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/matchmaking_openapi_covers_all_owner_scoped_routes.rs](../../../crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/matchmaking_openapi_covers_all_owner_scoped_routes.rs#L9)。
+テスト位置: [crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/tests.rs](../../../crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/tests.rs#L11)。
 
 範囲: Pure gateway offline OpenAPI assertions; the integration target does not start services in this synchronous case.
 
 ```sh
-cargo test --locked -p realtime-gateway --test services matchmaking_openapi_covers_all_owner_scoped_routes -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services services::matchmaking_tickets_browser_schema::matchmaking_openapi_covers_all_owner_scoped_routes -- --exact --format pretty --color never
 ```
 
-<a id="test-test-user-http-lib-user-http-openapi-tests-document-distinguishes-json-errors-and-framework-text-rejections"></a>
+<a id="test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract"></a>
 
-### test-user-http-lib-user-http-openapi-tests-document-distinguishes-json-errors-and-framework-text-rejections
+### test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract
 
-テスト位置: [crates/user-http/src/trace/public-api-documents/contract-user-schema/document_distinguishes_json_errors_and_framework_text_rejections.rs](../../../crates/user-http/src/trace/public-api-documents/contract-user-schema/document_distinguishes_json_errors_and_framework_text_rejections.rs#L9)。
-
-範囲: Generated user document status/media assertions without HTTP, storage or provider.
-
-```sh
-cargo test --locked -p user-http --lib openapi_tests::document_distinguishes_json_errors_and_framework_text_rejections -- --exact --format pretty --color never
-```
-
-<a id="test-test-user-http-lib-user-http-openapi-tests-document-has-all-routes-real-schemas-and-cookie-security-alternatives"></a>
-
-### test-user-http-lib-user-http-openapi-tests-document-has-all-routes-real-schemas-and-cookie-security-alternatives
-
-テスト位置: [crates/user-http/src/trace/public-api-documents/contract-user-schema/document_has_all_routes_real_schemas_and_cookie_security_alternatives.rs](../../../crates/user-http/src/trace/public-api-documents/contract-user-schema/document_has_all_routes_real_schemas_and_cookie_security_alternatives.rs#L9)。
-
-範囲: Offline user route/schema/local-reference assertions.
-
-```sh
-cargo test --locked -p user-http --lib openapi_tests::document_has_all_routes_real_schemas_and_cookie_security_alternatives -- --exact --format pretty --color never
-```
-
-<a id="test-test-user-http-lib-user-http-openapi-tests-document-identifies-this-service-without-dependency-attribution"></a>
-
-### test-user-http-lib-user-http-openapi-tests-document-identifies-this-service-without-dependency-attribution
-
-テスト位置: [crates/user-http/src/trace/public-api-documents/contract-user-schema/document_identifies_this_service_without_dependency_attribution.rs](../../../crates/user-http/src/trace/public-api-documents/contract-user-schema/document_identifies_this_service_without_dependency_attribution.rs#L9)。
-
-範囲: Offline user OpenAPI JSON, no provider or storage.
-
-```sh
-cargo test --locked -p user-http --lib openapi_tests::document_identifies_this_service_without_dependency_attribution -- --exact --format pretty --color never
-```
-
-<a id="test-test-user-http-lib-user-http-openapi-tests-runtime-document-equals-offline-document-without-storage-or-provider-calls"></a>
-
-### test-user-http-lib-user-http-openapi-tests-runtime-document-equals-offline-document-without-storage-or-provider-calls
-
-テスト位置: [crates/user-http/src/trace/public-api-documents/user-runtime/runtime_document_equals_offline_document_without_storage_or_provider_calls.rs](../../../crates/user-http/src/trace/public-api-documents/user-runtime/runtime_document_equals_offline_document_without_storage_or_provider_calls.rs#L9)。
-
-範囲: In-process HTTPS/development user routers with panic-on-use repository and provider.
-
-```sh
-cargo test --locked -p user-http --lib openapi_tests::runtime_document_equals_offline_document_without_storage_or_provider_calls -- --exact --format pretty --color never
-```
-
-<a id="test-test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract"></a>
-
-### test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract
-
-テスト位置: [crates/user-http/src/trace/account-profile/http-rename/runtime_rejection_status_and_media_match_documented_contract.rs](../../../crates/user-http/src/trace/account-profile/http-rename/runtime_rejection_status_and_media_match_documented_contract.rs#L9)。
+テスト位置: [crates/user-http/src/trace/account-profile/http-rename/tests.rs](../../../crates/user-http/src/trace/account-profile/http-rename/tests.rs#L11)。
 
 範囲: In-process user router checks selected documented response status/media and no-store.
 
 ```sh
-cargo test --locked -p user-http --lib openapi_tests::runtime_rejection_status_and_media_match_documented_contract -- --exact --format pretty --color never
+cargo test --locked -p user-http --lib openapi_tests::account_profile_http_rename::runtime_rejection_status_and_media_match_documented_contract -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-distinguishes-json-errors-and-framework-text-rejections"></a>
+
+### test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-distinguishes-json-errors-and-framework-text-rejections
+
+テスト位置: [crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs](../../../crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs#L164)。
+
+範囲: Generated user document status/media assertions without HTTP, storage or provider.
+
+```sh
+cargo test --locked -p user-http --lib openapi_tests::public_api_documents_contract_user_schema::document_distinguishes_json_errors_and_framework_text_rejections -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-has-all-routes-real-schemas-and-cookie-security-alternatives"></a>
+
+### test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-has-all-routes-real-schemas-and-cookie-security-alternatives
+
+テスト位置: [crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs](../../../crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs#L28)。
+
+範囲: Offline user route/schema/local-reference assertions.
+
+```sh
+cargo test --locked -p user-http --lib openapi_tests::public_api_documents_contract_user_schema::document_has_all_routes_real_schemas_and_cookie_security_alternatives -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-identifies-this-service-without-dependency-attribution"></a>
+
+### test-user-http-lib-user-http-openapi-tests-public-api-documents-contract-user-schema-document-identifies-this-service-without-dependency-attribution
+
+テスト位置: [crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs](../../../crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs#L11)。
+
+範囲: Offline user OpenAPI JSON, no provider or storage.
+
+```sh
+cargo test --locked -p user-http --lib openapi_tests::public_api_documents_contract_user_schema::document_identifies_this_service_without_dependency_attribution -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-openapi-tests-public-api-documents-user-runtime-runtime-document-equals-offline-document-without-storage-or-provider-calls"></a>
+
+### test-user-http-lib-user-http-openapi-tests-public-api-documents-user-runtime-runtime-document-equals-offline-document-without-storage-or-provider-calls
+
+テスト位置: [crates/user-http/src/trace/public-api-documents/user-runtime/tests.rs](../../../crates/user-http/src/trace/public-api-documents/user-runtime/tests.rs#L11)。
+
+範囲: In-process HTTPS/development user routers with panic-on-use repository and provider.
+
+```sh
+cargo test --locked -p user-http --lib openapi_tests::public_api_documents_user_runtime::runtime_document_equals_offline_document_without_storage_or_provider_calls -- --exact --format pretty --color never
 ```
 
 ## 検査と根拠の限界

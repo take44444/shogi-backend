@@ -520,49 +520,8 @@ impl AccountRepository for PostgresAccounts {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn identity() -> VerifiedIdentity {
-        VerifiedIdentity {
-            issuer: "https://accounts.google.com".into(),
-            subject: "subject".into(),
-            initial_name: DisplayName::new("Player".into()).unwrap(),
-        }
-    }
-    fn session(hash: &str, expiry: i64) -> NewSession {
-        NewSession {
-            token_hash: hash.into(),
-            expires_at: expiry,
-        }
-    }
-    fn attempt(state: &str, expiry: i64) -> LoginAttempt {
-        LoginAttempt {
-            state_hash: state.into(),
-            browser_hash: "browser-hash".into(),
-            nonce: "nonce".into(),
-            pkce_verifier: "verifier".into(),
-            expires_at: expiry,
-        }
-    }
-    include!(
-        "trace/account-profile/existing-identity/existing_schema_and_data_survive_builder_refactor.rs"
-    );
-    include!(
-        "trace/account-google-login/attempt-consumption/expired_attempts_and_sessions_cannot_be_used.rs"
-    );
-    include!(
-        "trace/account-google-login/account-session-transaction/concurrent_first_logins_and_callback_consumption_converge.rs"
-    );
-    include!(
-        "trace/account-google-login/account-session-transaction/failed_session_insert_rolls_back_a_new_identity.rs"
-    );
-    include!(
-        "trace/startup-schema-isolation/contract-account-schema/missing_ledger_or_changed_indexes_fail_closed.rs"
-    );
-    include!(
-        "trace/startup-schema-isolation/contract-account-schema/schema_constraints_and_ledger_are_checked_on_reopen.rs"
-    );
-}
+#[path = "trace/account-google-login/support.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]
