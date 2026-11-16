@@ -12,7 +12,7 @@ h2 { font-size: 1.16rem; line-height: 1.5; }
 h3 { font-size: .95rem; margin-top: 1.5rem; }
 p, li { line-height: 1.7; }
 a { color: #285ca0; overflow-wrap: anywhere; }
-.page-header { padding: 1.6rem 2rem; display: flex; gap: 2rem; justify-content: space-between; background: white; border-bottom: 1px solid #dce3ed; }
+.page-header { position: sticky; top: 0; z-index: 1; padding: 1.6rem 2rem; display: flex; gap: 2rem; justify-content: space-between; background: white; border-bottom: 1px solid #dce3ed; }
 .eyebrow { font-size: .68rem; letter-spacing: .12em; color: #65788e; font-weight: 700; margin-bottom: .5rem; overflow-wrap: anywhere; }
 .snapshot { font-size: .8rem; max-width: 36rem; margin-bottom: 0; color: #59697c; }
 #revision { display: block; font-family: monospace; overflow-wrap: anywhere; margin-top: .35rem; }
