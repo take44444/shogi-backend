@@ -55,8 +55,17 @@ jobs:
       - name: Check feature traceability
         run: |
           python3 scripts/test-traceability.py
+          python3 scripts/test-traceability-viewer.py
           CARGO_TARGET_DIR=target python3 scripts/test-directory-traceability.py
           python3 scripts/traceability.py check
+      - name: Generate traceability viewer
+        run: python3 scripts/traceability.py viewer
+      - name: Upload traceability viewer
+        uses: actions/upload-artifact@v7
+        with:
+          name: traceability-viewer
+          path: target/traceability-viewer.html
+          if-no-files-found: error
       - name: Check contract interfaces
         run: python3 scripts/check-contract-interfaces.py
       - name: Check deployment isolation and grants

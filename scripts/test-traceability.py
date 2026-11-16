@@ -12,8 +12,6 @@ from unittest.mock import patch
 
 CHECKER = Path(__file__).with_name("traceability.py").resolve()
 RECORD = Path("crates/sample/src/trace/ratings/feature.rs")
-DOCUMENT = Path("docs/reference/traceability/ratings.md")
-INDEX = Path("docs/reference/feature-traceability.md")
 spec = importlib.util.spec_from_file_location("traceability", CHECKER)
 traceability = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(traceability)
@@ -95,7 +93,7 @@ class TraceabilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
-    def rejects(self, message, command="render"):
+    def rejects(self, message, command="check"):
         result = self.run_cli(command)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn(message, result.stderr)
@@ -110,23 +108,30 @@ class TraceabilityTests(unittest.TestCase):
         self.bundle["entrypoints"].append({"feature": "other-feature", "name": "Other worker", "source": {"path": "source.rs", "needle": "// feature"}})
         return record, other
 
-    def test_render_check_and_run_use_exact_identity_and_are_repeatable(self):
+    def test_check_and_run_use_exact_identity_without_presentation_files(self):
         self.graph["contracts"][1]["evidence"][0]["relationship"] = "exercises"
-        self.succeeds("render")
-        first = (self.root / DOCUMENT).read_bytes()
-        self.succeeds("render")
-        self.assertEqual(first, (self.root / DOCUMENT).read_bytes())
-        self.succeeds("check")
+        first = self.succeeds("check").stdout
+        self.assertEqual(first, self.succeeds("check").stdout)
+        self.assertFalse(any("--list" not in args and args[:2] == ["cargo", "test"] for args in self.commands))
+        traces = self.load_fixture(self.root)
+        self.assertEqual(traces[0][2]["one"], 4)
+        self.assertEqual({edge["relationship"] for contract in traces[0][1]["contracts"] for edge in contract["evidence"]}, {"asserts", "exercises"})
         self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
         self.assertEqual(self.commands[-1], ["cargo", "test", "--locked", "-p", "sample", "--lib", "module::selected", "--", "--exact", "--format", "pretty", "--color", "never"])
-        self.assertIn("../../../source.rs#L4", first.decode())
-        self.assertIn('["機能: ratings"]', first.decode())
-        self.assertIn("-->|事例を直接検証|", first.decode())
-        self.assertIn("-->|処理を通る|", first.decode())
+        self.assertFalse((self.root / "docs").exists())
+        self.assertFalse((self.root / "target").exists())
+
+    def test_render_command_is_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as error:
+                traceability.main(["render", "--root", str(self.root)])
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
+        self.assertEqual(self.commands, [])
 
     def test_multiple_features_share_inventory_and_execute_each_identity_once(self):
         self.add_feature()
-        self.succeeds("render")
+        self.succeeds("check")
         self.commands.clear()
         self.assertIn("PASS other-feature/one, ratings/one", self.succeeds("run").stdout)
         self.assertEqual(sum("--list" in command for command in self.commands), 1)
@@ -143,7 +148,7 @@ class TraceabilityTests(unittest.TestCase):
 
     def test_global_inventory_keeps_multiplicity_and_zero_test_targets(self):
         self.bundle["inventories"] = [{"package": "other", "target": {"kind": "lib"}, "tests": []}]
-        self.succeeds("render")
+        self.succeeds("check")
         self.assertTrue(any("other" in command and "--list" in command for command in self.commands))
         self.protocol["inventory"]["other|lib|"] = "hidden: test\nhidden: test\n"
         self.rejects("unclassified compiled ['hidden', 'hidden']")
@@ -175,7 +180,7 @@ class TraceabilityTests(unittest.TestCase):
 
     def test_example_packages_compile_once_and_only_openapi_examples_execute(self):
         self.bundle["examples"].append({"package": "sample", "example": "demo", "source": "source.rs", "kind": "Program", "reason": "Needs a running service"})
-        self.succeeds("render")
+        self.succeeds("check")
         checks = [args for args in self.commands if args[:2] == ["cargo", "check"]]
         self.assertEqual(checks, [["cargo", "check", "--locked", "-p", "sample", "--examples"]])
         runs = [args for args in self.commands if args[:2] == ["cargo", "run"]]
@@ -194,39 +199,11 @@ class TraceabilityTests(unittest.TestCase):
         path.write_text("service GameService { rpc Selected(Request) returns (Response) { option x = true; } }")
         self.rejects("missing or unsupported gRPC service block")
 
-    def test_generated_document_set_detects_missing_extra_then_render_repairs(self):
-        self.succeeds("render")
-        extra = self.root / "docs/reference/traceability/obsolete.md"
-        extra.write_text("obsolete")
-        self.rejects("generated document set mismatch", "check")
-        self.succeeds("render")
-        self.assertFalse(extra.exists())
-        (self.root / DOCUMENT).unlink()
-        self.rejects("generated document set mismatch", "check")
-        self.succeeds("render")
-
-    def test_rendered_table_columns_match_their_header(self):
-        self.graph["feature"]["title"] = "Ratings | quoted `value`"
-        self.succeeds("render")
-        tables = 0
-        for document in (DOCUMENT, INDEX):
-            expected = None
-            for line in (self.root / document).read_text().splitlines():
-                if not line.startswith("|"):
-                    expected = None
-                    continue
-                columns = len(line.split("|")) - 2
-                if expected is None:
-                    expected = columns
-                    tables += 1
-                self.assertEqual(columns, expected, line)
-        self.assertGreater(tables, 0)
-
     def test_empty_tests_require_explicit_contract_gaps_and_flow_is_required(self):
         self.graph["tests"] = []
         for contract in self.graph["contracts"]:
             contract.update(evidence=[], gap="No direct assertion")
-        self.succeeds("render")
+        self.succeeds("check")
         self.graph["feature"]["flow"] = []
         self.rejects("nonempty list")
         self.graph["feature"]["flow"] = ["two\nlines"]
@@ -249,8 +226,8 @@ class TraceabilityTests(unittest.TestCase):
         self.graph["contracts"][0]["evidence"] = []
         self.rejects("evidence or explicit gap required")
         self.graph["contracts"][0]["gap"] = "No direct assertion"
-        self.succeeds("render")
-        self.assertIn("未検証: No direct assertion", (self.root / DOCUMENT).read_text())
+        self.succeeds("check")
+        self.assertEqual(self.load_fixture(self.root)[0][1]["contracts"][0]["gap"], "No direct assertion")
 
     def test_orphan_test_and_unknown_evidence_are_rejected(self):
         for contract in self.graph["contracts"]:
@@ -279,13 +256,18 @@ class TraceabilityTests(unittest.TestCase):
         self.graph["tests"][0]["source"]["needle"] = "fn other() {}"
         self.rejects("source needle must name")
 
-    def test_stale_document_blocks_check_and_run(self):
-        self.succeeds("render")
-        (self.root / DOCUMENT).write_text("stale")
-        self.rejects("stale generated document", "check")
-        self.rejects("stale generated document", "run")
-        self.succeeds("render")
+    def test_check_and_run_leave_stale_legacy_and_extra_markdown_untouched(self):
+        paths = ["docs/reference/feature-traceability.md", "docs/reference/traceability/ratings.md",
+                 "docs/reference/traceability/obsolete.md", "docs/reference/ratings-traceability.md"]
+        for relative in paths:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"User content in {relative}\n")
+        before = {path: path.read_bytes() for path in (self.root / "docs").rglob("*") if path.is_file()}
         self.succeeds("check")
+        self.succeeds("run")
+        self.assertEqual(before, {path: path.read_bytes() for path in (self.root / "docs").rglob("*") if path.is_file()})
+        self.assertFalse((self.root / "target").exists())
 
     def test_missing_exact_identity_is_not_a_substring_match(self):
         self.protocol["inventory"]["sample|lib|"] = "module::selected_extra: test\n"
@@ -307,7 +289,7 @@ class TraceabilityTests(unittest.TestCase):
         self.graph["contracts"][0]["evidence"].append({"test": "two", "relationship": "exercises", "reason": "Other"})
         self.rejects("two: expected exactly one")
         self.protocol["inventory"]["other|test|ratings"] = "module::selected: test\n"
-        self.succeeds("render")
+        self.succeeds("check")
         self.succeeds("run")
         self.graph["tests"][1]["target"] = {"kind": "lib"}
         self.rejects("two: expected exactly one")
@@ -315,25 +297,24 @@ class TraceabilityTests(unittest.TestCase):
     def test_integration_target_names_accept_underscores(self):
         self.graph["tests"][0]["target"] = {"kind": "test", "name": "schema_contract"}
         self.protocol["inventory"]["sample|test|schema_contract"] = "module::selected: test\n"
-        self.succeeds("render")
+        self.succeeds("check")
         self.succeeds("run")
 
     def test_wrong_package_cannot_use_another_packages_inventory(self):
         self.graph["tests"][0]["package"] = "other"
         self.rejects("expected exactly one")
 
-    def test_command_failure_and_unsupported_listing_leave_document_unchanged(self):
-        self.succeeds("render")
-        previous = (self.root / DOCUMENT).read_bytes()
+    def test_command_failure_and_unsupported_listing_are_rejected(self):
+        self.succeeds("check")
         self.protocol["inventory_exit"] = 1
         self.rejects("command failed")
         self.protocol["inventory_exit"] = 0
         self.protocol["inventory"]["sample|lib|"] = "unrecognized output\n"
         self.rejects("unsupported Cargo inventory")
-        self.assertEqual(previous, (self.root / DOCUMENT).read_bytes())
+        self.assertFalse((self.root / "docs").exists())
 
     def test_run_rejects_zero_ignored_multiple_failed_wrong_and_nonstandard_outcomes(self):
-        self.succeeds("render")
+        self.succeeds("check")
         cases = [
             "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s\n",
             "running 1 test\ntest module::selected ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
@@ -355,7 +336,7 @@ class TraceabilityTests(unittest.TestCase):
         with (self.root / "source.rs").open("a") as source:
             source.write(f"fn {name}() {{}}\n")
         self.protocol["inventory"]["sample|lib|"] = f"{name}: test\n"
-        self.succeeds("render")
+        self.succeeds("check")
         self.protocol["execution"] = """
 running 1 test
 
@@ -377,7 +358,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; fini
         self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
 
     def test_run_uses_parent_result_when_nested_tests_are_empty_or_ignored(self):
-        self.succeeds("render")
+        self.succeeds("check")
         children = [
             "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s\n",
             "running 1 test\ntest child ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
@@ -389,7 +370,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; fini
                 self.succeeds("run")
 
     def test_run_accepts_serial_parent_completion_after_nested_child(self):
-        self.succeeds("render")
+        self.succeeds("check")
         self.protocol["execution"] = (
             "running 1 test\ntest module::selected ... \n"
             "running 1 test\ntest child ... ok\n"
@@ -398,7 +379,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; fini
         self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
 
     def test_run_rejects_invalid_serial_parent_and_orphan_completions(self):
-        self.succeeds("render")
+        self.succeeds("check")
         child = ("running 1 test\ntest child ... ok\n"
                  "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
         parent = ("running 1 test\ntest module::selected ... \n" + child + "ok\n"
@@ -425,7 +406,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; fini
                 self.rejects("expected one passed exact test", "run")
 
     def test_run_rejects_unbalanced_malformed_and_repeated_runs(self):
-        self.succeeds("render")
+        self.succeeds("check")
         parent = ("running 1 test\ntest module::selected ... ok\n"
                   "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
         cases = [

@@ -1,6 +1,6 @@
 # ドキュメント
 
-現行機能の保証、コンポーネント契約、テストと未検証事項は[生成した機能一覧](reference/feature-traceability.md)から確認する。
+現行機能の保証、コンポーネント契約、テストと未検証事項は[HTML viewer の手順](how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
 API のフィールドや型は OpenAPI、[対局プロトコル](../proto/game.proto)、rustdoc を参照する。
 生成方法は[ワークスペースの手順](../README.md#api-ドキュメントを生成する)にまとめる。
 
@@ -11,7 +11,7 @@ API のフィールドや型は OpenAPI、[対局プロトコル](../proto/game.
 - [公開データサービスの起動と読み取りロールの準備](../apps/player-server/README.md)
 - [ブラウザー向けゲートウェイの起動](../apps/realtime-gateway/README.md)
 - [レートワーカーと隔離された対局の再試行](../apps/rating-worker-server/README.md)
-- [機能定義と生成文書の更新](how-to/check-traceability.md)
+- [機能定義の更新と検査](how-to/check-traceability.md)
 
 ## 設計判断
 

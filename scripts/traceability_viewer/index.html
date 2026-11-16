@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traceability viewer</title>
+<style>/* VIEWER_CSS */</style>
+</head>
+<body>
+<header class="page-header">
+  <div><p class="eyebrow">SOURCE · GUARANTEES · EVIDENCE</p><h1>Traceability viewer</h1></div>
+  <p class="snapshot">生成時点のソースと宣言のスナップショット。テストの成功や検証の十分さを示すものではありません。<span id="revision"></span></p>
+</header>
+<div id="notice" role="status" hidden></div>
+<main class="workspace">
+  <nav class="features panel" aria-label="機能">
+    <label for="feature-search">機能を検索</label>
+    <input id="feature-search" type="search" placeholder="機能名・ID" autocomplete="off">
+    <p id="feature-count" class="muted"></p>
+    <div id="feature-list"></div>
+  </nav>
+  <section class="canvas-panel panel" aria-label="機能グラフ">
+    <div class="canvas-header"><div><p class="eyebrow" id="feature-id"></p><h2 id="feature-title"></h2></div><button id="feature-details">機能の説明</button></div>
+    <div class="toolbar" aria-label="表示操作">
+      <button id="zoom-out" aria-label="縮小">−</button><output id="zoom-level" aria-live="polite">100%</output><button id="zoom-in" aria-label="拡大">＋</button>
+      <button id="fit">全体を表示</button><button id="reset">100% に戻す</button>
+    </div>
+    <div class="legend" aria-label="関係の凡例"><span class="asserts">asserts · 事例を直接検証</span><span class="exercises">exercises · 処理を通る</span><span class="unreviewed">unreviewed · 所属のみ</span></div>
+    <div id="graph-viewport" tabindex="0" aria-label="グラフのスクロール領域"><div id="graph-sizer"><div id="graph"></div></div></div>
+    <p class="canvas-help">ノードまたは関係を選択すると詳細を表示します。Tab と Enter でも操作できます。</p>
+  </section>
+  <aside class="inspector panel" aria-label="選択した項目の詳細"><div id="details" aria-live="polite"></div></aside>
+</main>
+<dialog id="source-dialog" aria-labelledby="source-title">
+  <div class="source-header"><h2 id="source-title"></h2><button id="source-close" autofocus>閉じる</button></div>
+  <p>生成時点のソースです。変更後は再生成してください。</p>
+  <p id="source-status"></p><div id="source-remote"></div>
+  <div id="source-lines" tabindex="0" aria-label="ソースコード"></div>
+</dialog>
+<script id="viewer-data" type="application/json"><!-- VIEWER_DATA --></script>
+<script>/* VIEWER_JS */</script>
+</body>
+</html>

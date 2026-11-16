@@ -75,8 +75,8 @@ trace::feature!(trace::Feature {
 });
 '''.replace("TITLE", title).replace("SURFACES", '&[trace::Surface::Grpc { path: "proto/service.proto", service: "Service", operation: "Invoke" }]' if title == "Demo" else '&[]'))
 
-    def cli(self, command="render", *, error=None):
-        result = subprocess.run([sys.executable, str(CHECKER), command, "--root", str(self.root)],
+    def cli(self, command="check", *, error=None, extra=()):
+        result = subprocess.run([sys.executable, str(CHECKER), command, "--root", str(self.root), *extra],
                                 capture_output=True, text=True, env=os.environ.copy())
         if error is None:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -102,15 +102,41 @@ trace_support::example!(trace_support::Example {{
 {main}
 '''
 
-    def test_normal_cli_render_check_and_exact_run(self):
-        self.cli()
+    def test_normal_cli_check_and_exact_run(self):
         self.cli("check")
         result = self.cli("run")
         self.assertIn("PASS demo/", result.stdout)
         self.assertIn("cases::selected", result.stdout)
+        self.assertFalse((self.root / "docs").exists())
+        self.assertFalse((self.root / "target").exists())
         graph = self.graph()
         self.assertEqual(graph["tests"][0]["name"], "cases::selected")
         self.assertEqual(graph["tests"][0]["source"]["path"], "crates/sample/src/trace/demo/behavior/tests.rs")
+
+    def test_viewer_exports_without_markdown_or_executing_test_bodies(self):
+        self.tests.write_text(self.tests.read_text().replace("crate::implementation();", 'panic!("viewer must not run this test");'))
+        result = self.cli("viewer")
+        self.assertIn("Viewer snapshot", result.stdout)
+        self.assertNotIn("PASS", result.stdout)
+        destination = self.root / "target/traceability-viewer.html"
+        content = destination.read_text()
+        self.assertIn("viewer-data", content)
+        self.assertIn("cases::selected", content)
+        self.assertFalse((self.root / "docs").exists())
+        self.cli("check")
+        custom = self.root / "custom.html"
+        self.cli("viewer", extra=("--output", str(custom)))
+        self.assertEqual(destination.read_bytes(), custom.read_bytes())
+        self.tests.write_text(self.tests.read_text().replace('panic!("viewer must not run this test");', "crate::implementation();"))
+        self.assertIn("PASS demo/", self.cli("run").stdout)
+        self.assertFalse((self.root / "docs").exists())
+        self.lib.write_text(self.lib.read_text() + "\n#[test]\nfn unclassified() {}\n")
+        self.cli("viewer", error="unclassified test;")
+
+    def test_viewer_output_option_is_rejected_for_other_commands(self):
+        for command in ("check", "run"):
+            with self.subTest(command=command):
+                self.cli(command, error="--output is only available for viewer", extra=("--output", str(self.root / "custom.html")))
 
     def test_new_ordinary_contract_test_is_unreviewed(self):
         self.append(self.tests, "#[test]\nfn automatically_discovered() {}")
@@ -120,9 +146,9 @@ trace_support::example!(trace_support::Example {{
         self.assertEqual(len(graph["tests"]), 2)
         relationships = {edge["relationship"] for edge in graph["contracts"][0]["evidence"]}
         self.assertEqual(relationships, {"asserts", "unreviewed"})
-        document = (self.root / "docs/reference/traceability/demo.md").read_text()
-        self.assertIn("automatically_discovered", document)
-        self.assertIn("所属のみ・未レビュー", document)
+        test = next(test for test in graph["tests"] if test["name"] == "cases::automatically_discovered")
+        edge = next(edge for edge in graph["contracts"][0]["evidence"] if edge["test"] == test["id"])
+        self.assertEqual(edge["relationship"], "unreviewed")
 
     def test_unreviewed_only_contract_requires_gap(self):
         self.tests.write_text("#[test]\nfn ordinary() {}\n")
@@ -146,15 +172,16 @@ trace_support::example!(trace_support::Example {{
         self.append(self.lib, 'trace_support::helper! { "Process harness"; #[test] fn probe() {} }')
         self.cli()
         self.assertEqual(len(self.graph()["tests"]), 1)
-        self.assertIn("Process harness", (self.root / "docs/reference/feature-traceability.md").read_text())
+        helper = next(item for item in traceability.directory_traces(self.root)["classifications"] if item["classification"] == "helper")
+        self.assertEqual(helper["identity"], {"package": "sample", "target": {"kind": "lib"}, "name": "probe"})
+        self.assertEqual(helper["semantics"]["reason"], "Process harness")
 
     def test_infrastructure_requires_an_explicit_category_and_reason(self):
         self.append(self.lib, 'trace_support::infrastructure! { "sql-policy", "Checks the SQL policy"; #[test] fn policy() {} }')
         self.cli()
-        index = (self.root / "docs/reference/feature-traceability.md").read_text()
-        self.assertIn("Checks the SQL policy", index)
-        self.assertIn("sql-policy", index)
-        self.assertIn("sample / lib / (lib) / policy", index)
+        item = next(item for item in traceability.directory_traces(self.root)["classifications"] if item["classification"] == "infrastructure")
+        self.assertEqual(item["semantics"], {"category": "sql-policy", "reason": "Checks the SQL policy"})
+        self.assertEqual(item["identity"], {"package": "sample", "target": {"kind": "lib"}, "name": "policy"})
         self.lib.write_text(self.lib.read_text().replace('"sql-policy"', '"catchall"'))
         self.cli(error="unsupported infrastructure category")
 
@@ -166,7 +193,7 @@ trace_support::example!(trace_support::Example {{
         self.append(self.lib, '#[cfg(test)]\n#[path = "trace/second/feature.rs"]\nmod second_feature;\n#[cfg(test)]\n#[path = "trace/second/behavior/contract.rs"]\nmod second_contract;')
         self.cli()
         self.cli("check")
-        self.assertTrue((self.root / "docs/reference/traceability/second.md").is_file())
+        self.assertEqual({graph["feature"]["id"] for _, graph, _ in traceability.load_traces(self.root)}, {"demo", "second"})
 
     def test_unknown_cross_feature_evidence_is_rejected(self):
         self.tests.write_text(self.tests.read_text().replace('also: &[]', 'also: &[trace::Evidence { feature: "absent", contract: "behavior", scope: "Remote feature", relationship: trace::Relationship::Exercises, reason: "Other edge" }]'))
