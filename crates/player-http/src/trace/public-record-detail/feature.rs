@@ -6,14 +6,14 @@ trace::feature!(trace::Feature {
         needle: "async fn detail(State(app): State<App>, path: Result<Path<String>, PathRejection>) -> Response {"
     },
     flow: &[
-        "The HTTP adapter validates the game ID and calls GameRecords::detail under the shared request limit.",
-        "The PostgreSQL reader reads public completed metadata and its entire bounded journal in one repeatable-read snapshot.",
-        "Typed metadata and contiguous public operations become a public DTO; corruption produces an error rather than partial history."
+        "HTTP アダプターは対局 ID を検証し、共有のリクエスト上限の下で GameRecords::detail を呼ぶ。",
+        "PostgreSQL の読み取り処理は、一つの反復可能読み取りスナップショットで、公開された終了済み対局のメタデータと、上限内のジャーナル全体を取得する。",
+        "型付きメタデータと連続した公開操作を公開 DTO に変換する。破損時は部分的な履歴を返さず、エラーとする。"
     ],
     guarantees: &[
         trace::Guarantee {
             id: "public-detail",
-            statement: "Anonymous detail returns public completed metadata and contiguous ordered public operations, excluding command receipts, retry identifiers and internal state.",
+            statement: "認証なしの詳細取得は、公開された終了済み対局のメタデータと、連続した順序付きの公開操作を返す。操作の受領記録、再試行用の識別子、内部状態は含めない。",
             contracts: &[
                 "http-boundary",
                 "public-dto",
@@ -23,24 +23,24 @@ trace::feature!(trace::Feature {
         },
         trace::Guarantee {
             id: "hidden-indistinguishable",
-            statement: "Missing, ongoing and hidden games return not_found, while malformed IDs are rejected before storage.",
+            statement: "存在しない対局、進行中の対局、非公開の対局には not_found を返す。不正な形式の ID は保存層へ到達する前に拒否する。",
             contracts: &["http-boundary", "snapshot-history"]
         },
         trace::Guarantee {
             id: "complete-bounded-history",
-            statement: "History is accepted only after structural validation and at most 4096 operations. Corruption returns generic 500 without partial history, excess history returns 422, and storage unavailability returns 503.",
+            statement: "履歴は構造を検証した後、最大 4096 操作まで受け入れる。破損時は部分的な履歴を返さず、詳細を伏せた 500 を返す。履歴の上限超過には 422、保存層が利用できない場合は 503 を返す。",
             contracts: &["http-boundary", "metadata-invariants", "snapshot-history"]
         },
         trace::Guarantee {
             id: "one-view",
-            statement: "Metadata and journal are read from one database view even if another connection changes both between reads.",
+            statement: "別の接続が読み取りの間にメタデータとジャーナルの両方を変更しても、同じデータベースの読み取り時点から両方を取得する。",
             contracts: &["application-forwarding", "snapshot-history"]
         }
     ],
     limitations: &[
-        "No mapped test starts a player-server TCP listener. No guarantee is made that structurally readable history consists of legal shogi play.",
-        "Shared HTTP byte/admission bounds and reader role/timeouts are mapped in public-record-search and startup-schema-isolation.",
-        "Source links and successful test execution establish traceable evidence, not semantic proof or complete coverage of these guarantees."
+        "対応付けたテストは player-server の TCP リスナーを起動しない。構造上読み取れる履歴が、将棋の合法な着手で構成されていることは保証しない。",
+        "共有 HTTP 処理の応答バイト数と受け入れ件数の上限、および読み取りロールとタイムアウトは、public-record-search と startup-schema-isolation に対応付けている。",
+        "ソースへのリンクとテストの実行成功は、追跡できる根拠を示す。保証の意味の証明や完全な網羅性を示すものではない。"
     ],
     entrypoints: &[],
     surfaces: &[trace::Surface::OpenApi {

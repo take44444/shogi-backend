@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. SnapshotHold freezes initial response while a real subscriber receives a commit.",
-        reason: "Holds frozen seq-0 snapshot, verifies real subscriber, commits/publishes seq 1, then receives snapshot 0 followed by event 1.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 実際の購読者がコミットを受信する間、SnapshotHoldで初期応答を保留する。",
+        reason: "連番0のスナップショットを確定した状態で保留し、実際の購読者を確認する。連番1をコミット・配信した後、スナップショット0、イベント1の順に受信する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "snapshot-frame", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. SnapshotHold freezes initial response while a real subscriber receives a commit.", relationship: crate::trace_support::Relationship::Asserts, reason: "Snapshot sequence zero is observed before the later move frame." }],
+        also: &[crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "snapshot-frame", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 実際の購読者がコミットを受信する間、SnapshotHoldで初期応答を保留する。", relationship: crate::trace_support::Relationship::Asserts, reason: "後続の着手フレームより先に、連番0のスナップショットを受信する。" }],
     };
 #[tokio::test]
 async fn committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot() {
@@ -60,10 +60,10 @@ async fn committed_move_during_initial_snapshot_arrives_after_the_frozen_snapsho
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.",
-        reason: "Three real WebSockets receive initial snapshot, two committed moves and resignation.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。",
+        reason: "実際の3本のWebSocketが、初期スナップショット、コミット済みの着手2件、投了を受信する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "snapshot-frame", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "All connected participants and spectator receive snapshot frames with expected game_id/sequence." }, crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "event-frame", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "Players and spectator assert move/resignation kinds, USI/results, and absence of user_id/request_id." }, crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "command-input", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Exercises, reason: "Valid participant move and resign commands dispatch and return matching acceptance." }, crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "command-response", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "Accepted request identity and sequence match participant commands." }],
+        also: &[crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "snapshot-frame", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "接続した参加者全員と観戦者が、期待したgame_id・連番を持つスナップショットフレームを受信する。" }, crate::trace_support::Evidence { feature: "realtime-game-feed", contract: "event-frame", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "対局者と観戦者が、着手・投了の種別、USI・結果、user_id・request_idが含まれないことを検証する。" }, crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "command-input", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Exercises, reason: "有効な参加者の着手・投了コマンドが送られ、一致する受理結果を返す。" }, crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "command-response", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "受理されたリクエストの識別情報と連番が、参加者のコマンドに一致する。" }],
     };
 #[tokio::test]
 async fn participants_and_spectator_receive_committed_moves_and_resignation() {
@@ -118,10 +118,10 @@ async fn participants_and_spectator_receive_committed_moves_and_resignation() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Drops connection after durable acceptance and retries original identity.",
-        reason: "Reconnect snapshot is seq 1 and retry returns original accepted seq 1 with one persisted event.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 永続化された受理の後に接続を切り、元の識別情報で再試行する。",
+        reason: "再接続時のスナップショットは連番1で、再試行は元の受理済み連番1を返し、永続化されたイベントは1件となる。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "command-response", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture.", relationship: crate::trace_support::Relationship::Asserts, reason: "Retry after reconnect returns original accepted sequence without duplicate event." }],
+        also: &[crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "command-response", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "再接続後の再試行は、イベントを重複させずに元の受理済み連番を返す。" }],
     };
 #[tokio::test]
 async fn lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move() {

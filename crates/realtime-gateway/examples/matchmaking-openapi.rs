@@ -3,7 +3,7 @@ mod trace_support;
 
 trace_support::example!(trace_support::Example {
     kind: trace_support::ExampleKind::OpenApi,
-    reason: "Prints the matchmaking HTTP OpenAPI document as JSON.",
+    reason: "マッチメイキング用HTTP APIのOpenAPI文書をJSONとして出力する。",
 });
 
 fn main() {

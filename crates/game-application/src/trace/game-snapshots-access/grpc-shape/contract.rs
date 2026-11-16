@@ -1,11 +1,11 @@
 use crate::trace_support as trace;
 trace::contract!(trace::Contract {
-    statement: "Snapshot conversion includes participant bindings, sequence, occupied board squares, both players/all hand kinds, turn/check/result and legal USI moves.",
+    statement: "スナップショットの変換には、参加者の割り当て、シーケンス、駒がある升目、両者のすべての持ち駒、手番・王手・結果、合法 USI 手を含める。",
     source: trace::Source {
         path: "crates/game-grpc/src/conversion.rs",
         needle: "impl From<Snapshot> for proto::Snapshot {"
     },
     gap: Some(
-        "The selected transport test does not compare the complete board/hand ordering or every piece/enum conversion branch."
+        "選択した通信テストは、盤面と持ち駒の完全な順序や、すべての駒・列挙型の変換分岐を比較しない。"
     ),
 });

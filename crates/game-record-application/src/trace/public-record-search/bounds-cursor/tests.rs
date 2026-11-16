@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure Search/filter/cursor value checks without HTTP or PostgreSQL.",
-        reason: "Direct cases reject bad bounds and malformed cursors, accept changed limit, preserve cursor bytes, and reject changed participant.",
+        scope: "HTTP と PostgreSQL を使わず、Search・フィルター・カーソルの値を直接確認する。",
+        reason: "不正な境界と不正な形式のカーソルを拒否し、取得件数の変更を受け入れ、カーソルのバイト列を維持し、参加者の変更を拒否することを直接確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

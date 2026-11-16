@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Real SQL and commit failure injection.",
-        reason: "Injected actual statement/commit errors leave both metadata and receipt unchanged.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際の SQL とコミットの失敗を注入する。",
+        reason: "実際の文実行やコミットにエラーを注入しても、メタデータと受理記録の両方が変更されない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

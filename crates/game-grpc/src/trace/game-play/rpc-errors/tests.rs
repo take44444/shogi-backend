@@ -3,8 +3,8 @@ use tonic::Code;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct error-to-Status conversion; no network, database or injected infrastructure failure.",
-        reason: "Direct conversion assertions distinguish infrastructure, corruption, rules failure, sequence exhaustion and sequence mismatch status classes.",
+        scope: "エラーからStatusへの直接変換。ネットワーク、データベース、基盤障害の注入は使わない。",
+        reason: "直接変換の検証で、基盤障害、破損、ルール処理の失敗、連番の上限到達、連番の不一致に対応するステータスを区別する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -41,8 +41,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct terminal-result enum conversion; does not play a network checkmate sequence.",
-        reason: "Checkmate result conversion preserves winner and reason.",
+        scope: "終局結果の列挙型を直接変換する。ネットワーク経由で詰みの手順を進めるものではない。",
+        reason: "詰みの結果を変換しても、勝者と終局理由を保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

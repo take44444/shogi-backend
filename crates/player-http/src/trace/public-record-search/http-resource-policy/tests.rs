@@ -34,8 +34,8 @@ async fn request(app: Router, path: &str) -> Response {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "In-process Axum admission using a deliberately blocked fake repository.",
-        reason: "Sixteen blocked searches enter storage, the seventeenth gets immediate 503 and no-store, and capacity returns after release.",
+        scope: "意図的に待機させるテスト用リポジトリを使い、プロセス内の Axum の受け入れ処理を確認する。",
+        reason: "待機させた検索は 16 件まで保存層に到達し、17 件目は即座に 503 と no-store を受け取る。待機を解除すると処理枠が再び使えることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -90,8 +90,8 @@ async fn sixteen_active_requests_admit_no_seventeenth_and_release_capacity() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shared response helper with exact serialized byte boundaries; no real record page.",
-        reason: "Direct response-helper checks accept exactly one MiB and return 422 with a generic error for the next byte.",
+        scope: "シリアライズ後のバイト数の境界を使い、共有応答ヘルパーを直接確認する。実際の対局ページは使わない。",
+        reason: "応答ヘルパーを直接呼び出し、ちょうど 1 MiB を受け入れ、その次の 1 バイトで 422 と詳細を伏せたエラーを返すことを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

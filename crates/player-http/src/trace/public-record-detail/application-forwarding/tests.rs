@@ -3,10 +3,10 @@ use crate::record_route_support::unused_ratings;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real Axum router, application service and PostgreSQL reader; asserts public serialization and missing/ongoing behavior.",
-        reason: "The real router traverses this method into the PostgreSQL reader.",
+        scope: "実 Axum ルーター、アプリケーションサービス、PostgreSQL の読み取り処理。公開用シリアライズと、対局が存在しない場合・進行中の場合の動作を検証する。",
+        reason: "実ルーターがこのメソッドを通り、PostgreSQL の読み取り処理に到達する。",
         relationship: crate::trace_support::Relationship::Exercises,
-        also: &[crate::trace_support::Evidence { feature: "public-record-detail", contract: "http-boundary", scope: "Real Axum router, application service and PostgreSQL reader; asserts public serialization and missing/ongoing behavior.", relationship: crate::trace_support::Relationship::Asserts, reason: "Missing and ongoing real database records yield identical 404 status/body, and successful detail has no-store." }, crate::trace_support::Evidence { feature: "public-record-detail", contract: "public-dto", scope: "Real Axum router, application service and PostgreSQL reader; asserts public serialization and missing/ongoing behavior.", relationship: crate::trace_support::Relationship::Asserts, reason: "The exact metadata key set, equality with list metadata and two ordered operations are asserted; serialized detail excludes each listed secret substring." }, crate::trace_support::Evidence { feature: "public-record-search", contract: "query-boundary", scope: "Real Axum router, application service and PostgreSQL reader; no player TCP listener.", relationship: crate::trace_support::Relationship::Asserts, reason: "A real router and PostgreSQL reader return the one record matching a combined participant/rule/winner/reason/ply query." }, crate::trace_support::Evidence { feature: "public-record-search", contract: "application-forwarding", scope: "Real Axum router, application service and PostgreSQL reader; no player TCP listener.", relationship: crate::trace_support::Relationship::Exercises, reason: "The real router traverses this application method to a real PostgreSQL reader." }, crate::trace_support::Evidence { feature: "public-record-search", contract: "public-keysets", scope: "Real Axum router, application service and PostgreSQL reader; no player TCP listener.", relationship: crate::trace_support::Relationship::Asserts, reason: "The anonymous real router returns only public metadata and becomes unavailable after closing the reader." }],
+        also: &[crate::trace_support::Evidence { feature: "public-record-detail", contract: "http-boundary", scope: "実 Axum ルーター、アプリケーションサービス、PostgreSQL の読み取り処理。公開用シリアライズと、対局が存在しない場合・進行中の場合の動作を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "実データベースで存在しない対局と進行中の対局が同じ 404 と本文を返し、詳細取得の成功応答に no-store が付くことを確認する。" }, crate::trace_support::Evidence { feature: "public-record-detail", contract: "public-dto", scope: "実 Axum ルーター、アプリケーションサービス、PostgreSQL の読み取り処理。公開用シリアライズと、対局が存在しない場合・進行中の場合の動作を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "メタデータのキー集合の完全一致、一覧のメタデータとの一致、順序付きの二つの操作を検証する。シリアライズした詳細に、列挙した内部情報の部分文字列が含まれないことも確認する。" }, crate::trace_support::Evidence { feature: "public-record-search", contract: "query-boundary", scope: "実 Axum ルーター、アプリケーションサービス、PostgreSQL の読み取り処理。公開対局サービスの TCP リスナーは使わない。", relationship: crate::trace_support::Relationship::Asserts, reason: "実ルーターと PostgreSQL の読み取り処理が、参加者・ルール・勝者・終了理由・手数を組み合わせたクエリーに一致する一件の対局を返すことを確認する。" }, crate::trace_support::Evidence { feature: "public-record-search", contract: "application-forwarding", scope: "実 Axum ルーター、アプリケーションサービス、PostgreSQL の読み取り処理。公開対局サービスの TCP リスナーは使わない。", relationship: crate::trace_support::Relationship::Exercises, reason: "実ルーターがこのアプリケーションメソッドを通り、実 PostgreSQL の読み取り処理に到達する。" }, crate::trace_support::Evidence { feature: "public-record-search", contract: "public-keysets", scope: "実 Axum ルーター、アプリケーションサービス、PostgreSQL の読み取り処理。公開対局サービスの TCP リスナーは使わない。", relationship: crate::trace_support::Relationship::Asserts, reason: "認証なしの実ルーターが公開メタデータだけを返し、読み取り処理を閉じると利用不可となることを確認する。" }],
     };
 #[tokio::test]
 async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions() {
@@ -144,10 +144,10 @@ async fn anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "In-process router with fake repository failures; no database.",
-        reason: "Fake repository errors traverse this method before HTTP mapping.",
+        scope: "リポジトリの失敗をテスト用の代替実装で再現する、プロセス内のルーター。データベースは使わない。",
+        reason: "テスト用リポジトリのエラーが、HTTP 応答へ変換される前にこのメソッドを通る。",
         relationship: crate::trace_support::Relationship::Exercises,
-        also: &[crate::trace_support::Evidence { feature: "public-record-detail", contract: "http-boundary", scope: "In-process router with fake repository failures; no database.", relationship: crate::trace_support::Relationship::Asserts, reason: "Fake corrupt, oversized and unavailable failures become 500/422/503 and fixed JSON with no-store." }],
+        also: &[crate::trace_support::Evidence { feature: "public-record-detail", contract: "http-boundary", scope: "リポジトリの失敗をテスト用の代替実装で再現する、プロセス内のルーター。データベースは使わない。", relationship: crate::trace_support::Relationship::Asserts, reason: "テスト用リポジトリの破損・サイズ超過・利用不可の失敗が 500・422・503 となり、固定の JSON と no-store を返すことを確認する。" }],
     };
 #[tokio::test]
 async fn bounded_detail_and_storage_errors_are_generic() {

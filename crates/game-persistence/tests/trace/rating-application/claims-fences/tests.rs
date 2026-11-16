@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL claims, expired/stale fences, budget and recovery; worker error routing is not the subject.",
-        reason: "Generations increase, expired/stale apply and fail return LostClaim, acquisition budget exhausts, slots remain reserved and recovery outcomes are checked.",
+        scope: "実際の PostgreSQL で、取得権、期限切れと古い取得権による操作の拒否、試行回数の枠、復旧を検証する。ワーカーのエラー処理経路は対象としない。",
+        reason: "取得世代が増加し、期限切れまたは古い取得権での適用と失敗通知が LostClaim となること、取得回数の枠を使い切っても参加枠を保持すること、復旧結果を確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "quarantine-recovery", scope: "Real PostgreSQL claims, expired/stale fences, budget and recovery; worker error routing is not the subject.", relationship: crate::trace_support::Relationship::Asserts, reason: "Expired-claim budget exhaustion retains slots; recovery and repeated/unknown recovery outcomes are directly checked." }],
+        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "quarantine-recovery", scope: "実際の PostgreSQL で、取得権、期限切れと古い取得権による操作の拒否、試行回数の枠、復旧を検証する。ワーカーのエラー処理経路は対象としない。", relationship: crate::trace_support::Relationship::Asserts, reason: "失効した取得権の試行枠を使い切っても参加枠を保持する。復旧と、復旧の繰り返しや不明な対象に対する結果を直接確認する。" }],
     };
 #[tokio::test]
 async fn expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots() {
@@ -87,8 +87,8 @@ async fn expired_claims_consume_budget_quarantine_and_recover_without_releasing_
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL lock wait crossing lease expiry; no CLI.",
-        reason: "Lease expiry while waiting for a state lock yields LostClaim, no ledger, two retained reservations and an unchanged unrated black state.",
+        scope: "実際の PostgreSQL で、ロック待ち中にリースが失効する場合を検証する。CLI は使わない。",
+        reason: "状態のロック待ち中にリースが切れると LostClaim となり、台帳を作らず二つの予約枠を保持し、先手の未評価状態を変更しない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -138,8 +138,8 @@ async fn lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations() 
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Concurrent real PostgreSQL acquisitions and a held row lock.",
-        reason: "A locked job is skipped; two concurrent claims for the remaining job yield exactly one owner.",
+        scope: "実際の PostgreSQL で、行ロックを保持した状態と同時取得を検証する。",
+        reason: "ロック中のジョブを読み飛ばし、残るジョブを同時に取得しようとした二つの処理のうち、一つだけが所有権を得る。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

@@ -17,7 +17,7 @@
 2. アプリケーション層は型付き ID を RatingRepository に渡す。
 3. PostgreSQL 読み取り側が確定済み状態を読み、型の検証を通した結果を HTTP が JSON に変換する。
 
-以下の保証には、各行に示す契約が必要となる。テストの assertions は記載した事例の範囲に限られる。
+以下の保証には、各行に示す契約が必要となる。テストによる検証は記載した事例の範囲に限られる。
 
 | ID | アプリケーションの保証と条件 | 必要な契約 |
 | --- | --- | --- |
@@ -30,34 +30,34 @@
 
 ## 宣言した対応関係
 
-矢印は著者が宣言した関係を示す。asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。
+矢印は著者が宣言した関係を示す。「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。「所属のみ・未レビュー」は契約ディレクトリへの配置だけで分類した関係を示す。
 
 ```mermaid
 flowchart TD
-    n0["feature: user-ratings"]
-    n1["guarantee: committed-snapshot"]
-    n2["guarantee: explicit-pools"]
-    n3["guarantee: invalid-user"]
-    n4["guarantee: no-store"]
-    n5["guarantee: openapi-shape"]
-    n6["guarantee: unavailable"]
-    n7["contract: application-forwarding"]
-    n8["contract: http-cache"]
-    n9["contract: http-input"]
-    n10["contract: http-openapi"]
-    n11["contract: http-pools"]
-    n12["contract: http-unavailable"]
-    n13["contract: postgres-snapshot"]
-    n14["contract: rating-state"]
-    n15["contract: user-id"]
-    n16["test: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states"]
-    n17["test: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots"]
-    n18["test: test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts"]
-    n19["test: test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503"]
-    n20["test: test-player-http-lib-player-http-rating-tests-user-ratings-http-input-invalid-user-ids-are-rejected-before-storage"]
-    n21["test: test-player-http-lib-player-http-rating-tests-user-ratings-http-openapi-rating-openapi-contains-required-null-rating-and-both-named-pools"]
-    n22["test: test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked"]
-    n23["test: test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries"]
+    n0["機能: user-ratings"]
+    n1["保証: committed-snapshot"]
+    n2["保証: explicit-pools"]
+    n3["保証: invalid-user"]
+    n4["保証: no-store"]
+    n5["保証: openapi-shape"]
+    n6["保証: unavailable"]
+    n7["契約: application-forwarding"]
+    n8["契約: http-cache"]
+    n9["契約: http-input"]
+    n10["契約: http-openapi"]
+    n11["契約: http-pools"]
+    n12["契約: http-unavailable"]
+    n13["契約: postgres-snapshot"]
+    n14["契約: rating-state"]
+    n15["契約: user-id"]
+    n16["テスト: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states"]
+    n17["テスト: test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots"]
+    n18["テスト: test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts"]
+    n19["テスト: test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503"]
+    n20["テスト: test-player-http-lib-player-http-rating-tests-user-ratings-http-input-invalid-user-ids-are-rejected-before-storage"]
+    n21["テスト: test-player-http-lib-player-http-rating-tests-user-ratings-http-openapi-rating-openapi-contains-required-null-rating-and-both-named-pools"]
+    n22["テスト: test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked"]
+    n23["テスト: test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries"]
     n0 --> n1
     n1 --> n11
     n1 --> n7
@@ -76,21 +76,21 @@ flowchart TD
     n5 --> n10
     n0 --> n6
     n6 --> n12
-    n7 -->|exercises| n18
-    n7 -->|exercises| n19
-    n8 -->|asserts| n18
-    n8 -->|asserts| n19
-    n9 -->|asserts| n20
-    n10 -->|asserts| n21
-    n11 -->|asserts| n18
-    n11 -->|asserts| n19
-    n12 -->|asserts| n19
-    n13 -->|asserts| n16
-    n13 -->|asserts| n17
-    n14 -->|exercises| n18
-    n14 -->|exercises| n19
-    n14 -->|asserts| n22
-    n15 -->|asserts| n23
+    n7 -->|処理を通る| n18
+    n7 -->|処理を通る| n19
+    n8 -->|事例を直接検証| n18
+    n8 -->|事例を直接検証| n19
+    n9 -->|事例を直接検証| n20
+    n10 -->|事例を直接検証| n21
+    n11 -->|事例を直接検証| n18
+    n11 -->|事例を直接検証| n19
+    n12 -->|事例を直接検証| n19
+    n13 -->|事例を直接検証| n16
+    n13 -->|事例を直接検証| n17
+    n14 -->|処理を通る| n18
+    n14 -->|処理を通る| n19
+    n14 -->|事例を直接検証| n22
+    n15 -->|事例を直接検証| n23
 ```
 
 ## コンポーネント契約と根拠
@@ -103,8 +103,8 @@ UserRatings::get は型付きユーザー ID を RatingRepository に渡し、�
 
 実装位置: [crates/game-record-application/src/ratings.rs](../../../crates/game-record-application/src/ratings.rs#L24)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (exercises): 実ルーターから UserRatings::get を通り、偽 repository は受けた ID が unknown であることを確認する。
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (exercises): 成功値と 2 種類の失敗がアプリケーション層を通る。HTTP は失敗を同じ 503 に変換する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (処理を通る): 実ルーターから UserRatings::get を通り、偽 repository は受けた ID が unknown であることを確認する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (処理を通る): 成功値と 2 種類の失敗がアプリケーション層を通る。HTTP は失敗を同じ 503 に変換する。
 
 未検証: 任意の ID と結果の無変更転送を独立して確認するテストはない。HTTP の失敗変換では元の失敗種別の保持を確認できない。
 
@@ -116,8 +116,8 @@ respond は応答の Cache-Control ヘッダーを no-store にする。
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L224)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (asserts): 成功応答で共有ヘルパーが no-store を確認する。
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (asserts): 成功と保存層の 2 種類の失敗で、共有ヘルパーが no-store を確認する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (事例を直接検証): 成功応答で共有ヘルパーが no-store を確認する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (事例を直接検証): 成功と保存層の 2 種類の失敗で、共有ヘルパーが no-store を確認する。
 
 未検証: 登録した不正 ID テストは 400 の Cache-Control を確認しない。
 
@@ -129,7 +129,7 @@ respond は応答の Cache-Control ヘッダーを no-store にする。
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L182)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-http-input-invalid-user-ids-are-rejected-before-storage](#test-test-player-http-lib-player-http-rating-tests-user-ratings-http-input-invalid-user-ids-are-rejected-before-storage) (asserts): 空白・全角空白・不正 UTF-8 のパスを 400 で拒否し、呼ばれると panic する repository に到達しない。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-http-input-invalid-user-ids-are-rejected-before-storage](#test-test-player-http-lib-player-http-rating-tests-user-ratings-http-input-invalid-user-ids-are-rejected-before-storage) (事例を直接検証): 空白・全角空白・不正 UTF-8 のパスを 400 で拒否し、呼ばれると panic する repository に到達しない。
 
 未検証: このテストには ID の全長境界や、すべての不正なパスの列挙はない。
 
@@ -141,7 +141,7 @@ respond は応答の Cache-Control ヘッダーを no-store にする。
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L32)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-http-openapi-rating-openapi-contains-required-null-rating-and-both-named-pools](#test-test-player-http-lib-player-http-rating-tests-user-ratings-http-openapi-rating-openapi-contains-required-null-rating-and-both-named-pools) (asserts): レート取得のパラメーター、応答、認証設定、両プール、必須フィールド、rating の integer と null を OpenAPI JSON で比較する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-http-openapi-rating-openapi-contains-required-null-rating-and-both-named-pools](#test-test-player-http-lib-player-http-rating-tests-user-ratings-http-openapi-rating-openapi-contains-required-null-rating-and-both-named-pools) (事例を直接検証): レート取得のパラメーター、応答、認証設定、両プール、必須フィールド、rating の integer と null を OpenAPI JSON で比較する。
 
 <a id="contract-http-pools"></a>
 
@@ -151,8 +151,8 @@ HTTP アダプターは UserRatingSnapshot の両プールを JSON に変換し�
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L216)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (asserts): 認証情報なしの未知ユーザーへの 200 応答と、両プールの null・0 を JSON 全体で比較する。
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (asserts): 片方に 1516、もう片方に null を持つ応答を確認する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (事例を直接検証): 認証情報なしの未知ユーザーへの 200 応答と、両プールの null・0 を JSON 全体で比較する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (事例を直接検証): 片方に 1516、もう片方に null を持つ応答を確認する。
 
 <a id="contract-http-unavailable"></a>
 
@@ -162,7 +162,7 @@ HTTP アダプターは UserRatingSnapshot の両プールを JSON に変換し�
 
 実装位置: [crates/player-http/src/lib.rs](../../../crates/player-http/src/lib.rs#L182)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (asserts): 偽 repository の Error::Unavailable と Error::Corrupt の双方で 503 と同一の JSON エラーを比較する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (事例を直接検証): 偽 repository の Error::Unavailable と Error::Corrupt の双方で 503 と同一の JSON エラーを比較する。
 
 未検証: 処理枠が尽きたレート取得の応答を確認するテストは登録していない。
 
@@ -174,8 +174,8 @@ PostgreSQL 読み取り側は指定ユーザーの確定済み rating_states を
 
 実装位置: [crates/game-record-persistence/src/ratings.rs](../../../crates/game-record-persistence/src/ratings.rs#L10)。
 
-- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states) (asserts): 実 DB から同じユーザーの両プールに異なる確定値 1516 と 1484、対局数 1 を確認する。
-- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots) (asserts): 実 DB から black の確定済み 1516・1、未適用プールの Unrated、unknown の ten_minute_30 の Unrated を確認する。
+- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-both-pools-update-independently-from-their-frozen-start-states) (事例を直接検証): 実 DB から同じユーザーの両プールに異なる確定値 1516 と 1484、対局数 1 を確認する。
+- [test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots](#test-test-game-persistence-test-ratings-ratings-rating-application-atomic-application-completed-replay-is-read-only-and-never-releases-the-next-games-slots) (事例を直接検証): 実 DB から black の確定済み 1516・1、未適用プールの Unrated、unknown の ten_minute_30 の Unrated を確認する。
 
 未検証: 読み取り側での破損値拒否、別ユーザーの値が混ざらないこと、未知ユーザーの両プールの初期値を個別に確認する assertion はない。
 
@@ -187,9 +187,9 @@ RatingState は未評価を null・0、評価済みを整数レートと正の�
 
 実装位置: [crates/rating-domain/src/lib.rs](../../../crates/rating-domain/src/lib.rs#L35)。
 
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (exercises): 既定の Unrated を HTTP に変換する。
-- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (exercises): RatingState::from_parts(Some(1516), 1) による評価済み状態を使う。
-- [test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked](#test-test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked) (asserts): Some(1500) と対局数 0、および None と対局数 1 の組み合わせを拒否することを確認する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-anonymous-unknown-user-has-two-explicit-null-pools-and-zero-counts) (処理を通る): 既定の Unrated を HTTP に変換する。
+- [test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503](#test-test-player-http-lib-player-http-rating-tests-user-ratings-application-forwarding-committed-values-are-pool-specific-and-storage-failures-are-503) (処理を通る): RatingState::from_parts(Some(1516), 1) による評価済み状態を使う。
+- [test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked](#test-test-rating-domain-lib-rating-domain-tests-expected-upsets-and-extremes-are-zero-sum-and-checked) (事例を直接検証): Some(1500) と対局数 0、および None と対局数 1 の組み合わせを拒否することを確認する。
 
 未検証: 不正な組み合わせの全列挙や読み取り側の破損値拒否は、この機能のテストでは確認していない。ドメイン全体のテスト一覧は対象外。
 
@@ -201,7 +201,7 @@ UserId は 1〜128 UTF-8 バイトで Unicode 空白を含まない ID を保持
 
 実装位置: [crates/user-id/src/lib.rs](../../../crates/user-id/src/lib.rs#L16)。
 
-- [test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries](#test-test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries) (asserts): 有効な ASCII・日本語・128 バイトの保持と、空文字・空白・129 バイト・多バイト長超過の拒否を確認する。
+- [test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries](#test-test-user-id-lib-user-id-tests-preserves-valid-identifiers-and-rejects-byte-and-whitespace-boundaries) (事例を直接検証): 有効な ASCII・日本語・128 バイトの保持と、空文字・空白・129 バイト・多バイト長超過の拒否を確認する。
 
 ## 実在するテストと実行コマンド
 
@@ -305,9 +305,9 @@ cargo test --locked -p user-id --lib tests::preserves_valid_identifiers_and_reje
 
 ## 検査と根拠の限界
 
-check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
+check はグラフ、ファイル内の一意なテキスト位置、パッケージとターゲットごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
-この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
+この文書には実行済みの成功状態を保存しない。CI のワークスペース全体のテスト実行結果は、その実行時点の結果となる。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
 - 実 PostgreSQL から HTTP レスポンスまでを通すレート取得の end-to-end テストはない。
@@ -317,6 +317,6 @@ run は check の後に共有された Cargo テストを一度ずつ実行し�
 
 ## ディレクトリ方式の検査範囲
 
-Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
-src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
-全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。
+Rust 宣言、通常のモジュールと文字列リテラルの include! から物理ファイルの所属、パッケージ、ターゲット、完全なテスト名と位置を抽出する。ホスト環境で Cargo の既定の機能フラグを使い、ワークスペースのライブラリ、バイナリ、結合テストの全テスト一覧と一致させる。別のターゲット、機能フラグ、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは「所属のみ・未レビュー」として追加する。「事例を直接検証」または「処理を通る」のレビュー済み根拠がない契約には未検証事項の gap 宣言が必要。
+全ターゲットの未分類テストは拒否する。trace ディレクトリ内の未対応の項目マクロと cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト実行補助と基盤の検査の明示分類および理由は全機能の一覧に示す。

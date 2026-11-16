@@ -27,33 +27,33 @@
 ## 一覧の検査範囲
 
 入口、保証、操作の所有者はコンパイルされる Feature、Contract、Case、Evidence、Surface 宣言から取得する。
-Cargo が列挙する全 example に、型検査される Example 宣言と理由を必須とする。OpenApi 宣言の example だけを実行し、出力された操作と Surface 宣言の完全一致を検査する。Program 宣言はコンパイルのみ行う。proto/ の全 service・RPC も探索して Surface 宣言と照合する。
-check は OpenAPI exporter と操作の追加・削除、gRPC 操作の追加・削除、未割当の所有者、台帳から参照されない機能、参照元データと生成文書の不足・余分を検出する。
-新しいバックグラウンド処理や WebSocket メッセージを自動発見すること、機能の分割が適切かを判定することはできない。台帳の入口と source はレビューで保つ。
-テスト宣言数は機能内の件数であり、同じ Cargo テストが複数機能で共有されることがある。run は package・target・完全なテスト名が同じものを一度だけ実行する。
-asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。位置の一致とテストの成功は、保証の意味や網羅性の証明ではない。
+Cargo が列挙する全サンプルプログラムに、型検査される Example 宣言と理由を必須とする。OpenApi 宣言のサンプルだけを実行し、出力された操作と Surface 宣言の完全一致を検査する。Program 宣言はコンパイルのみ行う。proto/ の全サービス・RPC も探索して Surface 宣言と照合する。
+check は OpenAPI 出力プログラムと操作の追加・削除、gRPC 操作の追加・削除、未割当の所有者、台帳から参照されない機能、参照元データと生成文書の不足・余分を検出する。
+新しいバックグラウンド処理や WebSocket メッセージを自動発見すること、機能の分割が適切かを判定することはできない。台帳の入口とソース参照はレビューで保つ。
+テスト宣言数は機能内の件数であり、同じ Cargo テストが複数機能で共有されることがある。run はパッケージ・ターゲット・完全なテスト名が同じものを一度だけ実行する。
+「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。位置の一致とテストの成功は、保証の意味や網羅性の証明ではない。
 
 更新方法は [仕様とテストの対応を更新する](../how-to/check-traceability.md) を参照する。
 
-## 全 workspace テストの分類
+## ワークスペース全体のテスト分類
 
-コンパイル済みテスト 196 件。機能に関連付けた固有テスト 190 件、インフラ 5 件、テスト補助 1 件。共有テストは機能ごとの宣言数に重複して現れるが、この合計では一度だけ数える。
+コンパイル済みテスト 196 件。機能に関連付けた固有テスト 190 件、基盤の検査 5 件、テスト実行補助 1 件。共有テストは機能ごとの宣言数に重複して現れるが、この合計では一度だけ数える。
 
-標準ホストとデフォルト Cargo feature を使用する。test = false の target は Cargo の指定どおり一覧から除く。required-features を持つ target は現在のポリシーでは明示的に拒否する。空の target も一覧照合の対象にする。
+標準ホストと Cargo の既定の機能フラグを使用する。test = false のターゲットは Cargo の指定どおり一覧から除く。required-features を持つターゲットは現在の規則では明示的に拒否する。テストがないターゲットも一覧照合の対象にする。
 
-- `game-persistence / test / outbox / outbox::publisher_lock_probe` (helper) [crates/game-persistence/tests/trace/durable-event-dispatch/support.rs](../../crates/game-persistence/tests/trace/durable-event-dispatch/support.rs#L89): Child-process harness invoked only by the publisher lock driver.
-- `game-persistence / test / sql_policy / policy_accepts_builders_bound_catalog_queries_and_test_fixtures` (infrastructure / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L497): Checks the SQL policy analyzer against permitted fixture and query-builder examples; it is a repository development control.
-- `game-persistence / test / sql_policy / policy_distinguishes_test_functions_from_production_sql` (infrastructure / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L519): Keeps test-only fixture SQL out of production diagnostics while retaining checks for ordinary functions and invalid test attributes.
-- `game-persistence / test / sql_policy / policy_rejects_application_sql_and_interpolation` (infrastructure / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L471): Checks SQL policy diagnostics for forbidden source examples; it is a repository development control.
-- `game-persistence / test / sql_policy / production_sql_uses_builders_or_reviewed_postgres_operations` (infrastructure / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L448): Scans repository production sources for the SQL construction policy; it does not assert a product contract.
-- `pg-test-support / lib / (lib) / tests::test_databases_have_independent_names_and_contents` (infrastructure / test-support) [crates/pg-test-support/src/lib.rs](../../crates/pg-test-support/src/lib.rs#L101): Validates isolated temporary PostgreSQL databases supplied to the test harness.
+- `game-persistence / test / outbox / outbox::publisher_lock_probe` (テスト実行補助) [crates/game-persistence/tests/trace/durable-event-dispatch/support.rs](../../crates/game-persistence/tests/trace/durable-event-dispatch/support.rs#L89): 配信ロックの駆動テストからだけ呼び出す、子プロセス用の補助テスト。
+- `game-persistence / test / sql_policy / policy_accepts_builders_bound_catalog_queries_and_test_fixtures` (基盤の検査 / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L497): 許可するテスト用データとクエリービルダーの例で SQL 方針の解析器を検証する。リポジトリ開発用の検査である。
+- `game-persistence / test / sql_policy / policy_distinguishes_test_functions_from_production_sql` (基盤の検査 / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L519): テスト専用の準備用 SQL を本番コードの診断対象から除き、通常の関数と不正なテスト属性の検査を維持する。
+- `game-persistence / test / sql_policy / policy_rejects_application_sql_and_interpolation` (基盤の検査 / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L471): 禁止するソース例に対する SQL 方針の診断を検証する。リポジトリ開発用の検査である。
+- `game-persistence / test / sql_policy / production_sql_uses_builders_or_reviewed_postgres_operations` (基盤の検査 / sql-policy) [crates/game-persistence/tests/sql_policy.rs](../../crates/game-persistence/tests/sql_policy.rs#L448): リポジトリの本番ソースに対する SQL 構築方針を検査する。製品の契約を検証するものではない。
+- `pg-test-support / lib / (lib) / tests::test_databases_have_independent_names_and_contents` (基盤の検査 / test-support) [crates/pg-test-support/src/lib.rs](../../crates/pg-test-support/src/lib.rs#L101): テスト実行用に提供する、独立した一時 PostgreSQL データベースを検証する。
 
-## Cargo example の分類
+## Cargo のサンプルプログラムの分類
 
-- `game-grpc / outbox_proof` (Program) [crates/game-grpc/examples/outbox_proof.rs](../../crates/game-grpc/examples/outbox_proof.rs): Exercises outbox recovery through gRPC, Valkey and Docker Compose, including service restarts.
-- `game-grpc / persistence_proof` (Program) [crates/game-grpc/examples/persistence_proof.rs](../../crates/game-grpc/examples/persistence_proof.rs): Exercises persistence across gRPC server restarts and writes proof files to a supplied directory.
-- `game-grpc / play` (Program) [crates/game-grpc/examples/play.rs](../../crates/game-grpc/examples/play.rs): Plays a game through a running gRPC service and checks move and resignation responses.
-- `game-grpc / rating_proof` (Program) [crates/game-grpc/examples/rating_proof.rs](../../crates/game-grpc/examples/rating_proof.rs): Finishes a game through a running gRPC service to support rating verification.
-- `player-http / player-openapi` (OpenApi) [crates/player-http/examples/player-openapi.rs](../../crates/player-http/examples/player-openapi.rs): Prints the public player HTTP OpenAPI document as JSON.
-- `realtime-gateway / matchmaking-openapi` (OpenApi) [crates/realtime-gateway/examples/matchmaking-openapi.rs](../../crates/realtime-gateway/examples/matchmaking-openapi.rs): Prints the matchmaking HTTP OpenAPI document as JSON.
-- `user-http / user-openapi` (OpenApi) [crates/user-http/examples/user-openapi.rs](../../crates/user-http/examples/user-openapi.rs): Prints the account HTTP OpenAPI document as JSON.
+- `game-grpc / outbox_proof` (プログラム（コンパイルのみ）) [crates/game-grpc/examples/outbox_proof.rs](../../crates/game-grpc/examples/outbox_proof.rs): サービスの再起動を含め、gRPC、Valkey、Docker Composeを通したOutboxの復旧処理を実行する。
+- `game-grpc / persistence_proof` (プログラム（コンパイルのみ）) [crates/game-grpc/examples/persistence_proof.rs](../../crates/game-grpc/examples/persistence_proof.rs): gRPCサーバーの再起動をまたいで永続化の処理を実行し、指定ディレクトリに検証用ファイルを出力する。
+- `game-grpc / play` (プログラム（コンパイルのみ）) [crates/game-grpc/examples/play.rs](../../crates/game-grpc/examples/play.rs): 稼働中のgRPCサービスを通して対局を進め、着手と投了の応答を確認する。
+- `game-grpc / rating_proof` (プログラム（コンパイルのみ）) [crates/game-grpc/examples/rating_proof.rs](../../crates/game-grpc/examples/rating_proof.rs): 稼働中のgRPCサービスを通して対局を終え、レーティングの検証に使う。
+- `player-http / player-openapi` (OpenAPI 仕様の出力) [crates/player-http/examples/player-openapi.rs](../../crates/player-http/examples/player-openapi.rs): 公開対局 HTTP の OpenAPI 文書を JSON として出力する。
+- `realtime-gateway / matchmaking-openapi` (OpenAPI 仕様の出力) [crates/realtime-gateway/examples/matchmaking-openapi.rs](../../crates/realtime-gateway/examples/matchmaking-openapi.rs): マッチメイキング用HTTP APIのOpenAPI文書をJSONとして出力する。
+- `user-http / user-openapi` (OpenAPI 仕様の出力) [crates/user-http/examples/user-openapi.rs](../../crates/user-http/examples/user-openapi.rs): アカウント HTTP の OpenAPI 文書を JSON として出力する。

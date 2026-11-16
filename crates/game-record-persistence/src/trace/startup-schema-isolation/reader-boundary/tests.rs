@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL reader pool acquisition saturation and recovery.",
-        reason: "Four held connections prevent a fifth until acquisition timeout; releasing a connection restores acquisition.",
+        scope: "実 PostgreSQL の読み取り接続プールを使い切った状態で、接続取得と復旧を確認する。",
+        reason: "四つの接続を保持すると、五つ目の取得はタイムアウトするまで待機する。接続を解放すると再び取得できることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -41,8 +41,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL timeout settings and timed work cancellation/recovery.",
-        reason: "Actual timeout settings are checked, pg_sleep is cancelled with SQLSTATE 57014 and the connection recovers.",
+        scope: "実 PostgreSQL のタイムアウト設定と、時間を要する処理の中断・復旧を確認する。",
+        reason: "実際のタイムアウト設定を確認し、pg_sleep が SQLSTATE 57014 で中断され、その接続が復旧することを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

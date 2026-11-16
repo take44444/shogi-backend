@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.",
-        reason: "Closing the real pool makes cached service snapshot return Unavailable.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
+        reason: "実際の接続プールを閉じると、キャッシュ済みサービスのスナップショット取得が Unavailable を返す。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

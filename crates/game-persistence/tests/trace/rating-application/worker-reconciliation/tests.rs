@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real RatingWorker and PostgreSQL with unavailable-result injection around actual application commits.",
-        reason: "Injected unavailable results before and after real commits produce Applied or AlreadyApplied, then Idle, with one ledger.",
+        scope: "実際の RatingWorker と PostgreSQL を使い、実際の適用コミットの前後で利用不能の結果を注入する。",
+        reason: "実際のコミットの前後で利用不能の結果を注入すると、Applied または AlreadyApplied、続いて Idle となり、台帳は一件となる。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

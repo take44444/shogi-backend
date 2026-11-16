@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown directly.",
-        reason: "Active socket closes and later upgrade returns 503.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 Gateway::shutdownを直接呼ぶ。",
+        reason: "接続中のソケットが閉じ、その後のアップグレードが503を返す。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -24,10 +24,10 @@ async fn shutdown_closes_active_connections_and_refuses_new_upgrades() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown before any connection.",
-        reason: "The first upgrade after shutdown is rejected 503.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 一度も接続を確立する前にGateway::shutdownを呼ぶ。",
+        reason: "停止後の最初のアップグレードを503で拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "upgrade-permits", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Calls Gateway::shutdown before any connection.", relationship: crate::trace_support::Relationship::Asserts, reason: "Shutdown before any connection makes first upgrade 503." }],
+        also: &[crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "upgrade-permits", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 一度も接続を確立する前にGateway::shutdownを呼ぶ。", relationship: crate::trace_support::Relationship::Asserts, reason: "接続を一度も確立する前に停止すると、最初のアップグレードが503となる。" }],
     };
 #[tokio::test]
 async fn shutdown_before_any_connection_refuses_the_first_upgrade() {

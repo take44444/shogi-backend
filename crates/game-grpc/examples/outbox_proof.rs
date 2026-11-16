@@ -3,7 +3,7 @@ mod trace_support;
 
 trace_support::example!(trace_support::Example {
     kind: trace_support::ExampleKind::Program,
-    reason: "Exercises outbox recovery through gRPC, Valkey and Docker Compose, including service restarts.",
+    reason: "サービスの再起動を含め、gRPC、Valkey、Docker Composeを通したOutboxの復旧処理を実行する。",
 });
 
 mod support;

@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL completed replay and later-game reservation preservation.",
-        reason: "Completed replay neither adds a ledger nor releases a newer game's slots.",
+        scope: "実際の PostgreSQL で、完了済み処理の再試行と、後の対局の予約枠の保持を検証する。",
+        reason: "完了済み処理の再試行は台帳を追加せず、後の対局の参加枠も解放しない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[crate::trace_support::Evidence { feature: "user-ratings", contract: "postgres-snapshot", scope: "実 PostgreSQL と PostgresGameRecords。ワーカー適用後の読み取り。HTTP は通らない。", relationship: crate::trace_support::Relationship::Asserts, reason: "実 DB から black の確定済み 1516・1、未適用プールの Unrated、unknown の ten_minute_30 の Unrated を確認する。" }],
     };
@@ -66,10 +66,10 @@ async fn completed_replay_is_read_only_and_never_releases_the_next_games_slots()
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real worker, PostgreSQL and read adapter for independent pools.",
-        reason: "Two real worker ticks produce independent black ratings of 1516 and 1484 in the two pools, one completed game each, two ledgers and no remaining slots.",
+        scope: "実際のワーカー、PostgreSQL、読み取りアダプターを使い、プールの独立性を検証する。",
+        reason: "実際のワーカーの二回の tick により、二つのプールの先手レーティングがそれぞれ独立に 1516 と 1484 となる。各プールの完了対局数は一件、台帳は二件となり、残る参加枠はない。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "worker-reconciliation", scope: "Real worker, PostgreSQL and read adapter for independent pools.", relationship: crate::trace_support::Relationship::Asserts, reason: "Real worker application uses independent frozen starts for the two pools." }, crate::trace_support::Evidence { feature: "user-ratings", contract: "postgres-snapshot", scope: "実 PostgreSQL と PostgresGameRecords。両プールのワーカー適用後の読み取り。HTTP は通らない。", relationship: crate::trace_support::Relationship::Asserts, reason: "実 DB から同じユーザーの両プールに異なる確定値 1516 と 1484、対局数 1 を確認する。" }],
+        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "worker-reconciliation", scope: "実際のワーカー、PostgreSQL、読み取りアダプターを使い、プールの独立性を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "実際のワーカーの適用処理は、二つのプールで独立して固定された開始状態を使う。" }, crate::trace_support::Evidence { feature: "user-ratings", contract: "postgres-snapshot", scope: "実 PostgreSQL と PostgresGameRecords。両プールのワーカー適用後の読み取り。HTTP は通らない。", relationship: crate::trace_support::Relationship::Asserts, reason: "実 DB から同じユーザーの両プールに異なる確定値 1516 と 1484、対局数 1 を確認する。" }],
     };
 #[tokio::test]
 async fn both_pools_update_independently_from_their_frozen_start_states() {
@@ -110,8 +110,8 @@ async fn both_pools_update_independently_from_their_frozen_start_states() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL atomic-apply rollback after forced ledger insertion failure.",
-        reason: "A forced ledger-insert failure rolls back both ratings and reservations, then succeeds after repair.",
+        scope: "実際の PostgreSQL で、台帳挿入の強制失敗後に適用全体を原子的にロールバックする。",
+        reason: "適用台帳への挿入を強制的に失敗させると、両者のレーティングと予約枠がロールバックされ、修復後には成功する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

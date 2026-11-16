@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL empty/wrong/incomplete reader schema with no initialization.",
-        reason: "An empty database stays empty and wrong/incomplete schemas are rejected.",
+        scope: "実際の PostgreSQL で、初期化を行わず、空・誤り・不完全な読み取り用スキーマを検証する。",
+        reason: "空のデータベースは空のままであり、誤ったスキーマや不完全なスキーマを拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

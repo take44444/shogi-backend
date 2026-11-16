@@ -15,10 +15,10 @@ fn ticket(n: u128, rating: i64, time: i64) -> Ticket {
 }
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure policy; no database or timer.",
-        reason: "Requires both participants to have widened enough.",
+        scope: "外部依存のない方針の検証。データベースやタイマーは使わない。",
+        reason: "双方の許容幅が十分に拡大していることを必須とする。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-pairing", contract: "windows", scope: "Pure policy; no database or timer.", relationship: crate::trace_support::Relationship::Asserts, reason: "Checks 29,999/30,000ms boundary, 400 cap, bilateral compatibility and Unrated=1500." }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-pairing", contract: "windows", scope: "外部依存のない方針の検証。データベースやタイマーは使わない。", relationship: crate::trace_support::Relationship::Asserts, reason: "29,999/30,000 ミリ秒の境界、差の上限 400、双方の許容幅の一致、Unrated を 1500 と扱うことを確認する。" }],
     };
 #[test]
     fn widening_is_bilateral_and_includes_boundary() {
@@ -33,8 +33,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure selector fixtures; no database or scheduler.",
-        reason: "Checks skipped incompatible head and nearest/oldest/UUID preferences.",
+        scope: "外部依存のない選択処理をテスト用データで検証する。データベースやスケジューラーは使わない。",
+        reason: "不適合な先頭の読み飛ばしと、差が最小・最も古い時刻・UUID の優先順位を確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -56,8 +56,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure selector boundary and isolation fixtures.",
-        reason: "Checks exclusive expiry boundary, extreme arithmetic and pool separation.",
+        scope: "外部依存のない選択処理の境界と分離を、テスト用データで検証する。",
+        reason: "有効期限ちょうどの境界、極端な値の算術、プールの分離を確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -78,8 +78,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure selector with equal UUIDs and distinct owners.",
-        reason: "Equal owner-scoped ticket UUIDs have deterministic owner tie breaking.",
+        scope: "同じ UUID と異なる所有者を与え、外部依存のない選択処理を検証する。",
+        reason: "所有者が異なる同じ UUID のチケットは、所有者によって決定的に優先順位を付ける。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

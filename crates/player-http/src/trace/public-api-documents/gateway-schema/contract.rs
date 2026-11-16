@@ -1,11 +1,11 @@
 use crate::trace_support as trace;
 trace::contract!(trace::Contract {
-    statement: "The gateway exports annotated matchmaking paths and two cookie security schemes through its offline OpenAPI accessor.",
+    statement: "ゲートウェイは、注釈を付けたマッチングのパスと二つの Cookie セキュリティ方式を、オフライン OpenAPI 取得関数から出力する。",
     source: trace::Source {
         path: "crates/realtime-gateway/src/matchmaking.rs",
         needle: "pub(crate) fn openapi() -> utoipa::openapi::OpenApi {"
     },
     gap: Some(
-        "This test checks presence rather than exact equality of the gateway method/path set. The completeness catalog separately reconciles generated operations. Gateway has no runtime /openapi.json route."
+        "このテストはゲートウェイの HTTP メソッドとパスの集合の存在を確認し、完全一致は確認しない。操作一覧の網羅性検査は、別途生成された操作と照合する。ゲートウェイに実行時の /openapi.json ルートはない。"
     ),
 });

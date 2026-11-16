@@ -3,7 +3,7 @@ mod trace_support;
 
 trace_support::example!(trace_support::Example {
     kind: trace_support::ExampleKind::Program,
-    reason: "Finishes a game through a running gRPC service to support rating verification.",
+    reason: "稼働中のgRPCサービスを通して対局を終え、レーティングの検証に使う。",
 });
 
 mod support;

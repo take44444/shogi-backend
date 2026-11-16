@@ -3,7 +3,7 @@ mod trace_support;
 
 trace_support::example!(trace_support::Example {
     kind: trace_support::ExampleKind::OpenApi,
-    reason: "Prints the account HTTP OpenAPI document as JSON.",
+    reason: "アカウント HTTP の OpenAPI 文書を JSON として出力する。",
 });
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

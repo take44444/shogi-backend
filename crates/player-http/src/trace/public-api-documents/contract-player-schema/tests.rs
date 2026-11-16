@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Offline player OpenAPI JSON, no HTTP/database.",
-        reason: "Package name/version are checked, with absent dependency-derived contact/license.",
+        scope: "公開対局サービスのオフライン OpenAPI JSON。HTTP とデータベースは使わない。",
+        reason: "パッケージ名とバージョンを確認し、依存先由来の連絡先とライセンスがないことを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -19,8 +19,8 @@ fn document_identifies_this_service_without_dependency_attribution() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Offline player route and schema assertions, no service startup.",
-        reason: "OpenAPI 3.1, exact four paths and methods, parameter constraints, enumerated errors and resolvable local refs are asserted.",
+        scope: "公開対局サービスのルートとスキーマをオフラインで検証する。サービスは起動しない。",
+        reason: "OpenAPI 3.1、四つのパスと HTTP メソッドの完全一致、パラメーターの制約、列挙したエラー、ローカル参照を解決できることを検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -124,8 +124,8 @@ fn paths_queries_and_error_contract_are_derived_from_routes() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Player OpenAPI and actual DTO serialization, no storage.",
-        reason: "Assertions compare flattened actions, required nullable cursor and unsigned integer bounds with actual DTO JSON.",
+        scope: "公開対局サービスの OpenAPI と実際の DTO のシリアライズ。保存層は使わない。",
+        reason: "平坦化した操作、必須かつ null を許すカーソル、符号なし整数の境界を、実際の DTO の JSON と比較する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

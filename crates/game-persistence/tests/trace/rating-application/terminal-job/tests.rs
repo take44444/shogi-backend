@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL receipt/outbox/rating-job atomicity with trigger-injected failure.",
-        reason: "A rating-job trigger failure rolls back metadata, journal and outbox; retry yields one job and casual finish yields none.",
+        scope: "トリガーで失敗を注入し、実際の PostgreSQL の受理記録・Outbox・レーティングジョブの原子性を検証する。",
+        reason: "レーティングジョブのトリガーが失敗すると、メタデータ・履歴・Outbox をロールバックする。再試行ではジョブが一件となり、非レーティング対局の終局ではジョブを作らない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

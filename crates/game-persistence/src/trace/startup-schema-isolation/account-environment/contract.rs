@@ -1,11 +1,11 @@
 use crate::trace_support as trace;
 trace::contract!(trace::Contract {
-    statement: "ServerConfig::from_env requires nonempty public origin, PostgreSQL URL and Google credentials, bounds session lifetime to 60 through 2592000 seconds, parses the bind address and accepts only true/false development flags.",
+    statement: "ServerConfig::from_env は空でない公開オリジン、PostgreSQL URL、Google 認証情報を必須とする。セッション有効期間を 60 秒から 2592000 秒に制限し、待ち受けアドレスを解析し、開発用フラグは true/false だけを受け入れる。",
     source: trace::Source {
         path: "crates/user-http/src/config.rs",
         needle: "pub fn from_env() -> Result<Self, ConfigError> {"
     },
     gap: Some(
-        "BrowserConfig constructor tests do not call from_env. No mapped test mutates the environment to assert required variables, invalid URL prefixes, session lifetime bounds, bind parsing, development-flag parsing or defaults."
+        "BrowserConfig のコンストラクターテストは from_env を呼ばない。必須の環境変数、不正な URL プレフィックス、セッション有効期間の境界、待ち受けアドレスの解析、開発用フラグの解析と既定値を、環境を書き換えて検証する対応テストはない。"
     ),
 });

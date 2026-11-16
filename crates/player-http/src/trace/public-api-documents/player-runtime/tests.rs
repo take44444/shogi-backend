@@ -3,8 +3,8 @@ use crate::record_route_support::unused_ratings;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "In-process player router with panic-on-use repositories.",
-        reason: "Anonymous router response equals offline JSON and panic-on-use record/rating repositories remain untouched.",
+        scope: "呼び出されると panic するリポジトリを使う、プロセス内の公開対局ルーター。",
+        reason: "認証なしのルーター応答がオフライン生成の JSON と一致し、呼び出されると panic する対局・レートのリポジトリに到達しないことを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

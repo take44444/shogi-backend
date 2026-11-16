@@ -6,36 +6,36 @@ trace::feature!(trace::Feature {
         needle: "pub enum TicketState {"
     },
     flow: &[
-        "Browser current/ticket/join/heartbeat/cancel handlers authenticate the cookie and derive the owner before issuing the corresponding GameService RPC.",
-        "GameRpc validates typed owner, UUID, pool and heartbeat values, then delegates JoinMatchmaking, GetMatchmaking, GetMatchmakingTicket, HeartbeatMatchmaking and CancelMatchmaking to the durable repository.",
-        "PostgreSQL transactions serialize admission, expire stale waiting state and preserve historical tickets, refusals and cancellation tombstones; pairing is traced separately."
+        "ブラウザーの現在参加状態・チケット・参加・ハートビート・取消の各ハンドラーは、Cookie を認証し、所有者を導出してから対応する GameService RPC を呼ぶ。",
+        "GameRpc は型付きの所有者・UUID・プール・ハートビートを検証し、JoinMatchmaking、GetMatchmaking、GetMatchmakingTicket、HeartbeatMatchmaking、CancelMatchmaking を永続リポジトリへ委譲する。",
+        "PostgreSQL トランザクションは参加受け入れを直列化し、古い待機状態を失効させ、過去のチケット・拒否・取消記録を保持する。組合せ処理は別に追跡する。"
     ],
     guarantees: &[
         trace::Guarantee {
             id: "owner-admission",
-            statement: "An owner may request either supported rated pool, with at most one waiting or playing participation across pools. The server captures the admission rating and preserves the UUID retry identity.",
+            statement: "所有者は対応するどちらのレーティングプールにも参加を要求できるが、プール全体で待機中または対局中の参加は一件に限られる。サーバーは参加時のレーティングを固定し、UUID による再試行の識別を保持する。",
             contracts: &["admission", "rpc-boundary", "browser-owner"]
         },
         trace::Guarantee {
             id: "durable-history",
-            statement: "Current participation and historical ticket reads are owner-scoped. Exact retries retain stored outcomes; a different pool conflicts. Refusals and cancellation before join remain durable.",
+            statement: "現在の参加状態と過去のチケットの読み取りは所有者に限定する。同一の再試行は保存済み結果を保持し、プールの変更は競合する。参加拒否と参加前の取消は永続化される。",
             contracts: &["admission", "reads", "cancel", "rpc-boundary"]
         },
         trace::Guarantee {
             id: "waiting-lifecycle",
-            statement: "Waiting lasts 30 seconds from admission or the latest strictly newer positive heartbeat. Duplicate/older heartbeats do not extend or revive it. Cancellation ends waiting but cannot cancel an already matched game.",
+            statement: "待機は、参加受け入れ時またはシーケンスが厳密に大きい最新の正のハートビートから 30 秒続く。同じか古いハートビートでは延長も復活もしない。取消は待機を終了させるが、組合せ済みの対局は取り消せない。",
             contracts: &["heartbeat", "cancel"]
         },
         trace::Guarantee {
             id: "browser-contract",
-            statement: "The five browser matchmaking operations require a valid session, enforce Host and mutation Origin/same-site checks, reject caller user_id, return stable ticket/error JSON and apply no-store. OpenAPI describes all five operations.",
+            statement: "ブラウザーの五つの組合せ操作は有効なセッションを必須とし、Host と変更時の Origin・same-site を確認する。呼び出し元の user_id を拒否し、安定したチケット・エラー JSON を返して no-store を適用する。OpenAPI は五つすべての操作を記述する。",
             contracts: &["browser-owner", "browser-response", "browser-schema"]
         }
     ],
     limitations: &[
-        "gRPC accepts caller identity claims and does not authenticate users; authenticated owner derivation belongs to the browser gateway.",
-        "Selected tests do not exhaust every heartbeat ordering, malformed field, no-store response class or backend failure branch.",
-        "Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review."
+        "gRPC は呼び出し元の識別情報の申告を受け入れ、ユーザーを認証しない。認証済み所有者の導出はブラウザーゲートウェイが担う。",
+        "選択したテストは、ハートビートの全順序、不正な全フィールド、no-store の全応答区分、接続先の失敗の全分岐を網羅しない。",
+        "リンクとテスト成功だけでは意味上の完全性は成立しない。保証、根拠の強さ、分割の変更にはレビューが必要となる。"
     ],
     entrypoints: &[],
     surfaces: &[

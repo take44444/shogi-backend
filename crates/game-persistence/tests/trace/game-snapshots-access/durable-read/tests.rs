@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Concurrent real commits and ordinary repository loads.",
-        reason: "Concurrent writer/read loop compares version with journal length and final result with last receipt; independent snapshot reconstruction succeeds.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のコミットと通常のリポジトリ読み込みを並行実行する。",
+        reason: "書き込みと読み取りの並行ループで、バージョンと履歴長、最終結果と最後の受理記録を比較し、独立したスナップショット復元が成功する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

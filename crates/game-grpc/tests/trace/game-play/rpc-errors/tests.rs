@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.",
-        reason: "NotFound, wrong-turn/illegal FailedPrecondition, stale Aborted metadata, request correction and post-finish rejection are asserted with unchanged state.",
+        scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。",
+        reason: "NotFound、手番違い・非合法手のFailedPrecondition、古い連番に対するAbortedのメタデータ、リクエストの訂正、終局後の拒否を検証し、状態が変化しないことも確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

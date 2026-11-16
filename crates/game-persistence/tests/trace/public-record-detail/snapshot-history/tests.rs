@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL public-record filtering and hidden-detail lookup.",
-        reason: "Repository lookup directly asserts a hidden completed record is not found.",
+        scope: "実際の PostgreSQL で、公開棋譜のフィルターと非公開詳細の検索を検証する。",
+        reason: "リポジトリで直接取得し、非公開の終了済み対局が見つからないことを検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "public-record-search", contract: "bounds-cursor", scope: "Real PostgreSQL reader and writer fixtures exercise filters, visibility and keyset changes.", relationship: crate::trace_support::Relationship::Asserts, reason: "A repository page cursor is rejected after changing the winner filter." }, crate::trace_support::Evidence { feature: "public-record-search", contract: "public-keysets", scope: "Real PostgreSQL reader and writer fixtures exercise filters, visibility and keyset changes.", relationship: crate::trace_support::Relationship::Asserts, reason: "Direct repository assertions cover individual filters, a combined case, c/b ID tie ordering followed by older a, exclusion of an unseen newer row, and omission of a newly hidden row." }],
+        also: &[crate::trace_support::Evidence { feature: "public-record-search", contract: "bounds-cursor", scope: "実際の PostgreSQL の読み取り・書き込み用のテスト構成で、フィルター、公開範囲、キーベースのページングの変化を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "勝者フィルターを変更すると、リポジトリのページカーソルを拒否する。" }, crate::trace_support::Evidence { feature: "public-record-search", contract: "public-keysets", scope: "実際の PostgreSQL の読み取り・書き込み用のテスト構成で、フィルター、公開範囲、キーベースのページングの変化を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "リポジトリを直接検証し、個別フィルター、組み合わせた条件、同時刻の ID を c/b の順に並べてから古い a を返すこと、まだ見ていない新しい行の除外、新たに非公開となった行の省略を確認する。" }],
     };
 #[tokio::test]
 async fn public_completed_metadata_only_filters_and_stable_keysets() {
@@ -190,8 +190,8 @@ async fn public_completed_metadata_only_filters_and_stable_keysets() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL journal/metadata corruption and oversized-history rejection.",
-        reason: "Eight corruption mutations and excess history are rejected rather than returning partial detail.",
+        scope: "実際の PostgreSQL で、履歴とメタデータの破損、および上限を超える履歴の拒否を検証する。",
+        reason: "八種類の破損変更と上限を超える履歴を拒否し、部分的な詳細は返さない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -235,8 +235,8 @@ async fn corrupt_and_oversized_details_fail_without_partial_history() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Concurrent real PostgreSQL mutation between reader statements tests snapshot consistency.",
-        reason: "A second connection changes metadata and history while history reading is blocked; returned detail retains the prior consistent snapshot.",
+        scope: "読み取り文の間で実際の PostgreSQL を並行変更し、スナップショットの整合性を検証する。",
+        reason: "履歴の読み込みが待機している間に別の接続がメタデータと履歴を変更しても、返す詳細は変更前の整合したスナップショットを保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -279,8 +279,8 @@ async fn detail_keeps_one_database_view_when_history_changes_between_reads() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL structural history boundary; intentionally does not replay legality.",
-        reason: "All 4096 structural operations are accepted, while 4097 are rejected without replaying board legality.",
+        scope: "実際の PostgreSQL の履歴の構造上の境界を検証する。意図的に合法性の再現は行わない。",
+        reason: "盤面上の合法性を再現せず、構造上の操作を 4096 件までは受け入れ、4097 件は拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

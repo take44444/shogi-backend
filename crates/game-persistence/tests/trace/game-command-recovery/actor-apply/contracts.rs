@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Separate real store/service instances.",
-        reason: "Independent real store/service instances serialize CAS conflicts and identical concurrent retries.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のストアとサービスをそれぞれ独立したインスタンスで実行する。",
+        reason: "独立した実際のストアとサービスのインスタンスで、CAS の競合と同じ内容の同時再試行を直列化する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "durable-commit", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Separate real store/service instances.", relationship: crate::trace_support::Relationship::Asserts, reason: "Independent service/store instances CAS and refresh correctly." }],
+        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "durable-commit", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のストアとサービスをそれぞれ独立したインスタンスで実行する。", relationship: crate::trace_support::Relationship::Asserts, reason: "独立したサービスとストアのインスタンスで、CAS と状態更新が正しく動く。" }],
     };
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
@@ -50,10 +50,10 @@ async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. FaultStore wraps real PostgreSQL to control return/read failures.",
-        reason: "Commit-after-error reconciles receipt; precommit failure fences until durable reads recover.",
+        scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。FaultStore が実際の PostgreSQL を包み、返す結果と読み込み失敗を制御する。",
+        reason: "コミット後にエラーが返る場合は受理記録と照合する。コミット前の失敗では、永続状態の読み込みが回復するまでローカル状態の使用を止める。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "reconciliation", scope: "Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. FaultStore wraps real PostgreSQL to control return/read failures.", relationship: crate::trace_support::Relationship::Asserts, reason: "Fault adapter around real PostgreSQL tests commit-after-error receipt recovery, precommit failure, unreadable fencing and later recovery." }],
+        also: &[crate::trace_support::Evidence { feature: "game-command-recovery", contract: "reconciliation", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。FaultStore が実際の PostgreSQL を包み、返す結果と読み込み失敗を制御する。", relationship: crate::trace_support::Relationship::Asserts, reason: "実際の PostgreSQL を包む障害注入アダプターで、コミット後のエラーからの受理記録の復旧、コミット前の失敗、読み込み不能時の状態使用停止、その後の復旧を検証する。" }],
     };
 #[tokio::test]
 async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery() {

@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Inspects generated OpenAPI only; no service fixture or network calls.",
-        reason: "All five method/path operations and both cookie schemes with alternative requirements are inspected.",
+        scope: "生成されたOpenAPIだけを検査する。サービスの準備処理やネットワーク呼び出しは使わない。",
+        reason: "5件すべてのメソッド・パスと、選択肢として使える2種類のCookie認証方式を検査する。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "public-api-documents", contract: "gateway-schema", scope: "Pure gateway offline OpenAPI assertions; the integration target does not start services in this synchronous case.", relationship: crate::trace_support::Relationship::Asserts, reason: "The generated document contains GET /matchmaking/me, GET/PUT/DELETE ticket and POST heartbeat operations plus both cookie names and OR security alternatives." }],
+        also: &[crate::trace_support::Evidence { feature: "public-api-documents", contract: "gateway-schema", scope: "ゲートウェイのオフラインOpenAPIだけを検証する。この同期テストでは結合テストのtargetからサービスを起動しない。", relationship: crate::trace_support::Relationship::Asserts, reason: "生成された文書に、GET /matchmaking/me、チケットのGET・PUT・DELETE、ハートビートのPOSTと、2種類のCookie名、およびいずれかで認証するOR条件が含まれることを確認する。" }],
     };
 #[test]
 fn matchmaking_openapi_covers_all_owner_scoped_routes() {

@@ -3,7 +3,7 @@ mod trace_support;
 
 trace_support::example!(trace_support::Example {
     kind: trace_support::ExampleKind::Program,
-    reason: "Exercises persistence across gRPC server restarts and writes proof files to a supplied directory.",
+    reason: "gRPCサーバーの再起動をまたいで永続化の処理を実行し、指定ディレクトリに検証用ファイルを出力する。",
 });
 
 mod support;

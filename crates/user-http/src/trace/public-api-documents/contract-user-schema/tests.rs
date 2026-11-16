@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Offline user OpenAPI JSON, no provider or storage.",
-        reason: "Package name/version are checked, without contact/license attribution from dependencies.",
+        scope: "ユーザーサービスのオフライン OpenAPI JSON。外部認証プロバイダーと保存層は使わない。",
+        reason: "パッケージ名とバージョンを確認し、依存先由来の連絡先やライセンスの表記がないことを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -19,8 +19,8 @@ fn document_identifies_this_service_without_dependency_attribution() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Offline user route/schema/local-reference assertions.",
-        reason: "Exact paths/methods, cookie alternatives, headers, redirects, DTO fields, error enums and all local references are asserted.",
+        scope: "ユーザーサービスのルート、スキーマ、ローカル参照をオフラインで検証する。",
+        reason: "パスと HTTP メソッドの完全一致、Cookie の選択肢、ヘッダー、リダイレクト、DTO のフィールド、エラーの列挙値、すべてのローカル参照を検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -155,8 +155,8 @@ fn document_has_all_routes_real_schemas_and_cookie_security_alternatives() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Generated user document status/media assertions without HTTP, storage or provider.",
-        reason: "The documented PATCH response status set, JSON ErrorBody references, framework text schemas and callback text rejection are compared directly.",
+        scope: "HTTP、保存層、外部認証プロバイダーを使わず、ユーザーサービスの生成文書にあるステータスとメディア型を検証する。",
+        reason: "文書に記載された PATCH 応答のステータス集合、JSON の ErrorBody への参照、フレームワークのテキストスキーマ、コールバックのテキストによる入力拒否を直接比較する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

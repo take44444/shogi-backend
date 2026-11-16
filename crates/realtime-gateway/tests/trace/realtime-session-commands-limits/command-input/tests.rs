@@ -2,10 +2,10 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom input/rate limits and durable snapshot assertion.",
-        reason: "Input byte limit 128 and rate one terminate abusive sockets while durable sequence remains zero.",
+        scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 入力・頻度の上限を変更し、永続化されたスナップショットを検証する。",
+        reason: "入力バイト数の上限128と頻度の上限1で、過剰な入力を送るソケットを終了する。永続化された連番は0のままとなる。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "upgrade-permits", scope: "Real HTTP/WebSocket gateway, user HTTP service, game gRPC service, PostgreSQL and Valkey; external OIDC provider is a fixture. Custom input/rate limits and durable snapshot assertion.", relationship: crate::trace_support::Relationship::Asserts, reason: "Oversized frames close without committing." }],
+        also: &[crate::trace_support::Evidence { feature: "realtime-session-commands-limits", contract: "upgrade-permits", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 入力・頻度の上限を変更し、永続化されたスナップショットを検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "過大なフレームでは、コミットせずに接続を閉じる。" }],
     };
 #[tokio::test]
 async fn oversized_frames_and_input_rate_close_without_committing_commands() {

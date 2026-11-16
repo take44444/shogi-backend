@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Application publisher with fake queue and transport, including uncertain outcomes.",
-        reason: "Fake queue and transport assert publication sequence order after failed send and uncertain mark, including duplicate publication.",
+        scope: "成否不明の結果も含め、テスト用キューと通信先を使うアプリケーションの配信処理。",
+        reason: "テスト用キューと通信先を使い、送信失敗と成否不明の処理済み更新の後も、重複配信を含めた配信シーケンス順を検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

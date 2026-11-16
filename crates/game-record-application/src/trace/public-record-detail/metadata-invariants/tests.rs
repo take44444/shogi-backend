@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure scalar storage-boundary cases.",
-        reason: "Direct scalar conversion assertions reject values outside PostgreSQL signed-integer storage bounds.",
+        scope: "保存層のスカラー値の境界を直接確認する。",
+        reason: "スカラー値の変換を直接検証し、PostgreSQL の符号付き整数として保存できる範囲外の値を拒否することを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -35,8 +35,8 @@ crate::trace_support::case! {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Pure metadata constructor cases without a database or legal game replay.",
-        reason: "Direct constructors reject listed duplicate-player, zero-sequence and inconsistent move/resignation count cases.",
+        scope: "データベースや合法な対局の再生を使わず、メタデータの構築を直接確認する。",
+        reason: "列挙した、参加者の重複、シーケンス番号 0、着手・投了時の手数と操作数の不整合を、直接の構築で拒否することを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };

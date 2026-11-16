@@ -13,64 +13,64 @@
 
 ## 保証の成立条件と構成
 
-1. The per-game actor refreshes durable history and checks participant membership, exact accepted request replay, then expected sequence before staging a cloned legal candidate.
-2. StagedGameChange freezes the acceptance and canonical event batch; commit_change performs version comparison and persists metadata, one receipt and those events atomically.
-3. After an uncertain/conflicting commit the actor reloads durable receipts, returns the original acceptance when present and otherwise reports conflict/unavailability while fencing uncertain local state.
-4. Caller cancellation after enqueue leaves the actor transaction running; restart reconstructs receipts, and dropping the final service sender lets queued commands drain.
+1. 対局ごとのアクターは永続履歴を更新し、参加者への所属、受理済みリクエストの完全一致による再試行、予想シーケンスの順に確認してから、複製した合法な候補局面をステージする。
+2. StagedGameChange は受理結果と正規のイベント列を固定する。commit_change はバージョンを比較し、メタデータ、一件の受理記録、そのイベントを原子的に永続化する。
+3. 成否不明または競合したコミットの後、アクターは永続受理記録を再読み込みする。一致する記録があれば元の受理結果を返し、なければ不確かなローカル状態を使わせず、競合または利用不能を返す。
+4. キュー追加後に呼び出し元が取り消しても、アクターのトランザクションは続行する。再起動時には受理記録を復元し、最後のサービス送信元を破棄すると、残るキュー内の操作を処理して終了する。
 
-以下の保証には、各行に示す契約が必要となる。テストの assertions は記載した事例の範囲に限られる。
+以下の保証には、各行に示す契約が必要となる。テストによる検証は記載した事例の範囲に限られる。
 
 | ID | アプリケーションの保証と条件 | 必要な契約 |
 | --- | --- | --- |
-| atomic-events | Candidate position becomes visible only after confirmed commit. Metadata, receipt and supplied canonical events commit together: move emits MoveCommitted, mate appends GameFinished at the same sequence, resignation emits GameFinished. Replay/rejection/restore emit nothing new. | [actor-apply](#contract-actor-apply), [durable-commit](#contract-durable-commit), [canonical-events](#contract-canonical-events) |
-| cancellation | The 64-slot per-game mailbox bounds queued commands. Cancellation after enqueue does not undo execution; cancellation before enqueue does not execute, and closed senders allow queued work to drain. | [mailbox](#contract-mailbox) |
-| exact-retry | Only acceptance reserves a per-game request identity. After participant checks, an exact typed action/user/original expected-sequence retry returns the original acceptance before stale/finished checks, even after restart; changed accepted content conflicts. | [replay](#contract-replay), [actor-apply](#contract-actor-apply) |
-| sequence | Each new committed command advances sequence once through i64::MAX. Per-game actor processing and repository CAS serialize competing service instances and refresh losing state. | [actor-apply](#contract-actor-apply), [durable-commit](#contract-durable-commit), [sequence-cap](#contract-sequence-cap) |
-| uncertain-recovery | An error may follow a durable commit. The actor reconciles a matching stored receipt or invalidates its state until a later successful durable refresh; failed reads never authorize continued cached mutation. | [actor-apply](#contract-actor-apply), [reconciliation](#contract-reconciliation) |
+| atomic-events | 候補局面はコミット確認後にだけ公開する。メタデータ・受理記録・渡された正規イベントを一緒にコミットする。着手は MoveCommitted を生成し、詰みでは同一シーケンスに GameFinished を追加し、投了は GameFinished を生成する。再試行・拒否・復元では新しいイベントを生成しない。 | [actor-apply](#contract-actor-apply), [durable-commit](#contract-durable-commit), [canonical-events](#contract-canonical-events) |
+| cancellation | 対局ごとの 64 件のメールボックスが、キューに入る操作数を制限する。追加後の取消は実行を取り消さず、追加前の取消では実行しない。送信元が閉じた後も、キュー内の操作を処理して終了する。 | [mailbox](#contract-mailbox) |
+| exact-retry | 対局ごとのリクエスト識別子は、受理時にだけ確保する。参加者確認後、型付き操作・ユーザー・元の予想シーケンスが一致する再試行は、再起動後も古いシーケンスや終局の確認より先に元の受理結果を返す。受理済みの内容を変更すると競合する。 | [replay](#contract-replay), [actor-apply](#contract-actor-apply) |
+| sequence | 新たに受理した操作ごとに、シーケンスを i64::MAX まで一度ずつ進める。対局ごとのアクター処理とリポジトリの CAS が、競合するサービスインスタンスを直列化し、競合に負けた側の状態を更新する。 | [actor-apply](#contract-actor-apply), [durable-commit](#contract-durable-commit), [sequence-cap](#contract-sequence-cap) |
+| uncertain-recovery | 永続コミットの後にエラーが返る場合がある。アクターは一致する保存済み受理記録と照合するか、後の永続状態の再読み込みが成功するまで自身の状態を無効化する。読み込み失敗時にキャッシュを使って変更を続けることはない。 | [actor-apply](#contract-actor-apply), [reconciliation](#contract-reconciliation) |
 
 ## 宣言した対応関係
 
-矢印は著者が宣言した関係を示す。asserts は記載した事例への直接の assertion、exercises は処理を通る関係を示す。
+矢印は著者が宣言した関係を示す。「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。「所属のみ・未レビュー」は契約ディレクトリへの配置だけで分類した関係を示す。
 
 ```mermaid
 flowchart TD
-    n0["feature: game-command-recovery"]
-    n1["guarantee: atomic-events"]
-    n2["guarantee: cancellation"]
-    n3["guarantee: exact-retry"]
-    n4["guarantee: sequence"]
-    n5["guarantee: uncertain-recovery"]
-    n6["contract: actor-apply"]
-    n7["contract: canonical-events"]
-    n8["contract: durable-commit"]
-    n9["contract: mailbox"]
-    n10["contract: reconciliation"]
-    n11["contract: replay"]
-    n12["contract: sequence-cap"]
-    n13["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-actor-supplies-events-before-commit-change-and-skips-retries-and-rejections"]
-    n14["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-mutation-errors-prioritize-request-conflict-then-sequence-mismatch-then-game-finished"]
-    n15["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-call-after-enqueue-executes-and-before-enqueue-does-not"]
-    n16["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-reply-and-closed-mailbox-still-drain-commands"]
-    n17["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-closed-actor-is-recovered-from-store-and-last-service-drop-closes-senders"]
-    n18["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-exhausted-state-still-checks-expected-sequence-before-advancing"]
-    n19["test: test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-sequence-cap-is-portable"]
-    n20["test: test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events"]
-    n21["test: test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity"]
-    n22["test: test-game-grpc-test-tcp-tcp-game-command-recovery-actor-apply-independent-tcp-clients-serialize-competing-commands-and-retry-identically"]
-    n23["test: test-game-grpc-test-tcp-tcp-game-command-recovery-replay-exact-replay-returns-original-receipt-after-finish-and-conflicts-are-rejected"]
-    n24["test: test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts"]
-    n25["test: test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay"]
-    n26["test: test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery"]
-    n27["test: test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-direct-store-constraints-and-sequence-overflow-leave-no-changes"]
-    n28["test: test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-real-statement-and-commit-failures-roll-back-both-metadata-and-receipt"]
-    n29["test: test-game-persistence-test-matchmaking-selection-game-command-recovery-durable-commit-missing-both-terminal-tickets-rolls-back-result-receipt-events-and-job"]
-    n30["test: test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"]
-    n31["test: test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"]
-    n32["test: test-game-persistence-test-service-service-game-command-recovery-actor-apply-competing-commands-at-one-sequence-accept-exactly-one"]
-    n33["test: test-game-persistence-test-service-service-game-command-recovery-replay-concurrent-identical-retries-all-receive-original-acceptance"]
-    n34["test: test-game-persistence-test-service-service-game-command-recovery-replay-every-rejection-preserves-snapshot-and-does-not-reserve-id"]
-    n35["test: test-game-persistence-test-service-service-game-command-recovery-replay-games-and-independent-services-have-separate-id-namespaces"]
-    n36["test: test-game-persistence-test-service-service-game-command-recovery-replay-replay-precedes-stale-and-finished-checks-and-fingerprint-is-exact"]
+    n0["機能: game-command-recovery"]
+    n1["保証: atomic-events"]
+    n2["保証: cancellation"]
+    n3["保証: exact-retry"]
+    n4["保証: sequence"]
+    n5["保証: uncertain-recovery"]
+    n6["契約: actor-apply"]
+    n7["契約: canonical-events"]
+    n8["契約: durable-commit"]
+    n9["契約: mailbox"]
+    n10["契約: reconciliation"]
+    n11["契約: replay"]
+    n12["契約: sequence-cap"]
+    n13["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-actor-supplies-events-before-commit-change-and-skips-retries-and-rejections"]
+    n14["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-mutation-errors-prioritize-request-conflict-then-sequence-mismatch-then-game-finished"]
+    n15["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-call-after-enqueue-executes-and-before-enqueue-does-not"]
+    n16["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-reply-and-closed-mailbox-still-drain-commands"]
+    n17["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-closed-actor-is-recovered-from-store-and-last-service-drop-closes-senders"]
+    n18["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-exhausted-state-still-checks-expected-sequence-before-advancing"]
+    n19["テスト: test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-sequence-cap-is-portable"]
+    n20["テスト: test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events"]
+    n21["テスト: test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity"]
+    n22["テスト: test-game-grpc-test-tcp-tcp-game-command-recovery-actor-apply-independent-tcp-clients-serialize-competing-commands-and-retry-identically"]
+    n23["テスト: test-game-grpc-test-tcp-tcp-game-command-recovery-replay-exact-replay-returns-original-receipt-after-finish-and-conflicts-are-rejected"]
+    n24["テスト: test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts"]
+    n25["テスト: test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay"]
+    n26["テスト: test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery"]
+    n27["テスト: test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-direct-store-constraints-and-sequence-overflow-leave-no-changes"]
+    n28["テスト: test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-real-statement-and-commit-failures-roll-back-both-metadata-and-receipt"]
+    n29["テスト: test-game-persistence-test-matchmaking-selection-game-command-recovery-durable-commit-missing-both-terminal-tickets-rolls-back-result-receipt-events-and-job"]
+    n30["テスト: test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"]
+    n31["テスト: test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"]
+    n32["テスト: test-game-persistence-test-service-service-game-command-recovery-actor-apply-competing-commands-at-one-sequence-accept-exactly-one"]
+    n33["テスト: test-game-persistence-test-service-service-game-command-recovery-replay-concurrent-identical-retries-all-receive-original-acceptance"]
+    n34["テスト: test-game-persistence-test-service-service-game-command-recovery-replay-every-rejection-preserves-snapshot-and-does-not-reserve-id"]
+    n35["テスト: test-game-persistence-test-service-service-game-command-recovery-replay-games-and-independent-services-have-separate-id-namespaces"]
+    n36["テスト: test-game-persistence-test-service-service-game-command-recovery-replay-replay-precedes-stale-and-finished-checks-and-fingerprint-is-exact"]
     n0 --> n1
     n1 --> n6
     n1 --> n8
@@ -87,32 +87,32 @@ flowchart TD
     n0 --> n5
     n5 --> n6
     n5 --> n10
-    n6 -->|asserts| n13
-    n6 -->|asserts| n14
-    n6 -->|unreviewed| n22
-    n6 -->|asserts| n25
-    n6 -->|asserts| n26
-    n6 -->|unreviewed| n32
-    n7 -->|asserts| n20
-    n7 -->|asserts| n21
-    n7 -->|asserts| n31
-    n8 -->|asserts| n25
-    n8 -->|unreviewed| n27
-    n8 -->|asserts| n28
-    n8 -->|asserts| n29
-    n8 -->|asserts| n30
-    n9 -->|asserts| n15
-    n9 -->|asserts| n16
-    n9 -->|asserts| n17
-    n10 -->|asserts| n26
-    n11 -->|asserts| n23
-    n11 -->|asserts| n24
-    n11 -->|unreviewed| n33
-    n11 -->|asserts| n34
-    n11 -->|asserts| n35
-    n11 -->|unreviewed| n36
-    n12 -->|asserts| n18
-    n12 -->|asserts| n19
+    n6 -->|事例を直接検証| n13
+    n6 -->|事例を直接検証| n14
+    n6 -->|所属のみ・未レビュー| n22
+    n6 -->|事例を直接検証| n25
+    n6 -->|事例を直接検証| n26
+    n6 -->|所属のみ・未レビュー| n32
+    n7 -->|事例を直接検証| n20
+    n7 -->|事例を直接検証| n21
+    n7 -->|事例を直接検証| n31
+    n8 -->|事例を直接検証| n25
+    n8 -->|所属のみ・未レビュー| n27
+    n8 -->|事例を直接検証| n28
+    n8 -->|事例を直接検証| n29
+    n8 -->|事例を直接検証| n30
+    n9 -->|事例を直接検証| n15
+    n9 -->|事例を直接検証| n16
+    n9 -->|事例を直接検証| n17
+    n10 -->|事例を直接検証| n26
+    n11 -->|事例を直接検証| n23
+    n11 -->|事例を直接検証| n24
+    n11 -->|所属のみ・未レビュー| n33
+    n11 -->|事例を直接検証| n34
+    n11 -->|事例を直接検証| n35
+    n11 -->|所属のみ・未レビュー| n36
+    n12 -->|事例を直接検証| n18
+    n12 -->|事例を直接検証| n19
 ```
 
 ## コンポーネント契約と根拠
@@ -121,96 +121,96 @@ flowchart TD
 
 ### actor-apply
 
-Mutation refreshes state, applies replay before expected sequence checks, stages a cloned candidate and supplied events, and publishes in-memory candidate only after commit confirmation.
+変更処理は状態を更新し、予想シーケンスの確認より先に再試行を扱う。複製した候補局面と渡すイベントをステージし、コミット確認後にだけメモリー内の候補を公開する。
 
 実装位置: [crates/game-application/src/actor.rs](../../../crates/game-application/src/actor.rs#L178)。
 
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-actor-supplies-events-before-commit-change-and-skips-retries-and-rejections](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-actor-supplies-events-before-commit-change-and-skips-retries-and-rejections) (asserts): Fake repository observes exact staged move/resignation events before commit and only two writes despite replay/rejection.
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-mutation-errors-prioritize-request-conflict-then-sequence-mismatch-then-game-finished](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-mutation-errors-prioritize-request-conflict-then-sequence-mismatch-then-game-finished) (asserts): Synthetic actor cases assert request-conflict before sequence mismatch before finished-game rejection.
-- [test-game-grpc-test-tcp-tcp-game-command-recovery-actor-apply-independent-tcp-clients-serialize-competing-commands-and-retry-identically](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-actor-apply-independent-tcp-clients-serialize-competing-commands-and-retry-identically) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay) (asserts): Independent real store/service instances serialize CAS conflicts and identical concurrent retries.
-- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery) (asserts): Commit-after-error reconciles receipt; precommit failure fences until durable reads recover.
-- [test-game-persistence-test-service-service-game-command-recovery-actor-apply-competing-commands-at-one-sequence-accept-exactly-one](#test-test-game-persistence-test-service-service-game-command-recovery-actor-apply-competing-commands-at-one-sequence-accept-exactly-one) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-actor-supplies-events-before-commit-change-and-skips-retries-and-rejections](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-actor-supplies-events-before-commit-change-and-skips-retries-and-rejections) (事例を直接検証): テスト用リポジトリで、コミット前の着手と投了のステージ済みイベントが正確であり、再試行と拒否があっても書き込みは二回だけであることを確認する。
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-mutation-errors-prioritize-request-conflict-then-sequence-mismatch-then-game-finished](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-actor-apply-mutation-errors-prioritize-request-conflict-then-sequence-mismatch-then-game-finished) (事例を直接検証): 合成したアクターの事例で、リクエスト競合、シーケンス不一致、終局後の拒否の順に優先されることを検証する。
+- [test-game-grpc-test-tcp-tcp-game-command-recovery-actor-apply-independent-tcp-clients-serialize-competing-commands-and-retry-identically](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-actor-apply-independent-tcp-clients-serialize-competing-commands-and-retry-identically) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
+- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay) (事例を直接検証): 独立した実際のストアとサービスのインスタンスで、CAS の競合と同じ内容の同時再試行を直列化する。
+- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery) (事例を直接検証): コミット後にエラーが返る場合は受理記録と照合する。コミット前の失敗では、永続状態の読み込みが回復するまでローカル状態の使用を止める。
+- [test-game-persistence-test-service-service-game-command-recovery-actor-apply-competing-commands-at-one-sequence-accept-exactly-one](#test-test-game-persistence-test-service-service-game-command-recovery-actor-apply-competing-commands-at-one-sequence-accept-exactly-one) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
 
 <a id="contract-canonical-events"></a>
 
 ### canonical-events
 
-StagedGameChange validates sequence bounds/continuity and action/result combinations, then freezes normal move, move-plus-checkmate or resignation event order.
+StagedGameChange はシーケンスの境界と連続性、操作と結果の組み合わせを検証し、通常着手、着手と詰み、投了のイベント順を固定する。
 
 実装位置: [crates/game-application/src/events.rs](../../../crates/game-application/src/events.rs#L92)。
 
-- [test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events](#test-test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events) (asserts): Exact normal move, same-sequence move-then-mate-finish and resignation batches are compared; inconsistent action/result cases reject.
-- [test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity](#test-test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity) (asserts): Zero/noncontiguous/max/out-of-range acceptance and expected sequence boundaries are checked.
-- [test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Persisted event payload stays frozen; retry/rejection/restoration add no duplicate events.
+- [test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events](#test-test-game-application-lib-game-application-events-tests-canonical-facts-canonical-move-mate-and-resignation-events) (事例を直接検証): 通常の着手、同一シーケンスでの着手と詰みによる終局、投了の各イベント列を完全に比較する。矛盾する操作と結果は拒否する。
+- [test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity](#test-test-game-application-lib-game-application-events-tests-canonical-facts-staging-checks-sequence-bounds-before-continuity) (事例を直接検証): 0・不連続・最大値・範囲外の受理シーケンスと、予想シーケンスの境界を確認する。
+- [test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (事例を直接検証): 永続化したイベントの内容は固定され、再試行・拒否・復元でイベントを重複追加しない。
 
 <a id="contract-durable-commit"></a>
 
 ### durable-commit
 
-PostgreSQL commit_change compares expected version and atomically saves metadata, receipt, frozen supplied events and terminal dependent records; no partial success is exposed.
+PostgreSQL の commit_change は予想バージョンを比較し、メタデータ・受理記録・渡された固定イベント・終局に付随する記録を原子的に保存する。部分的な成功は公開しない。
 
 実装位置: [crates/game-persistence/src/lib.rs](../../../crates/game-persistence/src/lib.rs#L388)。
 
-- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay) (asserts): Independent service/store instances CAS and refresh correctly.
-- [test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-direct-store-constraints-and-sequence-overflow-leave-no-changes](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-direct-store-constraints-and-sequence-overflow-leave-no-changes) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-real-statement-and-commit-failures-roll-back-both-metadata-and-receipt](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-real-statement-and-commit-failures-roll-back-both-metadata-and-receipt) (asserts): Injected actual statement/commit errors leave both metadata and receipt unchanged.
-- [test-game-persistence-test-matchmaking-selection-game-command-recovery-durable-commit-missing-both-terminal-tickets-rolls-back-result-receipt-events-and-job](#test-test-game-persistence-test-matchmaking-selection-game-command-recovery-durable-commit-missing-both-terminal-tickets-rolls-back-result-receipt-events-and-job) (asserts): Missing both terminal ticket records prevents result/receipt/outbox/job writes together.
-- [test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events) (asserts): Outbox enqueue failure rolls back game metadata, journal and events.
+- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-independent-instances-cas-refresh-and-identical-concurrent-replay) (事例を直接検証): 独立したサービスとストアのインスタンスで、CAS と状態更新が正しく動く。
+- [test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-direct-store-constraints-and-sequence-overflow-leave-no-changes](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-direct-store-constraints-and-sequence-overflow-leave-no-changes) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
+- [test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-real-statement-and-commit-failures-roll-back-both-metadata-and-receipt](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-durable-commit-real-statement-and-commit-failures-roll-back-both-metadata-and-receipt) (事例を直接検証): 実際の文実行やコミットにエラーを注入しても、メタデータと受理記録の両方が変更されない。
+- [test-game-persistence-test-matchmaking-selection-game-command-recovery-durable-commit-missing-both-terminal-tickets-rolls-back-result-receipt-events-and-job](#test-test-game-persistence-test-matchmaking-selection-game-command-recovery-durable-commit-missing-both-terminal-tickets-rolls-back-result-receipt-events-and-job) (事例を直接検証): 終端チケットの記録が両方とも欠けている場合、結果・受理記録・Outbox・ジョブの書き込みをすべて止める。
+- [test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events) (事例を直接検証): Outbox への追加失敗は、対局メタデータ・履歴・イベントをロールバックする。
 
 <a id="contract-mailbox"></a>
 
 ### mailbox
 
-The per-game facade uses a 64-command bounded channel; actor execution outlives dropped reply receivers and drains closed queues.
+対局ごとの操作窓口は、操作 64 件の有界チャネルを使う。応答の受信側が破棄されてもアクターは実行を続け、閉じたキュー内の操作を処理して終了する。
 
 実装位置: [crates/game-application/src/lib.rs](../../../crates/game-application/src/lib.rs#L59)。
 
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-call-after-enqueue-executes-and-before-enqueue-does-not](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-call-after-enqueue-executes-and-before-enqueue-does-not) (asserts): A capacity-blocked cancelled send does not execute while an enqueued cancelled call does.
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-reply-and-closed-mailbox-still-drain-commands](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-reply-and-closed-mailbox-still-drain-commands) (asserts): Dropped response and closed mailbox still execute queued commands.
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-closed-actor-is-recovered-from-store-and-last-service-drop-closes-senders](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-closed-actor-is-recovered-from-store-and-last-service-drop-closes-senders) (asserts): Closed actor reloads durable store and final service drop closes senders.
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-call-after-enqueue-executes-and-before-enqueue-does-not](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-call-after-enqueue-executes-and-before-enqueue-does-not) (事例を直接検証): 容量待ちの間に取り消した送信は実行されず、キューへの追加後に取り消した呼び出しは実行される。
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-reply-and-closed-mailbox-still-drain-commands](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-cancelled-reply-and-closed-mailbox-still-drain-commands) (事例を直接検証): 応答の受信側を破棄した場合も、メールボックスを閉じた場合も、キューに入った操作は実行する。
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-closed-actor-is-recovered-from-store-and-last-service-drop-closes-senders](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-mailbox-closed-actor-is-recovered-from-store-and-last-service-drop-closes-senders) (事例を直接検証): 終了したアクターは永続ストアから再読み込みし、最後のサービスを破棄すると送信元を閉じる。
 
-未検証: 64 bounds queued slots, excluding in-progress work and waiting senders. No global known-game actor registry bound or fairness guarantee is established.
+未検証: 64 件の上限は処理中の操作と送信待ちの呼び出しを除いたキュー内の件数に適用する。既知の対局を保持するアクター登録簿全体の上限や公平性は保証していない。
 
 <a id="contract-reconciliation"></a>
 
 ### reconciliation
 
-Reload clears local state before reading/validating durable history; failed reconciliation leaves it unavailable until a later refresh can restore it.
+再読み込みは、永続履歴の読み取りと検証の前にローカル状態を消去する。照合に失敗すると、後の再読み込みで復元できるまで利用不能のままとなる。
 
 実装位置: [crates/game-application/src/actor.rs](../../../crates/game-application/src/actor.rs#L141)。
 
-- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery) (asserts): Fault adapter around real PostgreSQL tests commit-after-error receipt recovery, precommit failure, unreadable fencing and later recovery.
+- [test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery](#test-test-game-persistence-test-contracts-contracts-game-command-recovery-actor-apply-uncertain-outcomes-reconcile-durable-receipts-or-fence-until-recovery) (事例を直接検証): 実際の PostgreSQL を包む障害注入アダプターで、コミット後のエラーからの受理記録の復旧、コミット前の失敗、読み込み不能時の状態使用停止、その後の復旧を検証する。
 
-未検証: The fault adapter controls representative outcome paths; arbitrary process/crash interleavings are not proven.
+未検証: 障害注入アダプターは代表的な結果経路を制御するが、任意のプロセス実行やクラッシュの割り込み順序は証明しない。
 
 <a id="contract-replay"></a>
 
 ### replay
 
-Replay first checks participant membership then compares the complete MutationRequest under the game-scoped accepted ID and returns its original Acceptance.
+再試行処理は最初に参加者への所属を確認し、対局ごとに受理済みの ID に対応する MutationRequest 全体を比較して、元の Acceptance を返す。
 
 実装位置: [crates/game-application/src/actor.rs](../../../crates/game-application/src/actor.rs#L111)。
 
-- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-exact-replay-returns-original-receipt-after-finish-and-conflicts-are-rejected](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-exact-replay-returns-original-receipt-after-finish-and-conflicts-are-rejected) (asserts): Exact move/resign retries after finish return original acceptances; changed sequence/user/move/action conflict with no extra advance.
-- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts) (asserts): Original receipts survive ongoing and finished state across two server restarts.
-- [test-game-persistence-test-service-service-game-command-recovery-replay-concurrent-identical-retries-all-receive-original-acceptance](#test-test-game-persistence-test-service-service-game-command-recovery-replay-concurrent-identical-retries-all-receive-original-acceptance) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-game-persistence-test-service-service-game-command-recovery-replay-every-rejection-preserves-snapshot-and-does-not-reserve-id](#test-test-game-persistence-test-service-service-game-command-recovery-replay-every-rejection-preserves-snapshot-and-does-not-reserve-id) (asserts): Every tested rejection preserves full snapshot and leaves the request ID reusable.
-- [test-game-persistence-test-service-service-game-command-recovery-replay-games-and-independent-services-have-separate-id-namespaces](#test-test-game-persistence-test-service-service-game-command-recovery-replay-games-and-independent-services-have-separate-id-namespaces) (asserts): Same request identity in separate games/services remains independent.
-- [test-game-persistence-test-service-service-game-command-recovery-replay-replay-precedes-stale-and-finished-checks-and-fingerprint-is-exact](#test-test-game-persistence-test-service-service-game-command-recovery-replay-replay-precedes-stale-and-finished-checks-and-fingerprint-is-exact) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-exact-replay-returns-original-receipt-after-finish-and-conflicts-are-rejected](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-exact-replay-returns-original-receipt-after-finish-and-conflicts-are-rejected) (事例を直接検証): 終局後の着手・投了の完全に同じ再試行は元の受理結果を返す。連番・ユーザー・着手・操作種別を変更すると競合になり、追加で進行しない。
+- [test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts](#test-test-game-grpc-test-tcp-tcp-game-command-recovery-replay-generated-tcp-client-restores-database-across-two-server-restarts) (事例を直接検証): サーバーを2回再起動しても、進行中・終局済みの状態で元の受理記録を保持する。
+- [test-game-persistence-test-service-service-game-command-recovery-replay-concurrent-identical-retries-all-receive-original-acceptance](#test-test-game-persistence-test-service-service-game-command-recovery-replay-concurrent-identical-retries-all-receive-original-acceptance) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
+- [test-game-persistence-test-service-service-game-command-recovery-replay-every-rejection-preserves-snapshot-and-does-not-reserve-id](#test-test-game-persistence-test-service-service-game-command-recovery-replay-every-rejection-preserves-snapshot-and-does-not-reserve-id) (事例を直接検証): 検証対象のすべての拒否で、スナップショット全体を保持し、リクエスト ID を再利用できる。
+- [test-game-persistence-test-service-service-game-command-recovery-replay-games-and-independent-services-have-separate-id-namespaces](#test-test-game-persistence-test-service-service-game-command-recovery-replay-games-and-independent-services-have-separate-id-namespaces) (事例を直接検証): 別の対局やサービスで同じリクエスト識別子を使っても、それぞれ独立している。
+- [test-game-persistence-test-service-service-game-command-recovery-replay-replay-precedes-stale-and-finished-checks-and-fingerprint-is-exact](#test-test-game-persistence-test-service-service-game-command-recovery-replay-replay-precedes-stale-and-finished-checks-and-fingerprint-is-exact) (所属のみ・未レビュー): 配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。
 
 <a id="contract-sequence-cap"></a>
 
 ### sequence-cap
 
-next_sequence rejects advancing i64::MAX; stale expected sequence is checked before attempting an exhausted advance.
+next_sequence は i64::MAX から先への更新を拒否する。上限到達後の更新を試す前に、古い予想シーケンスを確認する。
 
 実装位置: [crates/game-application/src/actor.rs](../../../crates/game-application/src/actor.rs#L43)。
 
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-exhausted-state-still-checks-expected-sequence-before-advancing](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-exhausted-state-still-checks-expected-sequence-before-advancing) (asserts): Synthetic exhausted actor distinguishes stale SequenceMismatch from SequenceExhausted.
-- [test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-sequence-cap-is-portable](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-sequence-cap-is-portable) (asserts): Direct helper asserts portable maximum and exhausted boundary.
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-exhausted-state-still-checks-expected-sequence-before-advancing](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-exhausted-state-still-checks-expected-sequence-before-advancing) (事例を直接検証): 合成した上限到達済みのアクターで、古いシーケンスに対する SequenceMismatch と SequenceExhausted を区別する。
+- [test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-sequence-cap-is-portable](#test-test-game-application-lib-game-application-actor-tests-game-command-recovery-sequence-cap-sequence-cap-is-portable) (事例を直接検証): 直接呼び出した補助関数で、移植可能な最大値と使い切った境界を検証する。
 
-未検証: Tests synthesize maximum state; they do not prove the rules engine supports billions of actual moves.
+未検証: テストは最大状態を合成する。ルールエンジンが実際に何十億手もの着手を処理できることは証明しない。
 
 ## 実在するテストと実行コマンド
 
@@ -222,7 +222,7 @@ next_sequence rejects advancing i64::MAX; stale expected sequence is checked bef
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/actor-apply/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/actor-apply/tests.rs#L11)。
 
-範囲: Actor with an in-memory recording repository; asserts staged values before commit, not PostgreSQL atomicity.
+範囲: 記録用のメモリー内リポジトリを使ったアクター。コミット前のステージ済み値を検証し、PostgreSQL の原子性は検証しない。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_actor_apply::actor_supplies_events_before_commit_change_and_skips_retries_and_rejections -- --exact --format pretty --color never
@@ -234,7 +234,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/actor-apply/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/actor-apply/tests.rs#L80)。
 
-範囲: Actor with synthetic durable record and fake repository; direct error precedence.
+範囲: 合成した永続記録とテスト用リポジトリを使ったアクターで、エラーの優先順位を直接検証する。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_actor_apply::mutation_errors_prioritize_request_conflict_then_sequence_mismatch_then_game_finished -- --exact --format pretty --color never
@@ -246,7 +246,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs#L52)。
 
-範囲: Controlled fake repository/channel capacity boundary.
+範囲: 制御可能なテスト用リポジトリとチャネルを使い、容量の境界を検証する。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_mailbox::cancelled_call_after_enqueue_executes_and_before_enqueue_does_not -- --exact --format pretty --color never
@@ -258,7 +258,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs#L11)。
 
-範囲: Actor/fake repository and channel lifecycle; no process shutdown signal.
+範囲: アクター・テスト用リポジトリ・チャネルのライフサイクルを対象とし、プロセスの停止シグナルは扱わない。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_mailbox::cancelled_reply_and_closed_mailbox_still_drain_commands -- --exact --format pretty --color never
@@ -270,7 +270,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs#L93)。
 
-範囲: In-memory RecordStore and sender lifecycle, not process restart.
+範囲: メモリー内の RecordStore と送信元のライフサイクルを対象とし、プロセス再起動は扱わない。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_mailbox::closed_actor_is_recovered_from_store_and_last_service_drop_closes_senders -- --exact --format pretty --color never
@@ -282,7 +282,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/sequence-cap/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/sequence-cap/tests.rs#L32)。
 
-範囲: Actor state is directly set to maximum sequence for error precedence.
+範囲: エラーの優先順位を確認するため、アクターの状態を最大シーケンスに直接設定する。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_sequence_cap::exhausted_state_still_checks_expected_sequence_before_advancing -- --exact --format pretty --color never
@@ -294,7 +294,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/game-command-recovery/sequence-cap/tests.rs](../../../crates/game-application/src/trace/game-command-recovery/sequence-cap/tests.rs#L11)。
 
-範囲: Direct sequence helper, synthetic maximum; no rules execution or DB.
+範囲: 合成した最大値でシーケンス補助関数を直接検証する。ルール実行や DB は使わない。
 
 ```sh
 cargo test --locked -p game-application --lib actor::tests::game_command_recovery_sequence_cap::sequence_cap_is_portable -- --exact --format pretty --color never
@@ -306,7 +306,7 @@ cargo test --locked -p game-application --lib actor::tests::game_command_recover
 
 テスト位置: [crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs](../../../crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs#L11)。
 
-範囲: Direct StagedGameChange construction with synthetic receipts; no played checkmate or database.
+範囲: 合成した受理記録から StagedGameChange を直接構築する。詰みに至る実際の対局やデータベースは使わない。
 
 ```sh
 cargo test --locked -p game-application --lib events::tests::canonical_facts::canonical_move_mate_and_resignation_events -- --exact --format pretty --color never
@@ -318,7 +318,7 @@ cargo test --locked -p game-application --lib events::tests::canonical_facts::ca
 
 テスト位置: [crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs](../../../crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs#L73)。
 
-範囲: Direct synthetic receipt sequence boundaries.
+範囲: 合成した受理記録でシーケンス境界を直接検証する。
 
 ```sh
 cargo test --locked -p game-application --lib events::tests::canonical_facts::staging_checks_sequence_bounds_before_continuity -- --exact --format pretty --color never
@@ -330,7 +330,7 @@ cargo test --locked -p game-application --lib events::tests::canonical_facts::st
 
 テスト位置: [crates/game-grpc/tests/trace/game-command-recovery/actor-apply/tests.rs](../../../crates/game-grpc/tests/trace/game-command-recovery/actor-apply/tests.rs#L4)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_actor_apply::independent_tcp_clients_serialize_competing_commands_and_retry_identically -- --exact --format pretty --color never
@@ -342,7 +342,7 @@ cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_actor_app
 
 テスト位置: [crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs#L11)。
 
-範囲: Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.
+範囲: 生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。
 
 ```sh
 cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_replay::exact_replay_returns_original_receipt_after_finish_and_conflicts_are_rejected -- --exact --format pretty --color never
@@ -354,7 +354,7 @@ cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_replay::e
 
 テスト位置: [crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs#L65)。
 
-範囲: Generated gRPC client over TCP, GameRpc, application and real PostgreSQL; test-only game seeding is fixture setup.
+範囲: 生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。
 
 ```sh
 cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_replay::generated_tcp_client_restores_database_across_two_server_restarts -- --exact --format pretty --color never
@@ -366,7 +366,7 @@ cargo test --locked -p game-grpc --test tcp tcp::game_command_recovery_replay::g
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/actor-apply/contracts.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/actor-apply/contracts.rs#L11)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Separate real store/service instances.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のストアとサービスをそれぞれ独立したインスタンスで実行する。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_command_recovery_actor_apply::independent_instances_cas_refresh_and_identical_concurrent_replay -- --exact --format pretty --color never
@@ -378,7 +378,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_command
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/actor-apply/contracts.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/actor-apply/contracts.rs#L59)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. FaultStore wraps real PostgreSQL to control return/read failures.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。FaultStore が実際の PostgreSQL を包み、返す結果と読み込み失敗を制御する。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_command_recovery_actor_apply::uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery -- --exact --format pretty --color never
@@ -390,7 +390,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_command
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/durable-commit/contracts.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/durable-commit/contracts.rs#L41)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_command_recovery_durable_commit::direct_store_constraints_and_sequence_overflow_leave_no_changes -- --exact --format pretty --color never
@@ -402,7 +402,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_command
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/durable-commit/contracts.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/durable-commit/contracts.rs#L11)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Real SQL and commit failure injection.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際の SQL とコミットの失敗を注入する。
 
 ```sh
 cargo test --locked -p game-persistence --test contracts contracts::game_command_recovery_durable_commit::real_statement_and_commit_failures_roll_back_both_metadata_and_receipt -- --exact --format pretty --color never
@@ -414,7 +414,7 @@ cargo test --locked -p game-persistence --test contracts contracts::game_command
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/durable-commit/selection.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/durable-commit/selection.rs#L11)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Terminal invariant failure via direct DB fixture changes.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。データベースのテスト用データを直接変更し、終局の不変条件を破る。
 
 ```sh
 cargo test --locked -p game-persistence --test matchmaking selection::game_command_recovery_durable_commit::missing_both_terminal_tickets_rolls_back_result_receipt_events_and_job -- --exact --format pretty --color never
@@ -426,7 +426,7 @@ cargo test --locked -p game-persistence --test matchmaking selection::game_comma
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L76)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Injected outbox enqueue failure.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。Outbox への追加失敗を注入する。
 
 ```sh
 cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::failed_enqueue_rolls_back_metadata_journal_and_events -- --exact --format pretty --color never
@@ -438,7 +438,7 @@ cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::fai
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L11)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Reads canonical persisted events; no broker delivery guarantee.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。永続化した正規イベントを読み取るが、ブローカー経由の配信は保証しない。
 
 ```sh
 cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::retry_rejection_restoration_and_frozen_payload -- --exact --format pretty --color never
@@ -450,7 +450,7 @@ cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::ret
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/actor-apply/service.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/actor-apply/service.rs#L4)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-persistence --test service service::game_command_recovery_actor_apply::competing_commands_at_one_sequence_accept_exactly_one -- --exact --format pretty --color never
@@ -462,7 +462,7 @@ cargo test --locked -p game-persistence --test service service::game_command_rec
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs#L4)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-persistence --test service service::game_command_recovery_replay::concurrent_identical_retries_all_receive_original_acceptance -- --exact --format pretty --color never
@@ -474,7 +474,7 @@ cargo test --locked -p game-persistence --test service service::game_command_rec
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs#L39)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。
 
 ```sh
 cargo test --locked -p game-persistence --test service service::game_command_recovery_replay::every_rejection_preserves_snapshot_and_does_not_reserve_id -- --exact --format pretty --color never
@@ -486,7 +486,7 @@ cargo test --locked -p game-persistence --test service service::game_command_rec
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs#L145)。
 
-範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
+範囲: 実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。
 
 ```sh
 cargo test --locked -p game-persistence --test service service::game_command_recovery_replay::games_and_independent_services_have_separate_id_namespaces -- --exact --format pretty --color never
@@ -498,7 +498,7 @@ cargo test --locked -p game-persistence --test service service::game_command_rec
 
 テスト位置: [crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs](../../../crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs#L90)。
 
-範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
+範囲: 契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。
 
 ```sh
 cargo test --locked -p game-persistence --test service service::game_command_recovery_replay::replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact -- --exact --format pretty --color never
@@ -506,18 +506,18 @@ cargo test --locked -p game-persistence --test service service::game_command_rec
 
 ## 検査と根拠の限界
 
-check はグラフ、ファイル内の一意なテキスト位置、package と target ごとのコンパイル済みテスト名、生成文書の一致を検査する。
+check はグラフ、ファイル内の一意なテキスト位置、パッケージとターゲットごとのコンパイル済みテスト名、生成文書の一致を検査する。
 run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。
-この文書には実行済みの成功状態を保存しない。CI の workspace テスト実行結果は、その実行時点の結果となる。
+この文書には実行済みの成功状態を保存しない。CI のワークスペース全体のテスト実行結果は、その実行時点の結果となる。
 宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。
 
-- Successful representative fault/concurrency tests do not prove all crash schedules or durable infrastructure guarantees.
-- Game command trace owns canonical event production and atomic enqueue; publication, subscriber delivery and rating application are separate feature records.
-- Actor/mailbox fairness, total memory for known-game registries and an upper bound on waiting callers are not promised.
-- Links and passing tests do not establish semantic completeness; changes to guarantees, evidence strength and decomposition require review.
+- 代表的な障害・並行処理テストの成功は、すべてのクラッシュの順序や永続基盤の保証を証明しない。
+- 対局操作の対応関係は、正規イベントの生成と原子的なキュー追加を扱う。配信・購読者への到達・レーティング適用は、それぞれ別の機能の記録で扱う。
+- アクターやメールボックスの公平性、既知の対局を保持する登録簿の総メモリー量、待機中の呼び出し元数の上限は保証しない。
+- リンクとテスト成功だけでは意味上の完全性は成立しない。保証、根拠の強さ、分割の変更にはレビューが必要となる。
 
 ## ディレクトリ方式の検査範囲
 
-Rust 宣言、通常のモジュールとリテラル include! から物理ファイルの所属、package、target、完全なテスト名と位置を抽出する。ホストのデフォルト Cargo feature 構成で workspace の lib、bin、integration test の全テスト一覧と一致させる。別 target、feature、cfg の組合せは対象外。
-src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは unreviewed として追加する。asserts または exercises のレビュー済み根拠がない契約には gap が必要。
-全 target の未分類テストは拒否する。trace ディレクトリ内の未対応の item macro と cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト補助とインフラの明示分類および理由は全機能の一覧に示す。
+Rust 宣言、通常のモジュールと文字列リテラルの include! から物理ファイルの所属、パッケージ、ターゲット、完全なテスト名と位置を抽出する。ホスト環境で Cargo の既定の機能フラグを使い、ワークスペースのライブラリ、バイナリ、結合テストの全テスト一覧と一致させる。別のターゲット、機能フラグ、cfg の組合せは対象外。
+src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは「所属のみ・未レビュー」として追加する。「事例を直接検証」または「処理を通る」のレビュー済み根拠がない契約には未検証事項の gap 宣言が必要。
+全ターゲットの未分類テストは拒否する。trace ディレクトリ内の未対応の項目マクロと cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト実行補助と基盤の検査の明示分類および理由は全機能の一覧に示す。

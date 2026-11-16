@@ -443,7 +443,7 @@ fn inspect(root: &Path, path: &Path, errors: &mut Vec<String>) {
         }
     }
 }
-crate::trace_support::infrastructure!("sql-policy", "Scans repository production sources for the SQL construction policy; it does not assert a product contract.";
+crate::trace_support::infrastructure!("sql-policy", "リポジトリの本番ソースに対する SQL 構築方針を検査する。製品の契約を検証するものではない。";
 #[test]
 fn production_sql_uses_builders_or_reviewed_postgres_operations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -466,7 +466,7 @@ fn production_sql_uses_builders_or_reviewed_postgres_operations() {
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
 );
-crate::trace_support::infrastructure!("sql-policy", "Checks SQL policy diagnostics for forbidden source examples; it is a repository development control.";
+crate::trace_support::infrastructure!("sql-policy", "禁止するソース例に対する SQL 方針の診断を検証する。リポジトリ開発用の検査である。";
 #[test]
 fn policy_rejects_application_sql_and_interpolation() {
     for source in [
@@ -492,7 +492,7 @@ fn policy_rejects_application_sql_and_interpolation() {
     }
 }
 );
-crate::trace_support::infrastructure!("sql-policy", "Checks the SQL policy analyzer against permitted fixture and query-builder examples; it is a repository development control.";
+crate::trace_support::infrastructure!("sql-policy", "許可するテスト用データとクエリービルダーの例で SQL 方針の解析器を検証する。リポジトリ開発用の検査である。";
 #[test]
 fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
     for source in [
@@ -514,7 +514,7 @@ fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
 #[path = "../../../scripts/traceability_model.rs"]
 mod trace_support;
 
-crate::trace_support::infrastructure!("sql-policy", "Keeps test-only fixture SQL out of production diagnostics while retaining checks for ordinary functions and invalid test attributes.";
+crate::trace_support::infrastructure!("sql-policy", "テスト専用の準備用 SQL を本番コードの診断対象から除き、通常の関数と不正なテスト属性の検査を維持する。";
 #[test]
 fn policy_distinguishes_test_functions_from_production_sql() {
     let fixture = r#"fn fixture() { db.execute_unprepared("DELETE FROM accounts"); }"#;

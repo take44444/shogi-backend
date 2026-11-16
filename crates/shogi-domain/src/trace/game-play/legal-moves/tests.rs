@@ -2,8 +2,8 @@ use super::*;
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Every ordinary/promoted piece movement is compared for both colors.",
-        reason: "Every ordinary/promoted piece movement is compared for both colors.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 通常の駒と成駒の全種類の動きを、先後両方で比較する。",
+        reason: "通常の駒と成駒の全種類の動きを、先後両方で比較する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -95,8 +95,8 @@ fn every_piece_has_the_expected_moves_for_both_colors() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Sliders stop at friendly pieces and cannot move beyond captured enemies.",
-        reason: "Sliders stop at friendly pieces and cannot move beyond captured enemies.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 飛び駒は味方の駒の前で止まり、相手の駒を取ってその先へ進むことはできない。",
+        reason: "飛び駒は味方の駒の前で止まり、相手の駒を取ってその先へ進むことはできない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -120,8 +120,8 @@ fn sliders_stop_at_friendly_and_enemy_blockers() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Captures demote every promoted kind into hand and a drop consumes a held piece.",
-        reason: "Captures demote every promoted kind into hand and a drop consumes a held piece.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 成駒を取ると、すべての種類で成る前の駒として持ち駒に加わる。駒打ちでは持ち駒を1枚消費する。",
+        reason: "成駒を取ると、すべての種類で成る前の駒として持ち駒に加わる。駒打ちでは持ち駒を1枚消費する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -176,8 +176,8 @@ fn capture_demotes_every_promoted_kind_and_drop_consumes_hand() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Optional nonpromotions remain legal and dead-rank moves require promotion.",
-        reason: "Optional nonpromotions remain legal and dead-rank moves require promotion.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 成らなくてもよい場合の不成は合法とし、行き所がなくなる段への着手では成りを必須とする。",
+        reason: "成らなくてもよい場合の不成は合法とし、行き所がなくなる段への着手では成りを必須とする。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -253,8 +253,8 @@ fn promotions_include_optional_nonpromotions_and_require_dead_rank_promotion() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Nifu, promoted-pawn exception, occupied-square and unavailable-hand drop cases are asserted.",
-        reason: "Nifu, promoted-pawn exception, occupied-square and unavailable-hand drop cases are asserted.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 二歩、成った歩の例外、駒のある升への駒打ち、持っていない駒の駒打ちを検証する。",
+        reason: "二歩、成った歩の例外、駒のある升への駒打ち、持っていない駒の駒打ちを検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -293,8 +293,8 @@ fn nifu_promoted_pawn_exception_occupied_and_missing_drops() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Pawn/lance/knight dead-rank drops are rejected for both sides.",
-        reason: "Pawn/lance/knight dead-rank drops are rejected for both sides.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 先後両方で、歩・香・桂の行き所がなくなる段への駒打ちを拒否する。",
+        reason: "先後両方で、歩・香・桂の行き所がなくなる段への駒打ちを拒否する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -333,8 +333,8 @@ fn dead_rank_drops_for_both_players() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Pins, legal check evasions and double-check legal moves are asserted.",
-        reason: "Pins, legal check evasions and double-check legal moves are asserted.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 ピンされた駒、合法な王手回避、両王手での合法手を検証する。",
+        reason: "ピンされた駒、合法な王手回避、両王手での合法手を検証する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -384,8 +384,8 @@ fn king_safety_pins_check_evasions_and_double_check() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Pawn-drop mate is rejected while a checking pawn drop with an escape remains legal.",
-        reason: "Pawn-drop mate is rejected while a checking pawn drop with an escape remains legal.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 打ち歩詰めを拒否し、逃げ道のある王手の歩打ちは合法とする。",
+        reason: "打ち歩詰めを拒否し、逃げ道のある王手の歩打ちは合法とする。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -404,8 +404,8 @@ fn pawn_drop_mate_is_rejected_but_checking_pawn_with_escape_is_allowed() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. RulesFailure is distinct and preserves state on a rules-engine counter failure.",
-        reason: "RulesFailure is distinct and preserves state on a rules-engine counter failure.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 ルールエンジンのカウンター処理が失敗した場合は、RulesFailureとして区別し、状態を保持する。",
+        reason: "ルールエンジンのカウンター処理が失敗した場合は、RulesFailureとして区別し、状態を保持する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -419,8 +419,8 @@ fn counter_failure_is_distinct_and_atomic() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. An ordinary advancing pawn may legally checkmate.",
-        reason: "An ordinary advancing pawn may legally checkmate.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 通常の歩の前進で詰ますことは合法とする。",
+        reason: "通常の歩の前進で詰ますことは合法とする。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -441,8 +441,8 @@ fn ordinary_pawn_advance_mate_is_accepted() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "Direct shogi-domain fixture and observable game state; no persistence, authentication or network transport. Promotion is allowed when a move starts in the zone and exits it.",
-        reason: "Promotion is allowed when a move starts in the zone and exits it.",
+        scope: "shogi-domainを直接使うテスト用データと、観測可能な対局状態を検証する。永続化、認証、ネットワーク通信は使わない。 敵陣内から敵陣外へ動く手でも、成りを許可する。",
+        reason: "敵陣内から敵陣外へ動く手でも、成りを許可する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
