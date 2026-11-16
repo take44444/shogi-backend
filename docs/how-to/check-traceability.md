@@ -69,6 +69,42 @@
 `render` と `check` は、宣言と生成物、Cargo のコンパイル済みテスト一覧を検査する。
 テスト本体の成功を確認するコマンドは `run` または `cargo test`。
 
+## ブラウザーで保証とソースを確認する
+
+リポジトリのルートで HTML を生成する。
+
+```sh
+python3 scripts/traceability.py viewer
+```
+
+`target/traceability-viewer.html` をブラウザーで開く。
+サーバーや追加のパッケージは不要で、`file://` でも利用できる。
+出力先を変える場合は `python3 scripts/traceability.py viewer --output /tmp/traceability.html` を使う。
+`--output` は `viewer` 専用となる。
+`--root` を指定した場合、既定の出力先はそのルートの `target/traceability-viewer.html` となる。
+入力ソース、追跡済みファイル、ツールのコード、Git の管理ファイルへの上書きは拒否する。
+
+機能を検索し、保証・契約・テストや、それらを結ぶ関係を選択する。
+詳細には処理の流れ、根拠、検証範囲、未検証事項、限界を表示する。
+契約を選ぶと、その契約のテストをグラフに展開する。
+選択項目は URL のハッシュに記録され、再読込とブラウザーの戻る・進むで復元する。
+共有する場合は、同じ HTML とハッシュを渡す。
+Tab と Enter で項目を選択できる。
+ソース画面は **閉じる** または Escape で閉じる。
+
+ソース画面は生成時点に取り込んだ内容と参照行を表示する。
+取り込み時の HEAD とファイルの生バイトが一致し、対応する GitHub origin がある場合だけ、そのコミットに固定したリンクを表示する。
+変更済み・新規のファイルや Git のない環境でも、取り込んだソースを参照できる。
+ファイル群全体の同時点性は保証しない。
+ソースを変更したら HTML を再生成する。
+HTML には参照されたソースの全文を含むため、共有先を確認する。
+
+`viewer` は構造・操作の所属・Cargo のテスト一覧を検査してから生成する。
+Markdown 生成物との比較やテスト本体の実行は行わず、テストの成功や検証の十分さも示さない。
+Rust CI の `traceability-viewer` artifact からも HTML をダウンロードして開ける。
+
+## 検査の対象
+
 分類の対象は、workspace の各 package にあるデフォルト構成の lib、bin、integration test target。
 新しい package や target も列挙し、未分類のコンパイル済みテストを拒否する。
 テストがない target も検査対象として記録する。

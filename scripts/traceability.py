@@ -533,15 +533,25 @@ def existing_documents(root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "render", "run"))
+    parser.add_argument("command", choices=("check", "render", "run", "viewer"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--output", type=Path, help="viewer HTML destination (viewer only)")
     args = parser.parse_args(argv)
+    if args.output is not None and args.command != "viewer":
+        parser.error("--output is only available for viewer")
     root = args.root.resolve()
     try:
         traces = load_traces(root)
         surfaces = check_surfaces(traces, root)
         tests = list(mapped_tests(traces))
         check_inventory(tests, root, traces.directory_bundle)
+        if args.command == "viewer":
+            from traceability_viewer import write_viewer
+
+            destination = args.output if args.output is not None else root / "target/traceability-viewer.html"
+            write_viewer(root, traces, destination)
+            print(f"Viewer snapshot for {len(traces)} features: {destination.resolve()}")
+            return 0
         documents = generated_documents(traces, surfaces)
         if args.command == "render":
             write_documents(root, documents)

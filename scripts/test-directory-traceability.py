@@ -75,8 +75,8 @@ trace::feature!(trace::Feature {
 });
 '''.replace("TITLE", title).replace("SURFACES", '&[trace::Surface::Grpc { path: "proto/service.proto", service: "Service", operation: "Invoke" }]' if title == "Demo" else '&[]'))
 
-    def cli(self, command="render", *, error=None):
-        result = subprocess.run([sys.executable, str(CHECKER), command, "--root", str(self.root)],
+    def cli(self, command="render", *, error=None, extra=()):
+        result = subprocess.run([sys.executable, str(CHECKER), command, "--root", str(self.root), *extra],
                                 capture_output=True, text=True, env=os.environ.copy())
         if error is None:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -111,6 +111,28 @@ trace_support::example!(trace_support::Example {{
         graph = self.graph()
         self.assertEqual(graph["tests"][0]["name"], "cases::selected")
         self.assertEqual(graph["tests"][0]["source"]["path"], "crates/sample/src/trace/demo/behavior/tests.rs")
+
+    def test_viewer_exports_without_markdown_or_executing_test_bodies(self):
+        self.tests.write_text(self.tests.read_text().replace("crate::implementation();", 'panic!("viewer must not run this test");'))
+        result = self.cli("viewer")
+        self.assertIn("Viewer snapshot", result.stdout)
+        self.assertNotIn("PASS", result.stdout)
+        destination = self.root / "target/traceability-viewer.html"
+        content = destination.read_text()
+        self.assertIn("viewer-data", content)
+        self.assertIn("cases::selected", content)
+        self.assertFalse((self.root / "docs").exists())
+        self.cli("check", error="generated document set mismatch")
+        custom = self.root / "custom.html"
+        self.cli("viewer", extra=("--output", str(custom)))
+        self.assertEqual(destination.read_bytes(), custom.read_bytes())
+        self.lib.write_text(self.lib.read_text() + "\n#[test]\nfn unclassified() {}\n")
+        self.cli("viewer", error="unclassified test;")
+
+    def test_viewer_output_option_is_rejected_for_other_commands(self):
+        for command in ("render", "check", "run"):
+            with self.subTest(command=command):
+                self.cli(command, error="--output is only available for viewer", extra=("--output", str(self.root / "custom.html")))
 
     def test_new_ordinary_contract_test_is_unreviewed(self):
         self.append(self.tests, "#[test]\nfn automatically_discovered() {}")
