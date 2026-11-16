@@ -71,5 +71,14 @@ dialog p { font-size: .8rem; color: #55667b; }
 .line-number { color: #7d8b9d; width: 4.5rem; flex-shrink: 0; text-align: right; padding-right: 1rem; user-select: none; }
 .line-content { padding-right: 1rem; }
 .source-line.highlight { background: #fff0b7; outline: 1px solid #e3ba50; }
+@media (min-width: 1151px) {
+  body { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .page-header, #notice { flex-shrink: 0; }
+  .workspace { flex: 1; min-height: 0; align-items: stretch; }
+  .features, .inspector { min-height: 0; max-height: none; }
+  .canvas-panel { display: flex; flex-direction: column; min-height: 0; }
+  .canvas-header, .toolbar, .legend, .canvas-help { flex-shrink: 0; }
+  #graph-viewport { flex: 1; min-height: 0; max-height: none; }
+}
 @media (max-width: 1150px) { .workspace { grid-template-columns: 185px minmax(0, 1fr); } .inspector { grid-column: 1 / -1; max-height: none; } }
 @media (max-width: 700px) { .page-header { padding: 1rem; display: block; } .snapshot { margin-top: 1rem; } .workspace { grid-template-columns: minmax(0, 1fr); padding: .6rem; gap: .6rem; } .features { max-height: 250px; } .inspector { grid-column: auto; } #graph-viewport { max-height: 55vh; min-height: 320px; } }
