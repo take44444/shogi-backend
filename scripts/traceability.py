@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Check source-backed feature graphs, surface ownership, and generated references."""
+"""Validate source-backed feature graphs and export the HTML viewer."""
 import argparse
 from collections import Counter
-import html
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -10,16 +9,11 @@ import re
 import shlex
 import subprocess
 import sys
-import tempfile
 
 
-DOCUMENTS = Path("docs/reference/traceability")
-INDEX = Path("docs/reference/feature-traceability.md")
-LEGACY = Path("docs/reference/ratings-traceability.md")
 ID = re.compile(r"[a-z][a-z0-9-]*\Z")
 CARGO_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 TEST_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*\Z")
-RELATIONSHIP_LABELS = {"asserts": "事例を直接検証", "exercises": "処理を通る", "unreviewed": "所属のみ・未レビュー"}
 
 
 class InvalidTrace(Exception):
@@ -198,11 +192,11 @@ def execute(args, root):
 def check_surfaces(traces, root):
     bundle = traces.directory_bundle
     features = {graph["feature"]["id"] for _, graph, _ in traces}
-    surfaces = {feature: [] for feature in features}
+    owned_features = set()
 
     def own(feature, label):
         require(text(feature) in features, f"{label}: unknown feature owner {feature}")
-        surfaces[feature].append(label)
+        owned_features.add(feature)
 
     openapi, grpc = {}, {}
     for surface in sequence(bundle["surfaces"], nonempty=False):
@@ -295,8 +289,7 @@ def check_surfaces(traces, root):
         own(entry["feature"], name)
         entry_names.append(name)
     unique(entry_names, "entrypoint names")
-    require(all(surfaces.values()), f"orphan feature without surface or entrypoint: {sorted(feature for feature in features if not surfaces[feature])}")
-    return surfaces
+    require(features == owned_features, f"orphan feature without surface or entrypoint: {sorted(features - owned_features)}")
 
 
 def mapped_tests(traces):
@@ -385,155 +378,9 @@ def run_tests(tests, root):
         print(f"PASS {', '.join(aliases)}: {shlex.join(args)}")
 
 
-def escaped(value):
-    return html.escape(value, quote=True).replace("|", "&#124;").replace("`", "&#96;")
-
-
-def markdown(record, graph, lines, directory_bundle=None):
-    def link(node):
-        path = node["source"]["path"]
-        return f"[{escaped(path)}](../../../{path}#L{lines[node['id']]})"
-
-    guarantees = sorted(graph["guarantees"], key=lambda node: node["id"])
-    contracts = sorted(graph["contracts"], key=lambda node: node["id"])
-    tests = sorted(graph["tests"], key=lambda node: node["id"])
-    feature = graph["feature"]
-    out = [f"# {escaped(feature['title'])}", "",
-           "このページは `python3 scripts/traceability.py render` で生成する。", "",
-           f"元データは [{escaped(record.as_posix())}](../../../{record.as_posix()})。",
-           "[全機能の一覧](../feature-traceability.md)。", "",
-           "## 対象機能", "", "| ID | 機能 | 仕様 |", "| --- | --- | --- |",
-           f"| {feature['id']} | {escaped(feature['title'])} | {link(feature)} |", "",
-           "## 保証の成立条件と構成", ""]
-    out += [f"{number}. {escaped(step)}" for number, step in enumerate(feature["flow"], 1)]
-    out += ["", "以下の保証には、各行に示す契約が必要となる。テストによる検証は記載した事例の範囲に限られる。", "",
-            "| ID | アプリケーションの保証と条件 | 必要な契約 |", "| --- | --- | --- |"]
-    for guarantee in guarantees:
-        refs = ", ".join(f"[{ref}](#contract-{ref})" for ref in guarantee["contracts"])
-        out.append(f"| {guarantee['id']} | {escaped(guarantee['statement'])} | {refs} |")
-    out += ["", "## 宣言した対応関係", "",
-            "矢印は著者が宣言した関係を示す。「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。「所属のみ・未レビュー」は契約ディレクトリへの配置だけで分類した関係を示す。", "",
-            "```mermaid", "flowchart TD"]
-    nodes = [feature] + guarantees + contracts + tests
-    mermaid_ids = {node["id"]: f"n{index}" for index, node in enumerate(nodes)}
-    for node in nodes:
-        layer = "機能" if node is feature else "保証" if node in guarantees else "契約" if node in contracts else "テスト"
-        label = escaped(f"{layer}: {node['id']}")
-        out.append(f'    {mermaid_ids[node["id"]]}["{label}"]')
-    for guarantee in guarantees:
-        out.append(f"    {mermaid_ids[feature['id']]} --> {mermaid_ids[guarantee['id']]}")
-        for ref in guarantee["contracts"]:
-            out.append(f"    {mermaid_ids[guarantee['id']]} --> {mermaid_ids[ref]}")
-    for contract in contracts:
-        for edge in contract["evidence"]:
-            out.append(f"    {mermaid_ids[contract['id']]} -->|{RELATIONSHIP_LABELS[edge['relationship']]}| {mermaid_ids[edge['test']]}")
-    out += ["```", "", "## コンポーネント契約と根拠", ""]
-    for contract in contracts:
-        out += [f'<a id="contract-{contract["id"]}"></a>', "", f"### {contract['id']}", "",
-                escaped(contract["statement"]), "", f"実装位置: {link(contract)}。", ""]
-        for edge in contract["evidence"]:
-            out.append(f"- [{edge['test']}](#test-{edge['test']}) ({RELATIONSHIP_LABELS[edge['relationship']]}): {escaped(edge['reason'])}")
-        if "gap" in contract:
-            out += ["", f"未検証: {escaped(contract['gap'])}"]
-        out.append("")
-    out += ["## 実在するテストと実行コマンド", "",
-            "コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。", ""]
-    for test in tests:
-        out += [f'<a id="test-{test["id"]}"></a>', "", f"### {test['id']}", "",
-                f"テスト位置: {link(test)}。", "", f"範囲: {escaped(test['scope'])}", "", "```sh",
-                shlex.join(cargo_command(test) + [test["name"], "--", "--exact", "--format", "pretty", "--color", "never"]), "```", ""]
-    out += ["## 検査と根拠の限界", "",
-            "check はグラフ、ファイル内の一意なテキスト位置、パッケージとターゲットごとのコンパイル済みテスト名、生成文書の一致を検査する。",
-            "run は check の後に共有された Cargo テストを一度ずつ実行し、厳密一致の 1 件が成功し、失敗と無視が 0 件であることを検査する。",
-            "この文書には実行済みの成功状態を保存しない。CI のワークスペース全体のテスト実行結果は、その実行時点の結果となる。",
-            "位置の検査は Rust の構文解析ではなく、テスト名と指定したソース位置が同じ定義を指すことも証明しない。",
-            "宣言した関連の意味と網羅性はレビューが必要となる。検出できる関連の削除は、必須の関連数、参照先、孤立ノードの規則に違反するものに限られる。", ""]
-    out += [f"- {escaped(item)}" for item in graph["limitations"]]
-    if directory_bundle:
-        out += ["", "## ディレクトリ方式の検査範囲", "",
-                "Rust 宣言、通常のモジュールと文字列リテラルの include! から物理ファイルの所属、パッケージ、ターゲット、完全なテスト名と位置を抽出する。ホスト環境で Cargo の既定の機能フラグを使い、ワークスペースのライブラリ、バイナリ、結合テストの全テスト一覧と一致させる。別のターゲット、機能フラグ、cfg の組合せは対象外。",
-                "src/trace/<feature> と tests/trace/<feature> は新規機能も探索し、未宣言または未到達のファイルを拒否する。契約内の通常テストは「所属のみ・未レビュー」として追加する。「事例を直接検証」または「処理を通る」のレビュー済み根拠がない契約には未検証事項の gap 宣言が必要。",
-                "全ターゲットの未分類テストは拒否する。trace ディレクトリ内の未対応の項目マクロと cfg は直接拒否し、外側の未対応構文が生成した実行対象テストはコンパイル済み一覧との差として拒否する。テスト実行補助と基盤の検査の明示分類および理由は全機能の一覧に示す。", ""]
-        out = [line for line in out if not line.startswith("位置の検査は Rust の構文解析ではなく")]
-    return "\n".join(out).rstrip() + "\n"
-
-
-def index_markdown(traces, surfaces):
-    out = ["# 機能の保証とテストの対応", "",
-           "この一覧は `python3 scripts/traceability.py render` で生成する。", "",
-           "実装を正とし、各機能の保証、コンポーネント契約、実在するテストと未検証事項を結ぶ。成功状態は保存しない。", "",
-           "| 機能 | 公開操作と入口 | 保証 | 契約 | テスト宣言 | 元データ |",
-           "| --- | --- | --- | --- | --- | --- |"]
-    for record, graph, _ in traces:
-        feature = graph["feature"]
-        owned = "<br>".join(escaped(surface) for surface in sorted(surfaces[feature["id"]]))
-        out.append(f"| [{escaped(feature['title'])}](traceability/{feature['id']}.md) | {owned} | {len(graph['guarantees'])} | {len(graph['contracts'])} | {len(graph['tests'])} | [{escaped(record.as_posix())}](../../{record.as_posix()}) |")
-    out += ["", "## 一覧の検査範囲", "",
-            "入口、保証、操作の所有者はコンパイルされる Feature、Contract、Case、Evidence、Surface 宣言から取得する。",
-            "Cargo が列挙する全サンプルプログラムに、型検査される Example 宣言と理由を必須とする。OpenApi 宣言のサンプルだけを実行し、出力された操作と Surface 宣言の完全一致を検査する。Program 宣言はコンパイルのみ行う。proto/ の全サービス・RPC も探索して Surface 宣言と照合する。",
-            "check は OpenAPI 出力プログラムと操作の追加・削除、gRPC 操作の追加・削除、未割当の所有者、台帳から参照されない機能、参照元データと生成文書の不足・余分を検出する。",
-            "新しいバックグラウンド処理や WebSocket メッセージを自動発見すること、機能の分割が適切かを判定することはできない。台帳の入口とソース参照はレビューで保つ。",
-            "テスト宣言数は機能内の件数であり、同じ Cargo テストが複数機能で共有されることがある。run はパッケージ・ターゲット・完全なテスト名が同じものを一度だけ実行する。",
-            "「事例を直接検証」は記載した事例を直接確かめる関係、「処理を通る」は対象の処理を実行する関係を示す。位置の一致とテストの成功は、保証の意味や網羅性の証明ではない。", "",
-            "更新方法は [仕様とテストの対応を更新する](../how-to/check-traceability.md) を参照する。", ""]
-    bundle = traces.directory_bundle
-    counts = Counter(item["classification"] for item in bundle["classifications"])
-    out += ["## ワークスペース全体のテスト分類", "",
-            f"コンパイル済みテスト {sum(counts.values())} 件。機能に関連付けた固有テスト {counts['evidence']} 件、基盤の検査 {counts['infrastructure']} 件、テスト実行補助 {counts['helper']} 件。共有テストは機能ごとの宣言数に重複して現れるが、この合計では一度だけ数える。", "",
-            "標準ホストと Cargo の既定の機能フラグを使用する。test = false のターゲットは Cargo の指定どおり一覧から除く。required-features を持つターゲットは現在の規則では明示的に拒否する。テストがないターゲットも一覧照合の対象にする。", ""]
-    for item in bundle["classifications"]:
-        if item["classification"] == "evidence":
-            continue
-        identity, source, semantics = item["identity"], item["source"], item["semantics"]
-        target = identity["target"]
-        category = f" / {semantics['category']}" if "category" in semantics else ""
-        label = f"{identity['package']} / {target['kind']} / {target.get('name', '(lib)')} / {identity['name']}"
-        classification = {"infrastructure": "基盤の検査", "helper": "テスト実行補助"}[item['classification']]
-        out.append(f"- `{escaped(label)}` ({classification}{category}) [{escaped(source['path'])}](../../{source['path']}#L{source['line']}): {escaped(semantics['reason'])}")
-    for item in bundle["excluded_targets"]:
-        out.append(f"- Cargo の除外ターゲット `{escaped(item['package'])} / {escaped(str(item['target']))}`: {escaped(item['reason'])}")
-    out += ["", "## Cargo のサンプルプログラムの分類", ""]
-    for item in bundle["examples"]:
-        label = f"{item['package']} / {item['example']}"
-        kind = {"OpenApi": "OpenAPI 仕様の出力", "Program": "プログラム（コンパイルのみ）"}[item['kind']]
-        out.append(f"- `{escaped(label)}` ({kind}) [{escaped(item['source'])}](../../{item['source']}): {escaped(item['reason'])}")
-    out.append("")
-    return "\n".join(out)
-
-
-def generated_documents(traces, surfaces):
-    bundle = getattr(traces, "directory_bundle", {})
-    migrated = {fragment["graph"]["feature"]["id"] for fragment in bundle.get("graphs", [])}
-    documents = {DOCUMENTS / f"{graph['feature']['id']}.md": markdown(
-        record, graph, lines, bundle if graph["feature"]["id"] in migrated else None)
-        for record, graph, lines in traces}
-    documents[INDEX] = index_markdown(traces, surfaces)
-    return documents
-
-
-def write_documents(root, documents):
-    for path, content in documents.items():
-        destination = root / path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent, delete=False) as temporary:
-            temporary.write(content)
-            temporary_path = Path(temporary.name)
-        try:
-            os.replace(temporary_path, destination)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-    for path in existing_documents(root) - documents.keys():
-        (root / path).unlink()
-
-
-def existing_documents(root):
-    return {path.relative_to(root) for path in (root / DOCUMENTS).rglob("*.md")} | {
-        path for path in (INDEX, LEGACY) if (root / path).is_file()}
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "render", "run", "viewer"))
+    parser.add_argument("command", choices=("check", "run", "viewer"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--output", type=Path, help="viewer HTML destination (viewer only)")
     args = parser.parse_args(argv)
@@ -542,7 +389,7 @@ def main(argv=None):
     root = args.root.resolve()
     try:
         traces = load_traces(root)
-        surfaces = check_surfaces(traces, root)
+        check_surfaces(traces, root)
         tests = list(mapped_tests(traces))
         check_inventory(tests, root, traces.directory_bundle)
         if args.command == "viewer":
@@ -552,20 +399,10 @@ def main(argv=None):
             write_viewer(root, traces, destination)
             print(f"Viewer snapshot for {len(traces)} features: {destination.resolve()}")
             return 0
-        documents = generated_documents(traces, surfaces)
-        if args.command == "render":
-            write_documents(root, documents)
-            print(f"Rendered {len(documents)} documents for {len(traces)} features")
+        if args.command == "run":
+            run_tests(tests, root)
         else:
-            require(existing_documents(root) == documents.keys(),
-                    "generated document set mismatch: run python3 scripts/traceability.py render")
-            for path, content in documents.items():
-                require((root / path).read_text(encoding="utf-8") == content,
-                        f"stale generated document: run python3 scripts/traceability.py render ({path})")
-            if args.command == "run":
-                run_tests(tests, root)
-            else:
-                print(f"Traceability surfaces, structure, Cargo identities, and documents match: {len(traces)} features")
+            print(f"Traceability surfaces, structure, and Cargo identities match: {len(traces)} features")
         return 0
     except (InvalidTrace, OSError, ValueError) as error:
         print(f"traceability: {error}", file=sys.stderr)

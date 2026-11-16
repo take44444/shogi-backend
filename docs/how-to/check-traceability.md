@@ -1,6 +1,6 @@
 # 機能の保証とテストの対応を更新する
 
-[機能一覧](../reference/feature-traceability.md)と各機能のページは Rust の宣言と実在するテストから生成する。
+HTML viewer は Rust の宣言と実在するテストから生成する。
 保証やテスト一覧を手書きの文書に複写しない。
 保証、契約、検証範囲、根拠、未検証事項の説明は日本語で書く。
 機能・契約の ID、列挙値、関数名、パスなどのコード上の識別子は維持する。
@@ -36,7 +36,7 @@
 5. 製品の契約を検証しないテストは、個別に理由を宣言する。
    SQL 記述方針やテスト用 DB の検査には `trace::infrastructure!("category", "reason"; <test item>)` を使う。
    別プロセスから起動する補助テストには `trace::helper!("reason"; <test item>)` を使う。
-   基盤・補助テストの一覧と理由は、機能一覧の生成ページで確認できる。
+   基盤・補助テストの分類と理由は、各テストの Rust 宣言で確認する。
    未分類のテストをまとめて除外する仕組みは設けない。
 6. HTTP・gRPC 操作の所属は `Feature.surfaces`、その他の処理入口は `Feature.entrypoints` に宣言する。
    OpenAPI 出力と proto の操作一覧に照合するため、追加・削除や所有者の重複は検査で拒否する。
@@ -45,28 +45,24 @@
    [OpenAPI 出力の例](../../crates/player-http/examples/player-openapi.rs)のように共通モデルを読み込み、`ExampleKind::OpenApi` または `ExampleKind::Program` と理由を指定する。
    全 example をコンパイルし、`OpenApi` の example だけを実行して出力を照合する。
    `Program` は実行しない。未宣言・重複・条件付きの宣言は拒否する。
-7. リポジトリのルートで再生成し、差分を確認する。
-
-   ```sh
-   python3 scripts/traceability.py render
-   ```
-
-8. 検査ツールのテストと、参照・生成物の検査を実行する。
+7. リポジトリのルートで検査ツールのテストと、宣言・ソース参照・Cargo のテスト一覧の検査を実行する。
 
    ```sh
    python3 scripts/test-traceability.py
    python3 scripts/test-directory-traceability.py
+   python3 scripts/test-traceability-viewer.py
    python3 scripts/traceability.py check
    ```
 
-9. 実テストを実行する。
+8. 実テストを実行する。
 
    ```sh
    scripts/test-postgres.sh python3 scripts/traceability.py run
    scripts/test-postgres.sh cargo test --locked --workspace
    ```
 
-`render` と `check` は、宣言と生成物、Cargo のコンパイル済みテスト一覧を検査する。
+`check` は、宣言、ソース参照、操作の所属、Cargo のコンパイル済みテスト一覧を検査する。
+`check` と `run` は表示用ファイルを読み書きしない。
 テスト本体の成功を確認するコマンドは `run` または `cargo test`。
 
 ## ブラウザーで保証とソースを確認する
@@ -100,7 +96,7 @@ Tab と Enter で項目を選択できる。
 HTML には参照されたソースの全文を含むため、共有先を確認する。
 
 `viewer` は構造・操作の所属・Cargo のテスト一覧を検査してから生成する。
-Markdown 生成物との比較やテスト本体の実行は行わず、テストの成功や検証の十分さも示さない。
+テスト本体は実行せず、テストの成功や検証の十分さも示さない。
 Rust CI の `traceability-viewer` artifact からも HTML をダウンロードして開ける。
 
 ## 検査の対象
@@ -109,6 +105,8 @@ Rust CI の `traceability-viewer` artifact からも HTML をダウンロード�
 新しい package や target も列挙し、未分類のコンパイル済みテストを拒否する。
 テストがない target も検査対象として記録する。
 `test = false` の target は理由付きで記録し、`required-features` を持つ target は構成を推測せず拒否する。
+基盤・補助テスト、除外 target、example の分類と理由は収集・検査する。
+これらの分類をまとめた表示は viewer に含まれないため、理由は Rust 宣言と Cargo.toml で確認する。
 ディレクトリ規約、ファイルの到達、同一テストの重複、宣言とコンパイル結果の不一致も検査する。
 
 [収集ツール](../../tools/traceability/Cargo.toml) は独立した Rust workspace で、syn による構文解析を使う。

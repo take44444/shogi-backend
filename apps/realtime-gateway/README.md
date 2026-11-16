@@ -3,7 +3,7 @@
 コマンドはリポジトリのルートで実行する。
 マッチメイキングの HTTP 仕様は[OpenAPI の生成手順](../../README.md#api-ドキュメントを生成する)、
 WebSocket の形式は[プロトコル実装](../../crates/realtime-gateway/src/game.rs)を参照すること。
-認証、接続、資源制限の実装とテストは[機能の対応表](../../docs/reference/traceability/realtime-session-commands-limits.md)からたどる。
+認証、接続、資源制限の実装とテストは[HTML viewer の手順](../../docs/how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
 環境変数と上限は [GatewayConfig](../../crates/realtime-gateway/src/lib.rs) に定義する。
 
 ## Docker Compose で起動する
@@ -86,8 +86,8 @@ const pendingCommand = {type: 'move', request_id: crypto.randomUUID(), expected_
 socket.send(JSON.stringify(pendingCommand));
 ```
 
-操作結果と更新通知の扱いは[対局操作の対応表](../../docs/reference/traceability/realtime-session-commands-limits.md)、
-初期局面と通知の同期は[リアルタイム配信の対応表](../../docs/reference/traceability/realtime-game-feed.md)を参照すること。
+操作結果と更新通知の扱いは[対局操作の定義](../../crates/realtime-gateway/src/trace/realtime-session-commands-limits/feature.rs)、
+初期局面と通知の同期は[リアルタイム配信の定義](../../crates/realtime-gateway/src/trace/realtime-game-feed/feature.rs)を参照すること。
 
 ## 操作結果が不明な場合や切断後に復旧する
 
