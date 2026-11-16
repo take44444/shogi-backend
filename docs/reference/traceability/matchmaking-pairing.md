@@ -45,12 +45,12 @@ flowchart TD
     n10["test: test-game-application-lib-game-application-matchmaking-tests-owner-scoped-equal-uuids-have-a-stable-opponent"]
     n11["test: test-game-application-lib-game-application-matchmaking-tests-skips-unmatched-head-and-prefers-nearest-then-oldest-then-id"]
     n12["test: test-game-application-lib-game-application-matchmaking-tests-widening-is-bilateral-and-includes-boundary"]
-    n13["test: test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner"]
-    n14["test: test-game-persistence-test-matchmaking-expiry-after-rating-lock-wait-prevents-match"]
-    n15["test: test-game-persistence-test-matchmaking-lost-observations-recover-and-worker-retries-preserve-the-next-match"]
-    n16["test: test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets"]
-    n17["test: test-game-persistence-test-matchmaking-widening-without-a-new-join-skips-an-incompatible-head"]
-    n18["test: test-game-server-test-matchmaking-writer-periodic-matching-progresses-without-another-join"]
+    n13["test: test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-cross-pool-joins-and-multiple-matchers-have-one-durable-winner"]
+    n14["test: test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-expiry-after-rating-lock-wait-prevents-match"]
+    n15["test: test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-lost-observations-recover-and-worker-retries-preserve-the-next-match"]
+    n16["test: test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets"]
+    n17["test: test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-widening-without-a-new-join-skips-an-incompatible-head"]
+    n18["test: test-game-server-test-matchmaking-selection-writer-periodic-matching-progresses-without-another-join"]
     n0 --> n1
     n1 --> n7
     n1 --> n5
@@ -84,11 +84,11 @@ tick serializes durable admission, locks selected tickets and rating states, rec
 
 実装位置: [crates/game-persistence/src/matchmaking.rs](../../../crates/game-persistence/src/matchmaking.rs#L385)。
 
-- [test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner](#test-test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner) (asserts): Concurrent ticks produce exactly one game, one rated_game and two slots, and one user&#x27;s current participation is Playing. This test does not compare participant or side bindings.
-- [test-game-persistence-test-matchmaking-expiry-after-rating-lock-wait-prevents-match](#test-test-game-persistence-test-matchmaking-expiry-after-rating-lock-wait-prevents-match) (asserts): Tickets expire while blocked on rating locks; tick returns None and creates no game.
-- [test-game-persistence-test-matchmaking-lost-observations-recover-and-worker-retries-preserve-the-next-match](#test-test-game-persistence-test-matchmaking-lost-observations-recover-and-worker-retries-preserve-the-next-match) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
-- [test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets](#test-test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets) (asserts): Injected slot failure leaves zero game/rated/slot rows and both waiting; successful retry freezes original Unrated states.
-- [test-game-persistence-test-matchmaking-widening-without-a-new-join-skips-an-incompatible-head](#test-test-game-persistence-test-matchmaking-widening-without-a-new-join-skips-an-incompatible-head) (asserts): After aging enqueue times, one/two pair while an incompatible head remains waiting.
+- [test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-cross-pool-joins-and-multiple-matchers-have-one-durable-winner](#test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-cross-pool-joins-and-multiple-matchers-have-one-durable-winner) (asserts): Concurrent ticks produce exactly one game, one rated_game and two slots, and one user&#x27;s current participation is Playing. This test does not compare participant or side bindings.
+- [test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-expiry-after-rating-lock-wait-prevents-match](#test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-expiry-after-rating-lock-wait-prevents-match) (asserts): Tickets expire while blocked on rating locks; tick returns None and creates no game.
+- [test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-lost-observations-recover-and-worker-retries-preserve-the-next-match](#test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-lost-observations-recover-and-worker-retries-preserve-the-next-match) (unreviewed): Directory ownership declares this test belongs to the contract; execution of the implementation and strength of assertions require review.
+- [test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets](#test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets) (asserts): Injected slot failure leaves zero game/rated/slot rows and both waiting; successful retry freezes original Unrated states.
+- [test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-widening-without-a-new-join-skips-an-incompatible-head](#test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-widening-without-a-new-join-skips-an-incompatible-head) (asserts): After aging enqueue times, one/two pair while an incompatible head remains waiting.
 
 未検証: The selected tests do not compare both ticket side bindings with the committed game&#x27;s participant bindings. The executable test checks snapshot users, but does not compare ticket-side equality.
 
@@ -100,7 +100,7 @@ The executable uses a one-second skipped-tick interval, alternates starting pool
 
 実装位置: [apps/game-server/src/main.rs](../../../apps/game-server/src/main.rs#L20)。
 
-- [test-game-server-test-matchmaking-writer-periodic-matching-progresses-without-another-join](#test-test-game-server-test-matchmaking-writer-periodic-matching-progresses-without-another-join) (asserts): Launches the actual game-server binary and observes waiting tickets become Playing with a sequence-zero snapshot containing both users, without another join.
+- [test-game-server-test-matchmaking-selection-writer-periodic-matching-progresses-without-another-join](#test-test-game-server-test-matchmaking-selection-writer-periodic-matching-progresses-without-another-join) (asserts): Launches the actual game-server binary and observes waiting tickets become Playing with a sequence-zero snapshot containing both users, without another join.
 
 未検証: The test ages DB timestamps instead of waiting 30 real seconds. It does not assert two-pool fairness, the 32-attempt cap, error logging/recovery or Ctrl-C shutdown.
 
@@ -135,7 +135,7 @@ Unrated rating is effectively 1500; allowed difference starts at 100 and increas
 
 ### test-game-application-lib-game-application-matchmaking-tests-extremes-expiry-and-pool-separation
 
-テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/extremes_expiry_and_pool_separation.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/extremes_expiry_and_pool_separation.rs#L9)。
+テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs#L65)。
 
 範囲: Pure selector boundary and isolation fixtures.
 
@@ -147,7 +147,7 @@ cargo test --locked -p game-application --lib matchmaking::tests::extremes_expir
 
 ### test-game-application-lib-game-application-matchmaking-tests-owner-scoped-equal-uuids-have-a-stable-opponent
 
-テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/owner_scoped_equal_uuids_have_a_stable_opponent.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/owner_scoped_equal_uuids_have_a_stable_opponent.rs#L9)。
+テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs#L87)。
 
 範囲: Pure selector with equal UUIDs and distinct owners.
 
@@ -159,7 +159,7 @@ cargo test --locked -p game-application --lib matchmaking::tests::owner_scoped_e
 
 ### test-game-application-lib-game-application-matchmaking-tests-skips-unmatched-head-and-prefers-nearest-then-oldest-then-id
 
-テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/skips_unmatched_head_and_prefers_nearest_then_oldest_then_id.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/skips_unmatched_head_and_prefers_nearest_then_oldest_then_id.rs#L9)。
+テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs#L42)。
 
 範囲: Pure selector fixtures; no database or scheduler.
 
@@ -171,7 +171,7 @@ cargo test --locked -p game-application --lib matchmaking::tests::skips_unmatche
 
 ### test-game-application-lib-game-application-matchmaking-tests-widening-is-bilateral-and-includes-boundary
 
-テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/widening_is_bilateral_and_includes_boundary.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/widening_is_bilateral_and_includes_boundary.rs#L9)。
+テスト位置: [crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs](../../../crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs#L24)。
 
 範囲: Pure policy; no database or timer.
 
@@ -179,76 +179,76 @@ cargo test --locked -p game-application --lib matchmaking::tests::skips_unmatche
 cargo test --locked -p game-application --lib matchmaking::tests::widening_is_bilateral_and_includes_boundary -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner"></a>
+<a id="test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-cross-pool-joins-and-multiple-matchers-have-one-durable-winner"></a>
 
-### test-game-persistence-test-matchmaking-cross-pool-joins-and-multiple-matchers-have-one-durable-winner
+### test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-cross-pool-joins-and-multiple-matchers-have-one-durable-winner
 
-テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/cross_pool_joins_and_multiple_matchers_have_one_durable_winner.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/cross_pool_joins_and_multiple_matchers_have_one_durable_winner.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs#L11)。
 
 範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
 
 ```sh
-cargo test --locked -p game-persistence --test matchmaking cross_pool_joins_and_multiple_matchers_have_one_durable_winner -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test matchmaking selection::matchmaking_pairing_durable_tick::cross_pool_joins_and_multiple_matchers_have_one_durable_winner -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-matchmaking-expiry-after-rating-lock-wait-prevents-match"></a>
+<a id="test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-expiry-after-rating-lock-wait-prevents-match"></a>
 
-### test-game-persistence-test-matchmaking-expiry-after-rating-lock-wait-prevents-match
+### test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-expiry-after-rating-lock-wait-prevents-match
 
-テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/expiry_after_rating_lock_wait_prevents_match.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/expiry_after_rating_lock_wait_prevents_match.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs#L145)。
 
 範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Explicit held rating locks and forced expiry.
 
 ```sh
-cargo test --locked -p game-persistence --test matchmaking expiry_after_rating_lock_wait_prevents_match -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test matchmaking selection::matchmaking_pairing_durable_tick::expiry_after_rating_lock_wait_prevents_match -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-matchmaking-lost-observations-recover-and-worker-retries-preserve-the-next-match"></a>
+<a id="test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-lost-observations-recover-and-worker-retries-preserve-the-next-match"></a>
 
-### test-game-persistence-test-matchmaking-lost-observations-recover-and-worker-retries-preserve-the-next-match
+### test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-lost-observations-recover-and-worker-retries-preserve-the-next-match
 
-テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/lost_observations_recover_and_worker_retries_preserve_the_next_match.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/lost_observations_recover_and_worker_retries_preserve_the_next_match.rs#L2)。
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs#L199)。
 
 範囲: Contract-directory membership only; runtime dependencies and assertions have not been reviewed.
 
 ```sh
-cargo test --locked -p game-persistence --test matchmaking lost_observations_recover_and_worker_retries_preserve_the_next_match -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test matchmaking selection::matchmaking_pairing_durable_tick::lost_observations_recover_and_worker_retries_preserve_the_next_match -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets"></a>
+<a id="test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets"></a>
 
-### test-game-persistence-test-matchmaking-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets
+### test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-pair-failure-rolls-back-and-terminal-failure-preserves-both-active-tickets
 
-テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs#L65)。
 
 範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport.
 
 ```sh
-cargo test --locked -p game-persistence --test matchmaking pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test matchmaking selection::matchmaking_pairing_durable_tick::pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-matchmaking-widening-without-a-new-join-skips-an-incompatible-head"></a>
+<a id="test-test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-widening-without-a-new-join-skips-an-incompatible-head"></a>
 
-### test-game-persistence-test-matchmaking-widening-without-a-new-join-skips-an-incompatible-head
+### test-game-persistence-test-matchmaking-selection-matchmaking-pairing-durable-tick-widening-without-a-new-join-skips-an-incompatible-head
 
-テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/widening_without_a_new_join_skips_an_incompatible_head.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/widening_without_a_new_join_skips_an_incompatible_head.rs#L9)。
+テスト位置: [crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs](../../../crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs#L175)。
 
 範囲: Real PostgreSQL with SeaOrmStore and application operations; no browser or RPC transport. Direct tick after forced enqueue aging.
 
 ```sh
-cargo test --locked -p game-persistence --test matchmaking widening_without_a_new_join_skips_an_incompatible_head -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test matchmaking selection::matchmaking_pairing_durable_tick::widening_without_a_new_join_skips_an_incompatible_head -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-server-test-matchmaking-writer-periodic-matching-progresses-without-another-join"></a>
+<a id="test-test-game-server-test-matchmaking-selection-writer-periodic-matching-progresses-without-another-join"></a>
 
-### test-game-server-test-matchmaking-writer-periodic-matching-progresses-without-another-join
+### test-game-server-test-matchmaking-selection-writer-periodic-matching-progresses-without-another-join
 
-テスト位置: [apps/game-server/tests/trace/matchmaking-pairing/periodic/writer_periodic_matching_progresses_without_another_join.rs](../../../apps/game-server/tests/trace/matchmaking-pairing/periodic/writer_periodic_matching_progresses_without_another_join.rs#L9)。
+テスト位置: [apps/game-server/tests/trace/matchmaking-pairing/periodic/tests.rs](../../../apps/game-server/tests/trace/matchmaking-pairing/periodic/tests.rs#L27)。
 
 範囲: Actual game-server process, real PostgreSQL and generated gRPC client; DB timestamps force eligibility.
 
 ```sh
-cargo test --locked -p game-server --test matchmaking writer_periodic_matching_progresses_without_another_join -- --exact --format pretty --color never
+cargo test --locked -p game-server --test matchmaking selection::writer_periodic_matching_progresses_without_another_join -- --exact --format pretty --color never
 ```
 
 ## 検査と根拠の限界

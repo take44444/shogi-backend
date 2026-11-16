@@ -341,30 +341,8 @@ impl GameRecords {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn filters() -> Filters {
-        Filters {
-            participant: None,
-            rule: None,
-            winner: None,
-            reason: None,
-            from: 0,
-            to: 100,
-            min_ply: None,
-            max_ply: None,
-        }
-    }
-    include!(
-        "trace/public-record-detail/metadata-invariants/record_scalars_reject_values_outside_storage_bounds.rs"
-    );
-
-    include!(
-        "trace/public-record-detail/metadata-invariants/metadata_construction_requires_distinct_players_and_consistent_finish_counts.rs"
-    );
-
-    include!("trace/public-record-search/bounds-cursor/bounds_and_cursor_binding.rs");
-}
+#[path = "trace/public-record-search/support.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]

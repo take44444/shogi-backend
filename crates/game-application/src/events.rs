@@ -271,5 +271,5 @@ impl<R: OutboxRepository + ?Sized> OutboxRepository for &mut R {
 }
 
 #[cfg(test)]
-#[path = "trace_tests_support.rs"]
+#[path = "trace/durable-event-dispatch/support.rs"]
 mod tests;

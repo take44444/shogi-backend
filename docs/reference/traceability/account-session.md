@@ -43,14 +43,14 @@ flowchart TD
     n8["contract: realtime-recheck"]
     n9["contract: session-cookie-input"]
     n10["contract: session-storage"]
-    n11["test: test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol"]
-    n12["test: test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification"]
-    n13["test: test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract"]
-    n14["test: test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values"]
-    n15["test: test-user-http-lib-user-http-tests-production-cookies-have-host-prefix-and-secure-attributes"]
-    n16["test: test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart"]
-    n17["test: test-user-http-lib-user-http-tests-tampered-and-duplicate-session-cookies-never-authenticate"]
-    n18["test: test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used"]
+    n11["test: test-realtime-gateway-test-services-services-account-session-realtime-authentication-handshake-requires-exact-origin-unique-session-and-supported-subprotocol"]
+    n12["test: test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification"]
+    n13["test: test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract"]
+    n14["test: test-user-http-lib-user-http-tests-account-google-login-http-attempt-persisted-browser-credentials-are-hashes-not-cookie-values"]
+    n15["test: test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart"]
+    n16["test: test-user-http-lib-user-http-tests-account-session-cookie-issuance-production-cookies-have-host-prefix-and-secure-attributes"]
+    n17["test: test-user-http-lib-user-http-tests-account-session-session-cookie-input-tampered-and-duplicate-session-cookies-never-authenticate"]
+    n18["test: test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used"]
     n0 --> n1
     n1 --> n5
     n0 --> n2
@@ -63,16 +63,16 @@ flowchart TD
     n4 --> n9
     n4 --> n10
     n5 -->|asserts| n13
-    n5 -->|asserts| n15
+    n5 -->|asserts| n16
     n6 -->|asserts| n13
-    n6 -->|asserts| n16
+    n6 -->|asserts| n15
     n7 -->|asserts| n11
     n7 -->|exercises| n12
     n8 -->|asserts| n12
-    n9 -->|asserts| n16
+    n9 -->|asserts| n15
     n9 -->|asserts| n17
     n10 -->|asserts| n14
-    n10 -->|asserts| n16
+    n10 -->|asserts| n15
     n10 -->|asserts| n18
 ```
 
@@ -86,8 +86,8 @@ set_cookie は Domain を付けず Path=/・HttpOnly・SameSite=Lax・指定 Max
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L159)。
 
-- [test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract) (asserts): 開発用の logout Cookie が user_session=; で始まることを確認する。
-- [test-user-http-lib-user-http-tests-production-cookies-have-host-prefix-and-secure-attributes](#test-test-user-http-lib-user-http-tests-production-cookies-have-host-prefix-and-secure-attributes) (asserts): 本番のログイン Cookie が __Host-user_login で始まり Secure・HttpOnly・SameSite=Lax・Path=/・Max-Age=600 を持ち、Domain がないことを確認する。
+- [test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract) (asserts): 開発用の logout Cookie が user_session=; で始まることを確認する。
+- [test-user-http-lib-user-http-tests-account-session-cookie-issuance-production-cookies-have-host-prefix-and-secure-attributes](#test-test-user-http-lib-user-http-tests-account-session-cookie-issuance-production-cookies-have-host-prefix-and-secure-attributes) (asserts): 本番のログイン Cookie が __Host-user_login で始まり Secure・HttpOnly・SameSite=Lax・Path=/・Max-Age=600 を持ち、Domain がないことを確認する。
 
 未検証: 本番のセッション Cookie の属性と Max-Age、ログアウトの Max-Age=0 を直接比較する assertion はない。ログイン Cookie と共有する helper の証拠を本番セッションの直接検証と扱わない。
 
@@ -99,8 +99,8 @@ logout は Origin の完全一致と、存在する場合の Sec-Fetch-Site: sam
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L418)。
 
-- [test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract) (asserts): セッション Cookie のない同一 Origin の POST が 204 と空の開発用セッション Cookie を返すことを確認する。
-- [test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart) (asserts): Origin 欠落の 401、正しい Origin の 204、対象 token の 401 と別 token の 200 を確認する。
+- [test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract](#test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract) (asserts): セッション Cookie のない同一 Origin の POST が 204 と空の開発用セッション Cookie を返すことを確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): Origin 欠落の 401、正しい Origin の 204、対象 token の 401 と別 token の 200 を確認する。
 
 未検証: ログアウトの hostile Origin、cross-site の Sec-Fetch-Site、不正形式 Cookie、repository 削除失敗を直接確認する assertion はない。
 
@@ -112,8 +112,8 @@ AuthClient::authenticate はセッション Cookie を user HTTP の /me に送�
 
 実装位置: [crates/realtime-gateway/src/auth.rs](../../../crates/realtime-gateway/src/auth.rs#L87)。
 
-- [test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol](#test-test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol) (asserts): 存在しないが形式の正しい token は実 user HTTP に問い合わせて 401 となり、欠落・不正・重複 Cookie もハンドシェイクで拒否する。
-- [test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification) (exercises): 有効な user HTTP セッションで WebSocket 接続する。
+- [test-realtime-gateway-test-services-services-account-session-realtime-authentication-handshake-requires-exact-origin-unique-session-and-supported-subprotocol](#test-test-realtime-gateway-test-services-services-account-session-realtime-authentication-handshake-requires-exact-origin-unique-session-and-supported-subprotocol) (asserts): 存在しないが形式の正しい token は実 user HTTP に問い合わせて 401 となり、欠落・不正・重複 Cookie もハンドシェイクで拒否する。
+- [test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification) (exercises): 有効な user HTTP セッションで WebSocket 接続する。
 
 未検証: user HTTP のリダイレクト、非 200/401、壊れた・大きすぎる JSON、通信失敗の分岐をこの記録のテストは直接確認していない。
 
@@ -125,7 +125,7 @@ AuthClient::recheck は保存した Cookie で再認証し、接続開始時の 
 
 実装位置: [crates/realtime-gateway/src/auth.rs](../../../crates/realtime-gateway/src/auth.rs#L121)。
 
-- [test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification) (asserts): 実 HTTP logout の後のコマンドで接続が閉じ game seq が変わらず、DB で期限切れにした viewer は次の通知で閉じ、双方の再接続も 401 となることを確認する。
+- [test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification](#test-test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification) (asserts): 実 HTTP logout の後のコマンドで接続が閉じ game seq が変わらず、DB で期限切れにした viewer は次の通知で閉じ、双方の再接続も 401 となることを確認する。
 
 未検証: 別 UserId を返す応答と idle 接続の定期失効確認は直接確認しない。再確認は既存のコマンド・通知処理時の証拠である。
 
@@ -137,8 +137,8 @@ user HTTP の cookie は対象 Cookie を全 Cookie ヘッダーから探し、�
 
 実装位置: [crates/user-http/src/lib.rs](../../../crates/user-http/src/lib.rs#L136)。
 
-- [test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart) (asserts): Cookie のない GET /me が 401 となることを確認し、有効な Cookie でプロフィール取得を通る。
-- [test-user-http-lib-user-http-tests-tampered-and-duplicate-session-cookies-never-authenticate](#test-test-user-http-lib-user-http-tests-tampered-and-duplicate-session-cookies-never-authenticate) (asserts): 発行済み token の一文字改変と同じヘッダー内の重複 Cookie を GET /me の 401 で確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): Cookie のない GET /me が 401 となることを確認し、有効な Cookie でプロフィール取得を通る。
+- [test-user-http-lib-user-http-tests-account-session-session-cookie-input-tampered-and-duplicate-session-cookies-never-authenticate](#test-test-user-http-lib-user-http-tests-account-session-session-cookie-input-tampered-and-duplicate-session-cookies-never-authenticate) (asserts): 発行済み token の一文字改変と同じヘッダー内の重複 Cookie を GET /me の 401 で確認する。
 
 未検証: user HTTP 自体の複数 Cookie ヘッダー、非 hex と長さ境界は直接確認していない。realtime の Cookie 検証は別実装である。
 
@@ -150,9 +150,9 @@ auth_query は token_hash と expires_at &gt; now で session と account を結
 
 実装位置: [crates/user-persistence/src/lib.rs](../../../crates/user-persistence/src/lib.rs#L292)。
 
-- [test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values](#test-test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values) (asserts): 保存済み token_hash が Cookie の生値と異なり、その SHA-256 と一致することを確認する。
-- [test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart) (asserts): 実ルーターでログアウトした token が store の再接続後も 401 で、別 token は 200 であることを確認する。
-- [test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used](#test-test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used) (asserts): 期限の一秒前は認証でき、期限ちょうどは Unauthorized、logout 後は以前の時刻を渡しても認証できないことを確認する。
+- [test-user-http-lib-user-http-tests-account-google-login-http-attempt-persisted-browser-credentials-are-hashes-not-cookie-values](#test-test-user-http-lib-user-http-tests-account-google-login-http-attempt-persisted-browser-credentials-are-hashes-not-cookie-values) (asserts): 保存済み token_hash が Cookie の生値と異なり、その SHA-256 と一致することを確認する。
+- [test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart](#test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart) (asserts): 実ルーターでログアウトした token が store の再接続後も 401 で、別 token は 200 であることを確認する。
+- [test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used](#test-test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used) (asserts): 期限の一秒前は認証でき、期限ちょうどは Unauthorized、logout 後は以前の時刻を渡しても認証できないことを確認する。
 
 未検証: 破損プロフィールの decode と保存層障害の HTTP 503 変換はこの記録のテストで直接確認していない。
 
@@ -160,100 +160,100 @@ auth_query は token_hash と expires_at &gt; now で session と account を結
 
 コマンドは個別テストを厳密一致で選択する。保存層テストには TEST_DATABASE_URL と TEST_VALKEY_URL が必要な場合がある。
 
-<a id="test-test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol"></a>
+<a id="test-test-realtime-gateway-test-services-services-account-session-realtime-authentication-handshake-requires-exact-origin-unique-session-and-supported-subprotocol"></a>
 
-### test-realtime-gateway-test-services-handshake-requires-exact-origin-unique-session-and-supported-subprotocol
+### test-realtime-gateway-test-services-services-account-session-realtime-authentication-handshake-requires-exact-origin-unique-session-and-supported-subprotocol
 
-テスト位置: [crates/realtime-gateway/tests/trace/account-session/realtime-authentication/handshake_requires_exact_origin_unique_session_and_supported_subprotocol.rs](../../../crates/realtime-gateway/tests/trace/account-session/realtime-authentication/handshake_requires_exact_origin_unique_session_and_supported_subprotocol.rs#L9)。
+テスト位置: [crates/realtime-gateway/tests/trace/account-session/realtime-authentication/tests.rs](../../../crates/realtime-gateway/tests/trace/account-session/realtime-authentication/tests.rs#L11)。
 
 範囲: 実 user HTTP・PostgreSQL・gRPC・Valkey と WebSocket ハンドシェイク。未知 token の本人確認を含む。
 
 ```sh
-cargo test --locked -p realtime-gateway --test services handshake_requires_exact_origin_unique_session_and_supported_subprotocol -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services services::account_session_realtime_authentication::handshake_requires_exact_origin_unique_session_and_supported_subprotocol -- --exact --format pretty --color never
 ```
 
-<a id="test-test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification"></a>
+<a id="test-test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification"></a>
 
-### test-realtime-gateway-test-services-logout-closes-before-command-and-expiry-closes-before-notification
+### test-realtime-gateway-test-services-services-account-session-realtime-authentication-logout-closes-before-command-and-expiry-closes-before-notification
 
-テスト位置: [crates/realtime-gateway/tests/trace/account-session/realtime-authentication/logout_closes_before_command_and_expiry_closes_before_notification.rs](../../../crates/realtime-gateway/tests/trace/account-session/realtime-authentication/logout_closes_before_command_and_expiry_closes_before_notification.rs#L9)。
+テスト位置: [crates/realtime-gateway/tests/trace/account-session/realtime-authentication/tests.rs](../../../crates/realtime-gateway/tests/trace/account-session/realtime-authentication/tests.rs#L76)。
 
 範囲: 実サービス群と WebSocket。HTTP logout と SQL による期限切れを起こし、次のコマンド・通知の拒否を確認する。
 
 ```sh
-cargo test --locked -p realtime-gateway --test services logout_closes_before_command_and_expiry_closes_before_notification -- --exact --format pretty --color never
+cargo test --locked -p realtime-gateway --test services services::account_session_realtime_authentication::logout_closes_before_command_and_expiry_closes_before_notification -- --exact --format pretty --color never
 ```
 
-<a id="test-test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract"></a>
+<a id="test-test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract"></a>
 
-### test-user-http-lib-user-http-openapi-tests-runtime-rejection-status-and-media-match-documented-contract
+### test-user-http-lib-user-http-openapi-tests-account-profile-http-rename-runtime-rejection-status-and-media-match-documented-contract
 
-テスト位置: [crates/user-http/src/trace/account-profile/http-rename/runtime_rejection_status_and_media_match_documented_contract.rs](../../../crates/user-http/src/trace/account-profile/http-rename/runtime_rejection_status_and_media_match_documented_contract.rs#L9)。
+テスト位置: [crates/user-http/src/trace/account-profile/http-rename/tests.rs](../../../crates/user-http/src/trace/account-profile/http-rename/tests.rs#L11)。
 
 範囲: 依存先が呼ばれると panic する実ルーター。Cookie のない同一 Origin logout と入力拒否を確認する。
 
 ```sh
-cargo test --locked -p user-http --lib openapi_tests::runtime_rejection_status_and_media_match_documented_contract -- --exact --format pretty --color never
+cargo test --locked -p user-http --lib openapi_tests::account_profile_http_rename::runtime_rejection_status_and_media_match_documented_contract -- --exact --format pretty --color never
 ```
 
-<a id="test-test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values"></a>
+<a id="test-test-user-http-lib-user-http-tests-account-google-login-http-attempt-persisted-browser-credentials-are-hashes-not-cookie-values"></a>
 
-### test-user-http-lib-user-http-tests-persisted-browser-credentials-are-hashes-not-cookie-values
+### test-user-http-lib-user-http-tests-account-google-login-http-attempt-persisted-browser-credentials-are-hashes-not-cookie-values
 
-テスト位置: [crates/user-http/src/trace/account-google-login/http-attempt/persisted_browser_credentials_are_hashes_not_cookie_values.rs](../../../crates/user-http/src/trace/account-google-login/http-attempt/persisted_browser_credentials_are_hashes_not_cookie_values.rs#L9)。
+テスト位置: [crates/user-http/src/trace/account-google-login/http-attempt/tests.rs](../../../crates/user-http/src/trace/account-google-login/http-attempt/tests.rs#L161)。
 
 範囲: 偽 provider の実ルーターから PostgreSQL に保存された credential hash を読む。
 
 ```sh
-cargo test --locked -p user-http --lib tests::persisted_browser_credentials_are_hashes_not_cookie_values -- --exact --format pretty --color never
+cargo test --locked -p user-http --lib tests::account_google_login_http_attempt::persisted_browser_credentials_are_hashes_not_cookie_values -- --exact --format pretty --color never
 ```
 
-<a id="test-test-user-http-lib-user-http-tests-production-cookies-have-host-prefix-and-secure-attributes"></a>
+<a id="test-test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart"></a>
 
-### test-user-http-lib-user-http-tests-production-cookies-have-host-prefix-and-secure-attributes
+### test-user-http-lib-user-http-tests-account-profile-existing-identity-registration-profile-update-csrf-logout-and-restart
 
-テスト位置: [crates/user-http/src/trace/account-session/cookie-issuance/production_cookies_have_host_prefix_and_secure_attributes.rs](../../../crates/user-http/src/trace/account-session/cookie-issuance/production_cookies_have_host_prefix_and_secure_attributes.rs#L9)。
-
-範囲: HTTPS BrowserConfig の start 応答。ログイン Cookie のみを確認し、callback とセッション Cookie は通らない。
-
-```sh
-cargo test --locked -p user-http --lib tests::production_cookies_have_host_prefix_and_secure_attributes -- --exact --format pretty --color never
-```
-
-<a id="test-test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart"></a>
-
-### test-user-http-lib-user-http-tests-registration-profile-update-csrf-logout-and-restart
-
-テスト位置: [crates/user-http/src/trace/account-profile/existing-identity/registration_profile_update_csrf_logout_and_restart.rs](../../../crates/user-http/src/trace/account-profile/existing-identity/registration_profile_update_csrf_logout_and_restart.rs#L9)。
+テスト位置: [crates/user-http/src/trace/account-profile/existing-identity/tests.rs](../../../crates/user-http/src/trace/account-profile/existing-identity/tests.rs#L11)。
 
 範囲: 実 Axum ルーターと PostgreSQL。偽 provider で二つのセッションを作り、logout と再接続後の失効を確認する。
 
 ```sh
-cargo test --locked -p user-http --lib tests::registration_profile_update_csrf_logout_and_restart -- --exact --format pretty --color never
+cargo test --locked -p user-http --lib tests::account_profile_existing_identity::registration_profile_update_csrf_logout_and_restart -- --exact --format pretty --color never
 ```
 
-<a id="test-test-user-http-lib-user-http-tests-tampered-and-duplicate-session-cookies-never-authenticate"></a>
+<a id="test-test-user-http-lib-user-http-tests-account-session-cookie-issuance-production-cookies-have-host-prefix-and-secure-attributes"></a>
 
-### test-user-http-lib-user-http-tests-tampered-and-duplicate-session-cookies-never-authenticate
+### test-user-http-lib-user-http-tests-account-session-cookie-issuance-production-cookies-have-host-prefix-and-secure-attributes
 
-テスト位置: [crates/user-http/src/trace/account-session/session-cookie-input/tampered_and_duplicate_session_cookies_never_authenticate.rs](../../../crates/user-http/src/trace/account-session/session-cookie-input/tampered_and_duplicate_session_cookies_never_authenticate.rs#L9)。
+テスト位置: [crates/user-http/src/trace/account-session/cookie-issuance/tests.rs](../../../crates/user-http/src/trace/account-session/cookie-issuance/tests.rs#L11)。
+
+範囲: HTTPS BrowserConfig の start 応答。ログイン Cookie のみを確認し、callback とセッション Cookie は通らない。
+
+```sh
+cargo test --locked -p user-http --lib tests::account_session_cookie_issuance::production_cookies_have_host_prefix_and_secure_attributes -- --exact --format pretty --color never
+```
+
+<a id="test-test-user-http-lib-user-http-tests-account-session-session-cookie-input-tampered-and-duplicate-session-cookies-never-authenticate"></a>
+
+### test-user-http-lib-user-http-tests-account-session-session-cookie-input-tampered-and-duplicate-session-cookies-never-authenticate
+
+テスト位置: [crates/user-http/src/trace/account-session/session-cookie-input/tests.rs](../../../crates/user-http/src/trace/account-session/session-cookie-input/tests.rs#L11)。
 
 範囲: 実ルーターと PostgreSQL。発行 token の改変と同一ヘッダーの重複を確認する。
 
 ```sh
-cargo test --locked -p user-http --lib tests::tampered_and_duplicate_session_cookies_never_authenticate -- --exact --format pretty --color never
+cargo test --locked -p user-http --lib tests::account_session_session_cookie_input::tampered_and_duplicate_session_cookies_never_authenticate -- --exact --format pretty --color never
 ```
 
-<a id="test-test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used"></a>
+<a id="test-test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used"></a>
 
-### test-user-persistence-lib-user-persistence-tests-expired-attempts-and-sessions-cannot-be-used
+### test-user-persistence-lib-user-persistence-tests-account-google-login-attempt-consumption-expired-attempts-and-sessions-cannot-be-used
 
-テスト位置: [crates/user-persistence/src/trace/account-google-login/attempt-consumption/expired_attempts_and_sessions_cannot_be_used.rs](../../../crates/user-persistence/src/trace/account-google-login/attempt-consumption/expired_attempts_and_sessions_cannot_be_used.rs#L9)。
+テスト位置: [crates/user-persistence/src/trace/account-google-login/attempt-consumption/tests.rs](../../../crates/user-persistence/src/trace/account-google-login/attempt-consumption/tests.rs#L11)。
 
 範囲: 実 PostgreSQL に指定時刻を渡す repository の期限・失効検証。HTTP は通らない。
 
 ```sh
-cargo test --locked -p user-persistence --lib tests::expired_attempts_and_sessions_cannot_be_used -- --exact --format pretty --color never
+cargo test --locked -p user-persistence --lib tests::account_google_login_attempt_consumption::expired_attempts_and_sessions_cannot_be_used -- --exact --format pretty --color never
 ```
 
 ## 検査と根拠の限界

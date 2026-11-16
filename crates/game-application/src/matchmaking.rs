@@ -227,29 +227,5 @@ pub fn select_pair(tickets: &[Ticket], now: i64) -> Option<(&Ticket, &Ticket)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn ticket(n: u128, rating: i64, time: i64) -> Ticket {
-        Ticket {
-            user: UserId::new(format!("u{n}")).unwrap(),
-            id: TicketId(Uuid::from_u128(n)),
-            pool: Some(Pool::TenMinute30),
-            state: TicketState::Waiting(Waiting {
-                pool: Pool::TenMinute30,
-                rating: RatingState::from_parts(Some(rating), 1).unwrap(),
-                enqueued_at: time,
-                expires_at: 1_000_000,
-                heartbeat_seq: 0,
-            }),
-        }
-    }
-    include!("trace/matchmaking-pairing/selection/widening_is_bilateral_and_includes_boundary.rs");
-    include!(
-        "trace/matchmaking-pairing/selection/skips_unmatched_head_and_prefers_nearest_then_oldest_then_id.rs"
-    );
-    include!("trace/matchmaking-pairing/selection/extremes_expiry_and_pool_separation.rs");
-
-    include!(
-        "trace/matchmaking-pairing/selection/owner_scoped_equal_uuids_have_a_stable_opponent.rs"
-    );
-}
+#[path = "trace/matchmaking-pairing/selection/tests.rs"]
+mod tests;

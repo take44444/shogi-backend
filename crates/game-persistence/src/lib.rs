@@ -512,41 +512,4 @@ impl GameRepository for SeaOrmStore {
 mod trace_support;
 
 #[cfg(test)]
-#[path = "trace/startup-schema-isolation/feature.rs"]
-mod trace_feature_startup_schema_isolation;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/contract-browser-config/contract.rs"]
-mod trace_contract_startup_schema_isolation_contract_browser_config;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/contract-account-schema/contract.rs"]
-mod trace_contract_startup_schema_isolation_contract_account_schema;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/contract-game-schema/contract.rs"]
-mod trace_contract_startup_schema_isolation_contract_game_schema;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/reader-boundary/contract.rs"]
-mod trace_contract_startup_schema_isolation_reader_boundary;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/reader-permissions/contract.rs"]
-mod trace_contract_startup_schema_isolation_reader_permissions;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/process-config/contract.rs"]
-mod trace_contract_startup_schema_isolation_process_config;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/account-environment/contract.rs"]
-mod trace_contract_startup_schema_isolation_account_environment;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/game-process/contract.rs"]
-mod trace_contract_startup_schema_isolation_game_process;
-
-#[cfg(test)]
-#[path = "trace/startup-schema-isolation/reader-process/contract.rs"]
-mod trace_contract_startup_schema_isolation_reader_process;
+mod trace_metadata;

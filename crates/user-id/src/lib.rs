@@ -26,12 +26,8 @@ impl UserId {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    include!(
-        "trace/account-profile/user-id/preserves_valid_identifiers_and_rejects_byte_and_whitespace_boundaries.rs"
-    );
-}
+#[path = "trace/account-profile/user-id/tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]

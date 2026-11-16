@@ -360,27 +360,23 @@ impl From<Detail> for DetailDto {
     }
 }
 #[cfg(test)]
+#[path = "trace/public-record-detail/support.rs"]
 mod tests;
 
 #[cfg(test)]
+#[path = "trace/public-api-documents/support.rs"]
 mod openapi_tests;
 
 #[cfg(test)]
+#[path = "trace/public-record-search/http-resource-policy/tests.rs"]
 mod contract_tests;
 
 #[cfg(test)]
-fn unused_ratings() -> UserRatings {
-    struct Unused;
-    #[async_trait::async_trait]
-    impl game_record_application::ratings::RatingRepository for Unused {
-        async fn ratings(&self, _: &UserId) -> Result<UserRatingSnapshot, Error> {
-            panic!("route must not query ratings")
-        }
-    }
-    UserRatings::new(Arc::new(Unused))
-}
+#[path = "trace/public-record-detail/router_support.rs"]
+mod record_route_support;
 
 #[cfg(test)]
+#[path = "trace/user-ratings/support.rs"]
 mod rating_tests;
 
 #[cfg(test)]
@@ -388,117 +384,4 @@ mod rating_tests;
 mod trace_support;
 
 #[cfg(test)]
-#[path = "trace/public-api-documents/feature.rs"]
-mod trace_feature_public_api_documents;
-
-#[cfg(test)]
-#[path = "trace/public-api-documents/player-runtime/contract.rs"]
-mod trace_contract_public_api_documents_player_runtime;
-
-#[cfg(test)]
-#[path = "trace/public-api-documents/contract-player-schema/contract.rs"]
-mod trace_contract_public_api_documents_contract_player_schema;
-
-#[cfg(test)]
-#[path = "trace/public-api-documents/user-runtime/contract.rs"]
-mod trace_contract_public_api_documents_user_runtime;
-
-#[cfg(test)]
-#[path = "trace/public-api-documents/contract-user-schema/contract.rs"]
-mod trace_contract_public_api_documents_contract_user_schema;
-
-#[cfg(test)]
-#[path = "trace/public-api-documents/gateway-schema/contract.rs"]
-mod trace_contract_public_api_documents_gateway_schema;
-
-#[cfg(test)]
-#[path = "trace/public-api-documents/example-exports/contract.rs"]
-mod trace_contract_public_api_documents_example_exports;
-
-#[cfg(test)]
-#[path = "trace/public-record-detail/feature.rs"]
-mod trace_feature_public_record_detail;
-
-#[cfg(test)]
-#[path = "trace/public-record-detail/http-boundary/contract.rs"]
-mod trace_contract_public_record_detail_http_boundary;
-
-#[cfg(test)]
-#[path = "trace/public-record-detail/public-dto/contract.rs"]
-mod trace_contract_public_record_detail_public_dto;
-
-#[cfg(test)]
-#[path = "trace/public-record-detail/metadata-invariants/contract.rs"]
-mod trace_contract_public_record_detail_metadata_invariants;
-
-#[cfg(test)]
-#[path = "trace/public-record-detail/application-forwarding/contract.rs"]
-mod trace_contract_public_record_detail_application_forwarding;
-
-#[cfg(test)]
-#[path = "trace/public-record-detail/snapshot-history/contract.rs"]
-mod trace_contract_public_record_detail_snapshot_history;
-
-#[cfg(test)]
-#[path = "trace/public-record-search/feature.rs"]
-mod trace_feature_public_record_search;
-
-#[cfg(test)]
-#[path = "trace/public-record-search/query-boundary/contract.rs"]
-mod trace_contract_public_record_search_query_boundary;
-
-#[cfg(test)]
-#[path = "trace/public-record-search/bounds-cursor/contract.rs"]
-mod trace_contract_public_record_search_bounds_cursor;
-
-#[cfg(test)]
-#[path = "trace/public-record-search/application-forwarding/contract.rs"]
-mod trace_contract_public_record_search_application_forwarding;
-
-#[cfg(test)]
-#[path = "trace/public-record-search/public-keysets/contract.rs"]
-mod trace_contract_public_record_search_public_keysets;
-
-#[cfg(test)]
-#[path = "trace/public-record-search/http-resource-policy/contract.rs"]
-mod trace_contract_public_record_search_http_resource_policy;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/feature.rs"]
-mod trace_feature_user_ratings;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/http-pools/contract.rs"]
-mod trace_contract_user_ratings_http_pools;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/application-forwarding/contract.rs"]
-mod trace_contract_user_ratings_application_forwarding;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/postgres-snapshot/contract.rs"]
-mod trace_contract_user_ratings_postgres_snapshot;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/rating-state/contract.rs"]
-mod trace_contract_user_ratings_rating_state;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/user-id/contract.rs"]
-mod trace_contract_user_ratings_user_id;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/http-input/contract.rs"]
-mod trace_contract_user_ratings_http_input;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/http-unavailable/contract.rs"]
-mod trace_contract_user_ratings_http_unavailable;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/http-cache/contract.rs"]
-mod trace_contract_user_ratings_http_cache;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/http-openapi/contract.rs"]
-mod trace_contract_user_ratings_http_openapi;
+mod trace_metadata;

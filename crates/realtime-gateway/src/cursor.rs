@@ -153,21 +153,5 @@ pub(crate) fn result_json(result: Option<shogi_domain::GameResult>) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use game_application::{GameId, RequestId, UserId};
-    use shogi_domain::{FinishReason, GameResult, Player};
-    fn event(seq: u64, fact: DomainEvent) -> Notification {
-        Notification(CommittedEvent {
-            game_id: GameId::new("g").unwrap(),
-            request_id: RequestId::new("r").unwrap(),
-            user_id: UserId::new("u").unwrap(),
-            seq,
-            event: fact,
-        })
-    }
-    include!("trace/realtime-game-feed/cursor/same_sequence_checkmate_pair_and_conflicts.rs");
-    include!(
-        "trace/realtime-game-feed/cursor/gaps_and_unpaired_checkmate_finish_require_resync.rs"
-    );
-}
+#[path = "trace/realtime-game-feed/cursor/tests.rs"]
+mod tests;

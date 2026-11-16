@@ -209,8 +209,5 @@ impl Error for ApplicationError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    include!("trace/game-play/binding/participant_bindings_are_distinct_and_preserve_sides.rs");
-}
+#[path = "trace/game-play/binding/tests.rs"]
+mod tests;

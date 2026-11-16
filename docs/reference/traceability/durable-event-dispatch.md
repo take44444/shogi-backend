@@ -54,14 +54,14 @@ flowchart TD
     n17["test: test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-cancelled-publication-cannot-reuse-a-connection-or-reconnect"]
     n18["test: test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-outbox-marks-only-after-a-valid-publish-response-including-no-subscribers"]
     n19["test: test-game-messaging-lib-game-messaging-transport-tests-confirmed-dispatch-publication-timeout-leaves-the-outbox-pending"]
-    n20["test: test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"]
-    n21["test: test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"]
-    n22["test: test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once"]
-    n23["test: test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes"]
-    n24["test: test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened"]
-    n25["test: test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue"]
-    n26["test: test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop"]
-    n27["test: test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed"]
+    n20["test: test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"]
+    n21["test: test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"]
+    n22["test: test-game-persistence-test-outbox-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once"]
+    n23["test: test-game-persistence-test-outbox-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes"]
+    n24["test: test-game-persistence-test-outbox-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened"]
+    n25["test: test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue"]
+    n26["test: test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop"]
+    n27["test: test-game-persistence-test-outbox-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed"]
     n0 --> n1
     n1 --> n7
     n1 --> n6
@@ -104,9 +104,9 @@ The repository commit persists the accepted receipt and frozen outbox rows in th
 
 実装位置: [crates/game-persistence/src/lib.rs](../../../crates/game-persistence/src/lib.rs#L388)。
 
-- [test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events](#test-test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events) (asserts): An enqueue-failing trigger rolls back game metadata, journal and outbox.
-- [test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Real database assertions count events after replay, rejection and restoration and prove payload remains frozen after journal mutation.
-- [test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once](#test-test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once) (asserts): Retry after an uncertain real commit yields one outbox row.
+- [test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events) (asserts): An enqueue-failing trigger rolls back game metadata, journal and outbox.
+- [test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Real database assertions count events after replay, rejection and restoration and prove payload remains frozen after journal mutation.
+- [test-game-persistence-test-outbox-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once) (asserts): Retry after an uncertain real commit yields one outbox row.
 
 <a id="contract-canonical-facts"></a>
 
@@ -142,12 +142,12 @@ PostgresOutbox uses one nonreconnecting advisory-locked session for ordered read
 
 実装位置: [crates/game-persistence/src/outbox.rs](../../../crates/game-persistence/src/outbox.rs#L118)。
 
-- [test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Real PostgreSQL returns the frozen move before the sequence-two finish; marking the first row twice still leaves the finish pending.
-- [test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes](#test-test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes) (asserts): A real queue round trip preserves game, request and participant identifiers containing NUL and backslashes.
-- [test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened](#test-test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened) (asserts): Terminating the owning database session causes the old queue to fail; a replacement resumes the same pending event.
-- [test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue](#test-test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue) (asserts): At the delivery boundary PostgreSQL reports no open transaction and another writer can commit.
-- [test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop](#test-test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop) (asserts): A child process cannot acquire the publisher lock until the owner drops it.
-- [test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed](#test-test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed) (asserts): Changing a persisted event encoding version to 99 makes next_pending return Corrupt.
+- [test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload](#test-test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload) (asserts): Real PostgreSQL returns the frozen move before the sequence-two finish; marking the first row twice still leaves the finish pending.
+- [test-game-persistence-test-outbox-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes](#test-test-game-persistence-test-outbox-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes) (asserts): A real queue round trip preserves game, request and participant identifiers containing NUL and backslashes.
+- [test-game-persistence-test-outbox-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened](#test-test-game-persistence-test-outbox-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened) (asserts): Terminating the owning database session causes the old queue to fail; a replacement resumes the same pending event.
+- [test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue](#test-test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue) (asserts): At the delivery boundary PostgreSQL reports no open transaction and another writer can commit.
+- [test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop](#test-test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop) (asserts): A child process cannot acquire the publisher lock until the owner drops it.
+- [test-game-persistence-test-outbox-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed](#test-test-game-persistence-test-outbox-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed) (asserts): Changing a persisted event encoding version to 99 makes next_pending return Corrupt.
 
 未検証: The delivery-boundary fixture observes database state and subsequent writes. It is not an all-components test stalled on a real broker.
 
@@ -275,100 +275,100 @@ cargo test --locked -p game-messaging --lib transport_tests::confirmed_dispatch:
 cargo test --locked -p game-messaging --lib transport_tests::confirmed_dispatch::publication_timeout_leaves_the_outbox_pending -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events"></a>
 
-### test-game-persistence-test-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events
+### test-game-persistence-test-outbox-outbox-atomic-outbox-failed-enqueue-rolls-back-metadata-journal-and-events
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L76)。
 
 範囲: Real PostgreSQL trigger-injected enqueue failure and rollback.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox atomic_outbox::failed_enqueue_rolls_back_metadata_journal_and_events -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::failed_enqueue_rolls_back_metadata_journal_and_events -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload"></a>
 
-### test-game-persistence-test-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload
+### test-game-persistence-test-outbox-outbox-atomic-outbox-retry-rejection-restoration-and-frozen-payload
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L11)。
 
 範囲: Real PostgreSQL writer/outbox persistence, replay, rejection, restoration and frozen payload.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox atomic_outbox::retry_rejection_restoration_and_frozen_payload -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::retry_rejection_restoration_and_frozen_payload -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once"></a>
 
-### test-game-persistence-test-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once
+### test-game-persistence-test-outbox-outbox-atomic-outbox-uncertain-commit-and-retry-enqueue-once
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs#L104)。
 
 範囲: Real PostgreSQL uncertain commit injection and idempotent retry.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox atomic_outbox::uncertain_commit_and_retry_enqueue_once -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::atomic_outbox::uncertain_commit_and_retry_enqueue_once -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes"></a>
 
-### test-game-persistence-test-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes
+### test-game-persistence-test-outbox-outbox-exclusive-queue-frozen-events-preserve-identifiers-with-nul-and-backslashes
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L139)。
 
 範囲: Real PostgreSQL frozen-event identifier preservation and exact-row marking.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox exclusive_queue::frozen_events_preserve_identifiers_with_nul_and_backslashes -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::exclusive_queue::frozen_events_preserve_identifiers_with_nul_and_backslashes -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened"></a>
 
-### test-game-persistence-test-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened
+### test-game-persistence-test-outbox-outbox-exclusive-queue-lost-publisher-session-fails-closed-and-pending-work-can-be-reopened
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L84)。
 
 範囲: Real PostgreSQL session termination and replacement queue.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox exclusive_queue::lost_publisher_session_fails_closed_and_pending_work_can_be_reopened -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::exclusive_queue::lost_publisher_session_fails_closed_and_pending_work_can_be_reopened -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue"></a>
 
-### test-game-persistence-test-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue
+### test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-holds-no-transaction-while-awaiting-delivery-and-writes-continue
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L49)。
 
 範囲: Real PostgreSQL delivery-boundary observation with a test publisher.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox exclusive_queue::publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::exclusive_queue::publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop"></a>
 
-### test-game-persistence-test-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop
+### test-game-persistence-test-outbox-outbox-exclusive-queue-publisher-session-lock-excludes-a-second-process-and-releases-on-drop
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L11)。
 
 範囲: Real PostgreSQL lock owner and spawned lock-probe process; registers the driver rather than the inert helper.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox exclusive_queue::publisher_session_lock_excludes_a_second_process_and_releases_on_drop -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::exclusive_queue::publisher_session_lock_excludes_a_second_process_and_releases_on_drop -- --exact --format pretty --color never
 ```
 
-<a id="test-test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed"></a>
+<a id="test-test-game-persistence-test-outbox-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed"></a>
 
-### test-game-persistence-test-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed
+### test-game-persistence-test-outbox-outbox-exclusive-queue-unsupported-frozen-encoding-fails-closed
 
 テスト位置: [crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs](../../../crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs#L118)。
 
 範囲: Real PostgreSQL pending-event decoding rejects an unsupported encoding version.
 
 ```sh
-cargo test --locked -p game-persistence --test outbox exclusive_queue::unsupported_frozen_encoding_fails_closed -- --exact --format pretty --color never
+cargo test --locked -p game-persistence --test outbox outbox::exclusive_queue::unsupported_frozen_encoding_fails_closed -- --exact --format pretty --color never
 ```
 
 ## 検査と根拠の限界
