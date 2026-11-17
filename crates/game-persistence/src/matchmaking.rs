@@ -10,6 +10,8 @@ use sea_orm::sea_query::{Expr, ExprTrait, OnConflict, Order, Query};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, QueryResult, TransactionTrait};
 use shogi_domain::Player;
 
+const READY_TIMEOUT_MS: i64 = 15_000;
+
 pub(crate) async fn admission_lock(tx: &DatabaseTransaction) -> Result<(), Error> {
     tx.execute_unprepared("SELECT pg_advisory_xact_lock(6001133723959083849)")
         .await
@@ -39,13 +41,13 @@ fn decode(row: QueryResult) -> Result<Ticket, Error> {
         .map_err(corrupt)?
         .map(|s| Pool::parse(&s).map_err(corrupt))
         .transpose()?;
-    let game = || -> Result<(GameId, Player), Error> {
+    let game = |id_column: &str, side_column: &str| -> Result<(GameId, Player), Error> {
         Ok((
             GameId::new(decode_id(
-                &row.try_get::<String>("", "game_id").map_err(corrupt)?,
+                &row.try_get::<String>("", id_column).map_err(corrupt)?,
             )?)
             .map_err(corrupt)?,
-            match row.try_get::<i32>("", "side").map_err(corrupt)? {
+            match row.try_get::<i32>("", side_column).map_err(corrupt)? {
                 1 => Player::Black,
                 2 => Player::White,
                 _ => return Err(Error::Corrupt),
@@ -68,13 +70,26 @@ fn decode(row: QueryResult) -> Result<Ticket, Error> {
             expires_at: row.try_get("", "expires_at").map_err(corrupt)?,
             heartbeat_seq: row.try_get("", "heartbeat_seq").map_err(corrupt)?,
         }),
+        "matched" => {
+            let (game_id, side) = game("prospective_game_id", "matched_side")?;
+            TicketState::Matched {
+                game_id,
+                side,
+                ready: row.try_get("", "ready").map_err(corrupt)?,
+                ready_deadline: row.try_get("", "ready_deadline").map_err(corrupt)?,
+            }
+        }
         "playing" => {
-            let (game_id, side) = game()?;
+            let (game_id, side) = game("game_id", "side")?;
             TicketState::Playing { game_id, side }
         }
         "finished" => {
-            let (game_id, side) = game()?;
+            let (game_id, side) = game("game_id", "side")?;
             TicketState::Finished { game_id, side }
+        }
+        "voided" => {
+            let (game_id, side) = game("prospective_game_id", "matched_side")?;
+            TicketState::Voided { game_id, side }
         }
         "cancelled" => TicketState::Cancelled,
         "expired" => TicketState::Expired,
@@ -85,6 +100,7 @@ fn decode(row: QueryResult) -> Result<Ticket, Error> {
                 .as_str()
             {
                 "already_waiting" => RefusalReason::AlreadyWaiting,
+                "already_matched" => RefusalReason::AlreadyMatched,
                 "already_playing" => RefusalReason::AlreadyPlaying,
                 "rating_pending" => RefusalReason::RatingPending,
                 _ => return Err(Error::Corrupt),
@@ -120,6 +136,88 @@ async fn read(
     .map(decode)
     .transpose()
 }
+
+struct MatchedPair {
+    tickets: [Ticket; 2],
+    players: Participants,
+    pool: Pool,
+    deadline: i64,
+    starts: [RatingState; 2],
+}
+async fn matched_pair(tx: &DatabaseTransaction, id: &GameId) -> Result<MatchedPair, Error> {
+    let rows = tx
+        .query_all(
+            Query::select()
+                .column(sea_orm::sea_query::Asterisk)
+                .from(a("matchmaking_tickets"))
+                .and_where(Expr::col(a("prospective_game_id")).eq(encode_id(id.as_str())))
+                .order_by(a("matched_side"), Order::Asc)
+                .lock_exclusive(),
+        )
+        .await
+        .map_err(storage)?;
+    let [black, white]: [QueryResult; 2] = rows.try_into().map_err(|_| Error::Corrupt)?;
+    let mut tickets = Vec::new();
+    let mut starts = Vec::new();
+    let mut shared = None;
+    for (row, side) in [(black, Player::Black), (white, Player::White)] {
+        starts.push(
+            RatingState::from_parts(
+                row.try_get("", "rating").map_err(corrupt)?,
+                row.try_get("", "completed").map_err(corrupt)?,
+            )
+            .map_err(corrupt)?,
+        );
+        let ticket = decode(row)?;
+        let TicketState::Matched {
+            game_id,
+            side: stored_side,
+            ready_deadline,
+            ..
+        } = &ticket.state
+        else {
+            return Err(Error::Corrupt);
+        };
+        let pool = ticket.pool.ok_or(Error::Corrupt)?;
+        if game_id != id || *stored_side != side {
+            return Err(Error::Corrupt);
+        }
+        match shared {
+            Some((prior_pool, deadline)) if prior_pool != pool || deadline != *ready_deadline => {
+                return Err(Error::Corrupt);
+            }
+            None => shared = Some((pool, *ready_deadline)),
+            _ => {}
+        }
+        tickets.push(ticket);
+    }
+    let [black, white]: [Ticket; 2] = tickets.try_into().map_err(|_| Error::Corrupt)?;
+    let players = Participants::new(black.user.clone(), white.user.clone()).map_err(corrupt)?;
+    let (pool, deadline) = shared.ok_or(Error::Corrupt)?;
+    Ok(MatchedPair {
+        tickets: [black, white],
+        players,
+        pool,
+        deadline,
+        starts: starts.try_into().map_err(|_| Error::Corrupt)?,
+    })
+}
+async fn void_pair(tx: &DatabaseTransaction, id: &GameId) -> Result<(), Error> {
+    let result = tx
+        .execute(
+            Query::update()
+                .table(a("matchmaking_tickets"))
+                .value(a("state"), "voided")
+                .and_where(Expr::col(a("prospective_game_id")).eq(encode_id(id.as_str())))
+                .and_where(Expr::col(a("state")).eq("matched")),
+        )
+        .await
+        .map_err(storage)?;
+    if result.rows_affected() != 2 {
+        return Err(Error::Corrupt);
+    }
+    Ok(())
+}
 async fn expire(tx: &DatabaseTransaction, user: Option<&UserId>) -> Result<(), Error> {
     let mut locks = Query::select();
     locks
@@ -143,6 +241,31 @@ async fn expire(tx: &DatabaseTransaction, user: Option<&UserId>) -> Result<(), E
         query.and_where(owner(user));
     }
     tx.execute(&query).await.map_err(storage)?;
+    let mut matches = Query::select();
+    matches
+        .column(a("prospective_game_id"))
+        .from(a("matchmaking_tickets"))
+        .and_where(Expr::col(a("state")).eq("matched"))
+        .order_by(a("user_id"), Order::Asc)
+        .order_by(a("ticket_id"), Order::Asc)
+        .lock_exclusive();
+    if let Some(user) = user {
+        matches.and_where(owner(user));
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for row in tx.query_all(&matches).await.map_err(storage)? {
+        ids.insert(
+            row.try_get::<String>("", "prospective_game_id")
+                .map_err(corrupt)?,
+        );
+    }
+    for id in ids {
+        let id = GameId::new(decode_id(&id)?).map_err(corrupt)?;
+        let pair = matched_pair(tx, &id).await?;
+        if now(tx).await? >= pair.deadline {
+            void_pair(tx, &id).await?;
+        }
+    }
     Ok(())
 }
 async fn active(tx: &DatabaseTransaction, user: &UserId) -> Result<Option<Ticket>, Error> {
@@ -151,7 +274,7 @@ async fn active(tx: &DatabaseTransaction, user: &UserId) -> Result<Option<Ticket
             .column(sea_orm::sea_query::Asterisk)
             .from(a("matchmaking_tickets"))
             .and_where(owner(user))
-            .and_where(Expr::col(a("state")).is_in(["waiting", "playing"]))
+            .and_where(Expr::col(a("state")).is_in(["waiting", "matched", "playing"]))
             .lock_exclusive(),
     )
     .await
@@ -234,13 +357,15 @@ impl MatchmakingRepository for SeaOrmStore {
                 created: false,
             });
         }
+        let rating = locked_rating(&tx, &user, pool).await?;
+        expire(&tx, Some(&user)).await?;
         let reason = match active(&tx, &user).await?.map(|t| t.state) {
             Some(TicketState::Waiting(_)) => Some(RefusalReason::AlreadyWaiting),
+            Some(TicketState::Matched { .. }) => Some(RefusalReason::AlreadyMatched),
             Some(TicketState::Playing { .. }) => Some(RefusalReason::AlreadyPlaying),
             Some(_) => return Err(MError::Corrupt),
             None => None,
         };
-        let rating = locked_rating(&tx, &user, pool).await?;
         let reason = if reason.is_some() {
             reason
         } else if reserved(&tx, &user, pool).await? {
@@ -305,13 +430,6 @@ impl MatchmakingRepository for SeaOrmStore {
         tx.commit().await.map_err(storage)?;
         Ok(result)
     }
-    async fn ticket(&self, user: &UserId, id: TicketId) -> Result<Ticket, MError> {
-        let tx = begin(self).await?;
-        expire(&tx, Some(user)).await?;
-        let ticket = read(&tx, user, id).await?.ok_or(MError::NotFound)?;
-        tx.commit().await.map_err(storage)?;
-        Ok(ticket)
-    }
     async fn heartbeat(
         &self,
         user: &UserId,
@@ -319,6 +437,7 @@ impl MatchmakingRepository for SeaOrmStore {
         sequence: HeartbeatSequence,
     ) -> Result<Ticket, MError> {
         let tx = begin(self).await?;
+        expire(&tx, Some(user)).await?;
         let ticket = read(&tx, user, id).await?.ok_or(MError::NotFound)?;
         let time = now(&tx).await?;
         if let TicketState::Waiting(waiting) = ticket.state {
@@ -347,6 +466,7 @@ impl MatchmakingRepository for SeaOrmStore {
     }
     async fn cancel(&self, user: &UserId, id: TicketId) -> Result<Ticket, MError> {
         let tx = begin(self).await?;
+        expire(&tx, Some(user)).await?;
         let ticket = read(&tx, user, id).await?;
         if let Some(ticket) = ticket {
             if let TicketState::Waiting(waiting) = ticket.state {
@@ -377,6 +497,85 @@ impl MatchmakingRepository for SeaOrmStore {
             )
             .await
             .map_err(storage)?;
+        }
+        let ticket = read(&tx, user, id).await?.ok_or(MError::Corrupt)?;
+        tx.commit().await.map_err(storage)?;
+        Ok(ticket)
+    }
+    async fn ready(&self, user: &UserId, id: TicketId) -> Result<Ticket, MError> {
+        let tx = begin(self).await?;
+        expire(&tx, Some(user)).await?;
+        let ticket = read(&tx, user, id).await?.ok_or(MError::NotFound)?;
+        let TicketState::Matched { ref game_id, .. } = ticket.state else {
+            tx.commit().await.map_err(storage)?;
+            return Ok(ticket);
+        };
+        let mut pair = matched_pair(&tx, game_id).await?;
+        if now(&tx).await? >= pair.deadline {
+            void_pair(&tx, game_id).await?;
+        } else {
+            let own = pair
+                .tickets
+                .iter_mut()
+                .find(|ticket| &ticket.user == user && ticket.id == id)
+                .ok_or(MError::Corrupt)?;
+            let TicketState::Matched { ready, .. } = &mut own.state else {
+                return Err(MError::Corrupt);
+            };
+            if !*ready {
+                let result = tx
+                    .execute(
+                        Query::update()
+                            .table(a("matchmaking_tickets"))
+                            .value(a("ready"), true)
+                            .and_where(identity(user, id))
+                            .and_where(Expr::col(a("state")).eq("matched")),
+                    )
+                    .await
+                    .map_err(storage)?;
+                if result.rows_affected() != 1 {
+                    return Err(MError::Corrupt);
+                }
+                *ready = true;
+            }
+            if pair
+                .tickets
+                .iter()
+                .all(|ticket| matches!(ticket.state, TicketState::Matched { ready: true, .. }))
+            {
+                let starts = rating::locked_states(&tx, &pair.players, pair.pool).await?;
+                for ticket in &pair.tickets {
+                    if reserved(&tx, &ticket.user, pair.pool).await? {
+                        return Err(MError::Corrupt);
+                    }
+                }
+                if now(&tx).await? >= pair.deadline {
+                    void_pair(&tx, game_id).await?;
+                } else {
+                    if starts != pair.starts {
+                        return Err(MError::Corrupt);
+                    }
+                    rating::insert_rated(&tx, game_id, &pair.players, pair.pool, starts).await?;
+                    let result = tx
+                        .execute(
+                            Query::update()
+                                .table(a("matchmaking_tickets"))
+                                .value(a("state"), "playing")
+                                .value(a("game_id"), encode_id(game_id.as_str()))
+                                .value(a("side"), Expr::col(a("matched_side")))
+                                .and_where(
+                                    Expr::col(a("prospective_game_id"))
+                                        .eq(encode_id(game_id.as_str())),
+                                )
+                                .and_where(Expr::col(a("state")).eq("matched")),
+                        )
+                        .await
+                        .map_err(storage)?;
+                    if result.rows_affected() != 2 {
+                        return Err(MError::Corrupt);
+                    }
+                }
+            }
         }
         let ticket = read(&tx, user, id).await?.ok_or(MError::Corrupt)?;
         tx.commit().await.map_err(storage)?;
@@ -438,26 +637,33 @@ impl MatchmakingRepository for SeaOrmStore {
             return Ok(None);
         }
         let id = GameId::new(uuid::Uuid::new_v4().to_string()).map_err(|_| MError::Corrupt)?;
-        rating::insert_rated(&tx, &id, &players, pool, starts).await?;
         for ticket in &locked {
-            tx.execute(
-                Query::update()
-                    .table(a("matchmaking_tickets"))
-                    .value(a("state"), "playing")
-                    .value(a("game_id"), encode_id(id.as_str()))
-                    .value(
-                        a("side"),
-                        if &ticket.user == players.black() {
-                            1_i32
-                        } else {
-                            2_i32
-                        },
-                    )
-                    .and_where(identity(&ticket.user, ticket.id)),
-            )
-            .await
-            .map_err(storage)?;
+            let result = tx
+                .execute(
+                    Query::update()
+                        .table(a("matchmaking_tickets"))
+                        .value(a("state"), "matched")
+                        .value(a("prospective_game_id"), encode_id(id.as_str()))
+                        .value(a("ready"), false)
+                        .value(a("ready_deadline"), time + READY_TIMEOUT_MS)
+                        .value(
+                            a("matched_side"),
+                            if &ticket.user == players.black() {
+                                1_i32
+                            } else {
+                                2_i32
+                            },
+                        )
+                        .and_where(identity(&ticket.user, ticket.id))
+                        .and_where(Expr::col(a("state")).eq("waiting")),
+                )
+                .await
+                .map_err(storage)?;
+            if result.rows_affected() != 1 {
+                return Err(MError::Corrupt);
+            }
         }
+        matched_pair(&tx, &id).await?;
         tx.commit().await.map_err(storage)?;
         Ok(Some(id))
     }

@@ -52,6 +52,8 @@ mod trace_contract_game_snapshots_access_viewer_read;
 mod trace_contract_matchmaking_pairing_durable_tick;
 #[path = "trace/matchmaking-pairing/periodic/contract.rs"]
 mod trace_contract_matchmaking_pairing_periodic;
+#[path = "trace/matchmaking-pairing/readiness/contract.rs"]
+mod trace_contract_matchmaking_pairing_readiness;
 #[path = "trace/matchmaking-pairing/selection/contract.rs"]
 mod trace_contract_matchmaking_pairing_selection;
 #[path = "trace/matchmaking-pairing/windows/contract.rs"]
@@ -66,10 +68,10 @@ mod trace_contract_matchmaking_tickets_browser_response;
 mod trace_contract_matchmaking_tickets_browser_schema;
 #[path = "trace/matchmaking-tickets/cancel/contract.rs"]
 mod trace_contract_matchmaking_tickets_cancel;
+#[path = "trace/matchmaking-tickets/current/contract.rs"]
+mod trace_contract_matchmaking_tickets_current;
 #[path = "trace/matchmaking-tickets/heartbeat/contract.rs"]
 mod trace_contract_matchmaking_tickets_heartbeat;
-#[path = "trace/matchmaking-tickets/reads/contract.rs"]
-mod trace_contract_matchmaking_tickets_reads;
 #[path = "trace/matchmaking-tickets/rpc-boundary/contract.rs"]
 mod trace_contract_matchmaking_tickets_rpc_boundary;
 #[path = "trace/rating-application/atomic-application/contract.rs"]

@@ -8,7 +8,7 @@ mod public_record_search_public_keysets;
 async fn initialize(url: &str) {
     let pool = PgPool::connect(url).await.unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../../game-persistence/tests/fixtures/schema-v7.sql"
+        "../../../../game-persistence/tests/fixtures/schema-v8.sql"
     ))
     .execute(&pool)
     .await

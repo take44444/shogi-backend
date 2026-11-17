@@ -67,19 +67,6 @@ impl proto::game_service_server::GameService for GameRpc {
         };
         Ok(Response::new(proto::MatchmakingCurrent { ticket }))
     }
-    async fn get_matchmaking_ticket(
-        &self,
-        request: Request<proto::MatchmakingRequest>,
-    ) -> Result<Response<proto::MatchmakingTicket>, Status> {
-        let request = request.into_inner();
-        let (user, id) = owner_ticket(request.user_id, request.ticket_id)?;
-        Ok(Response::new(ticket_message(
-            self.matchmaking
-                .ticket(&user, id)
-                .await
-                .map_err(matchmaking_status)?,
-        )))
-    }
     async fn heartbeat_matchmaking(
         &self,
         request: Request<proto::HeartbeatMatchmakingRequest>,
@@ -91,6 +78,19 @@ impl proto::game_service_server::GameService for GameRpc {
         Ok(Response::new(ticket_message(
             self.matchmaking
                 .heartbeat(&user, id, sequence)
+                .await
+                .map_err(matchmaking_status)?,
+        )))
+    }
+    async fn ready_matchmaking(
+        &self,
+        request: Request<proto::MatchmakingRequest>,
+    ) -> Result<Response<proto::MatchmakingTicket>, Status> {
+        let request = request.into_inner();
+        let (user, id) = owner_ticket(request.user_id, request.ticket_id)?;
+        Ok(Response::new(ticket_message(
+            self.matchmaking
+                .ready(&user, id)
                 .await
                 .map_err(matchmaking_status)?,
         )))
@@ -226,6 +226,29 @@ fn ticket_message(ticket: Ticket) -> proto::MatchmakingTicket {
             message.expires_at = Some(waiting.expires_at);
             message.heartbeat_sequence = Some(waiting.heartbeat_seq);
             "waiting"
+        }
+        TicketState::Matched {
+            game_id,
+            side,
+            ready,
+            ready_deadline,
+        } => {
+            message.game_id = Some(game_id.as_str().into());
+            message.side = Some(match side {
+                shogi_domain::Player::Black => 1,
+                shogi_domain::Player::White => 2,
+            });
+            message.ready = Some(ready);
+            message.ready_deadline = Some(ready_deadline);
+            "matched"
+        }
+        TicketState::Voided { game_id, side } => {
+            message.game_id = Some(game_id.as_str().into());
+            message.side = Some(match side {
+                shogi_domain::Player::Black => 1,
+                shogi_domain::Player::White => 2,
+            });
+            "voided"
         }
         TicketState::Playing { game_id, side } => {
             message.game_id = Some(game_id.as_str().into());

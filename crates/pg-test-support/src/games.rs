@@ -70,7 +70,7 @@ pub async fn seed_game(
     let mut tx = c.begin().await.map_err(failure)?;
     insert_game(&mut tx, id, players).await?;
     for (user, side) in [(players.black(), 1), (players.white(), 2)] {
-        sqlx::query("INSERT INTO matchmaking_tickets(user_id,ticket_id,pool,state,enqueued_at,expires_at,rating,completed,heartbeat_seq,game_id,side) VALUES($1,$2,'ten_minute_30','playing',0,1,NULL,0,0,$3,$4)").bind(encoded(user.as_str())).bind(uuid::Uuid::new_v4().to_string()).bind(encoded(id.as_str())).bind(side).execute(&mut *tx).await.map_err(failure)?;
+        sqlx::query("INSERT INTO matchmaking_tickets(user_id,ticket_id,pool,state,enqueued_at,expires_at,rating,completed,heartbeat_seq,game_id,side,prospective_game_id,matched_side,ready,ready_deadline) VALUES($1,$2,'ten_minute_30','playing',0,1,NULL,0,0,$3,$4,$3,$4,TRUE,30000)").bind(encoded(user.as_str())).bind(uuid::Uuid::new_v4().to_string()).bind(encoded(id.as_str())).bind(side).execute(&mut *tx).await.map_err(failure)?;
     }
     tx.commit().await.map_err(failure)
 }
@@ -119,7 +119,7 @@ pub async fn seed_rated(
             .execute(&mut *tx)
             .await
             .map_err(failure)?;
-        sqlx::query("INSERT INTO matchmaking_tickets(user_id,ticket_id,pool,state,enqueued_at,expires_at,rating,completed,heartbeat_seq,game_id,side) SELECT $1,$2,$3,'playing',0,1,rating,completed,0,$4,$5 FROM rating_states WHERE user_id=$1 AND pool=$3").bind(encoded(user.as_str())).bind(uuid::Uuid::new_v4().to_string()).bind(pool.as_str()).bind(encoded(id.as_str())).bind(side).execute(&mut *tx).await.map_err(failure)?;
+        sqlx::query("INSERT INTO matchmaking_tickets(user_id,ticket_id,pool,state,enqueued_at,expires_at,rating,completed,heartbeat_seq,game_id,side,prospective_game_id,matched_side,ready,ready_deadline) SELECT $1,$2,$3,'playing',0,1,rating,completed,0,$4,$5,$4,$5,TRUE,30000 FROM rating_states WHERE user_id=$1 AND pool=$3").bind(encoded(user.as_str())).bind(uuid::Uuid::new_v4().to_string()).bind(pool.as_str()).bind(encoded(id.as_str())).bind(side).execute(&mut *tx).await.map_err(failure)?;
     }
     tx.commit().await.map_err(failure)
 }

@@ -5,7 +5,5 @@ trace::contract!(trace::Contract {
         path: "crates/game-grpc/src/service.rs",
         needle: "async fn join_matchmaking("
     },
-    gap: Some(
-        "すべての RPC で不正な所有者と UUID の事例を列挙してはいない。専用の TCP テストはハートビートの成功を検証しないが、ブラウザーテストは RPC 経由で成功するハートビートを検証する。"
-    ),
+    gap: Some("すべての RPC で不正な所有者と UUID の事例を列挙してはいない。"),
 });

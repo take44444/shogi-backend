@@ -49,6 +49,8 @@ impl HeartbeatSequence {
 pub enum RefusalReason {
     /// Another ticket is waiting in either pool.
     AlreadyWaiting,
+    /// Another ticket is awaiting confirmation in either pool.
+    AlreadyMatched,
     /// Another ticket is playing in either pool.
     AlreadyPlaying,
     /// This pool's preceding rating job still owns its reservation.
@@ -59,6 +61,7 @@ impl RefusalReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AlreadyWaiting => "already_waiting",
+            Self::AlreadyMatched => "already_matched",
             Self::AlreadyPlaying => "already_playing",
             Self::RatingPending => "rating_pending",
         }
@@ -82,8 +85,19 @@ pub struct Waiting {
 /// Exclusive ticket lifecycle. Terminal records remain durable for retries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TicketState {
-    /// Still eligible for pairing and heartbeats.
+    /// Eligible for pairing. Newer heartbeats renew its lease.
     Waiting(Waiting),
+    /// A prospective match awaits both owners' confirmation.
+    Matched {
+        /// Prospective identity, unavailable through game APIs until playing.
+        game_id: GameId,
+        /// Permanent side.
+        side: Player,
+        /// This owner's durable confirmation.
+        ready: bool,
+        /// Exclusive database epoch millisecond deadline for both owners.
+        ready_deadline: i64,
+    },
     /// A committed game owns the user's global participation.
     Playing {
         /// Committed game.
@@ -96,6 +110,13 @@ pub enum TicketState {
         /// Committed game.
         game_id: GameId,
         /// Permanent side.
+        side: Player,
+    },
+    /// The shared confirmation deadline elapsed without a playable game.
+    Voided {
+        /// Prospective identity retained for retries.
+        game_id: GameId,
+        /// Assigned side retained for retries.
         side: Player,
     },
     /// Cancelled, including a cancellation received before join.
@@ -128,7 +149,7 @@ pub struct JoinOutcome {
 /// An owner-visible current participation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Participation {
-    /// No waiting or playing ticket. Rating may still be pending.
+    /// No waiting, matched or playing ticket. Rating may still be pending.
     Idle,
     /// One active ticket across both pools.
     Active(Ticket),
@@ -171,11 +192,12 @@ pub trait MatchmakingRepository: Send + Sync {
         ticket: TicketId,
         pool: Pool,
     ) -> Result<JoinOutcome, MatchmakingError>;
-    /// Returns this owner's active ticket, expiring stale waiting state first.
+    /// Returns this owner's active ticket, expiring waiting and matched state first.
     async fn current(&self, user: &UserId) -> Result<Participation, MatchmakingError>;
-    /// Reads this owner's request, expiring stale waiting state first.
-    async fn ticket(&self, user: &UserId, ticket: TicketId) -> Result<Ticket, MatchmakingError>;
-    /// Extends only a live waiting ticket with a strictly newer sequence.
+    /// Returns the owned ticket's lifecycle state, including matched and terminal states,
+    /// after expiring waiting and matched state. Only a live waiting ticket with a
+    /// strictly newer sequence renews its lease. Duplicate or older sequences do not
+    /// extend it. Matched heartbeats neither extend readiness nor confirm readiness.
     async fn heartbeat(
         &self,
         user: &UserId,
@@ -184,7 +206,11 @@ pub trait MatchmakingRepository: Send + Sync {
     ) -> Result<Ticket, MatchmakingError>;
     /// Cancels waiting state or creates a cancellation tombstone.
     async fn cancel(&self, user: &UserId, ticket: TicketId) -> Result<Ticket, MatchmakingError>;
-    /// Expires waiting state and atomically forms at most one pair in the pool.
+    /// Confirms a live match, starting its game only when both owners are ready.
+    /// Other states return unchanged, without recording advance confirmation.
+    async fn ready(&self, user: &UserId, ticket: TicketId) -> Result<Ticket, MatchmakingError>;
+    /// Expires waiting and matched state and forms at most one pair in the pool.
+    /// The returned identity is prospective until both owners confirm.
     async fn tick(&self, pool: Pool) -> Result<Option<GameId>, MatchmakingError>;
 }
 

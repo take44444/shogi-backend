@@ -107,7 +107,7 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
             || rows[0]
                 .try_get::<i64>("", "version")
                 .map_err(|_| SchemaError::Corrupt)?
-                != 7
+                != 8
         {
             return Err(SchemaError::Corrupt);
         }
@@ -157,7 +157,7 @@ async fn create_schema(tx: &DatabaseTransaction) -> Result<(), SchemaError> {
         Query::insert()
             .into_table(a("schema_version"))
             .columns([a("id"), a("version")])
-            .values_panic([0_i64.into(), 7_i64.into()]),
+            .values_panic([0_i64.into(), 8_i64.into()]),
     )
     .await?;
     tx.execute(

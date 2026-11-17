@@ -96,17 +96,17 @@ impl GameRpcService for HeldSnapshotRpc {
     ) -> Result<tonic::Response<proto::MatchmakingCurrent>, tonic::Status> {
         self.inner.get_matchmaking(request).await
     }
-    async fn get_matchmaking_ticket(
-        &self,
-        request: tonic::Request<proto::MatchmakingRequest>,
-    ) -> Result<tonic::Response<proto::MatchmakingTicket>, tonic::Status> {
-        self.inner.get_matchmaking_ticket(request).await
-    }
     async fn heartbeat_matchmaking(
         &self,
         request: tonic::Request<proto::HeartbeatMatchmakingRequest>,
     ) -> Result<tonic::Response<proto::MatchmakingTicket>, tonic::Status> {
         self.inner.heartbeat_matchmaking(request).await
+    }
+    async fn ready_matchmaking(
+        &self,
+        request: tonic::Request<proto::MatchmakingRequest>,
+    ) -> Result<tonic::Response<proto::MatchmakingTicket>, tonic::Status> {
+        self.inner.ready_matchmaking(request).await
     }
     async fn cancel_matchmaking(
         &self,
