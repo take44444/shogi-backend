@@ -80,8 +80,10 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
         assert_eq!(f.count(table).await, 0);
     }
     for (user, id) in [("one", one), ("two", two)] {
+        let ticket = active(&f.store, &uid(user)).await;
+        assert_eq!(ticket.id, id);
         assert!(matches!(
-            f.store.ticket(&uid(user), id).await.unwrap().state,
+            ticket.state,
             TicketState::Matched { .. }
         ));
     }
@@ -108,8 +110,10 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
         assert_eq!(f.count(table).await, 0);
     }
     for (user, id) in [("one", one), ("two", two)] {
+        let ticket = active(&f.store, &uid(user)).await;
+        assert_eq!(ticket.id, id);
         assert!(matches!(
-            f.store.ticket(&uid(user), id).await.unwrap().state,
+            ticket.state,
             TicketState::Playing { .. }
         ));
     }
@@ -135,10 +139,9 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
     );
     let next = f.join("one", Pool::Byoyomi30).await;
     f.store.cancel(&uid("one"), one).await.unwrap();
-    assert!(matches!(
-        f.store.ticket(&uid("one"), next).await.unwrap().state,
-        TicketState::Waiting(_)
-    ));
+    let current = active(&f.store, &uid("one")).await;
+    assert_eq!(current.id, next);
+    assert!(matches!(current.state, TicketState::Waiting(_)));
 }
 }
 
@@ -166,7 +169,7 @@ async fn expiry_after_rating_lock_wait_prevents_match() {
     assert_eq!(pending.await.unwrap().unwrap(), None);
     assert_eq!(f.count("games").await, 0);
     assert_eq!(
-        f.store.ticket(&uid("one"), one).await.unwrap().state,
+        f.store.join(uid("one"), one, POOL).await.unwrap().ticket.state,
         TicketState::Expired
     );
 }
@@ -220,7 +223,8 @@ async fn lost_observations_recover_and_worker_retries_preserve_the_next_match() 
     let _ = f.store.tick(POOL).await.unwrap();
     recovered.ready(&uid("one"), one).await.unwrap();
     f.store.ready(&uid("two"), two).await.unwrap();
-    let game = match recovered.ticket(&uid("one"), one).await.unwrap().state {
+    let confirmed = recovered.ready(&uid("one"), one).await.unwrap();
+    let game = match confirmed.state {
         TicketState::Playing { game_id, .. } => game_id,
         other => panic!("{other:?}"),
     };

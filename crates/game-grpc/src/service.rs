@@ -67,19 +67,6 @@ impl proto::game_service_server::GameService for GameRpc {
         };
         Ok(Response::new(proto::MatchmakingCurrent { ticket }))
     }
-    async fn get_matchmaking_ticket(
-        &self,
-        request: Request<proto::MatchmakingRequest>,
-    ) -> Result<Response<proto::MatchmakingTicket>, Status> {
-        let request = request.into_inner();
-        let (user, id) = owner_ticket(request.user_id, request.ticket_id)?;
-        Ok(Response::new(ticket_message(
-            self.matchmaking
-                .ticket(&user, id)
-                .await
-                .map_err(matchmaking_status)?,
-        )))
-    }
     async fn heartbeat_matchmaking(
         &self,
         request: Request<proto::HeartbeatMatchmakingRequest>,

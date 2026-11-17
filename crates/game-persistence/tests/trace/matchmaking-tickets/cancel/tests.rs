@@ -19,11 +19,13 @@ async fn cancellation_racing_a_match_has_one_committed_outcome() {
         let (cancelled, matched) = tokio::join!(f.store.cancel(&owner, id), f.store.tick(POOL));
         let cancelled = cancelled.unwrap();
         let matched = matched.unwrap();
+        let other_ticket = active(&f.store, &uid(&other)).await;
+        assert_eq!(other_ticket.id, other_id);
         match cancelled.state {
             TicketState::Cancelled => {
                 assert!(matched.is_none());
                 assert!(matches!(
-                    f.store.ticket(&uid(&other), other_id).await.unwrap().state,
+                    other_ticket.state,
                     TicketState::Waiting(_)
                 ));
                 f.store.cancel(&uid(&other), other_id).await.unwrap();
@@ -31,7 +33,7 @@ async fn cancellation_racing_a_match_has_one_committed_outcome() {
             TicketState::Matched { game_id, .. } => {
                 assert_eq!(matched, Some(game_id.clone()));
                 assert!(
-                    matches!(f.store.ticket(&uid(&other),other_id).await.unwrap().state,TicketState::Matched {game_id:other_game,..} if other_game==game_id)
+                    matches!(other_ticket.state,TicketState::Matched {game_id:other_game,..} if other_game==game_id)
                 );
                 assert_eq!(f.count("games").await, 0);
             }

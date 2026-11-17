@@ -50,7 +50,7 @@ async fn fixed_clock(f: &Fixture) {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "実際の PostgreSQL と SeaOrmStore を使う。ready と取得の再試行、別接続での復旧、対局操作を直接呼ぶ。HTTP や RPC は通らない。",
+        scope: "実際の PostgreSQL と SeaOrmStore を使う。ready とハートビートの再試行、別接続での復旧、対局操作を直接呼ぶ。HTTP や RPC は通らない。",
         reason: "一人目の ready は永続化され、再試行・ハートビート・取消で期限を変えない。相手の確認前は対局 API が NotFound となり、対局・予約枠・ジョブを作らない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
@@ -59,8 +59,10 @@ crate::trace_support::case! {
 async fn first_ready_is_durable_and_the_prospective_game_cannot_be_played() {
     let f = Fixture::new().await;
     let (one, two, game) = paired(&f).await;
-    let first = f.store.ticket(&uid("one"), one).await.unwrap();
-    let second = f.store.ticket(&uid("two"), two).await.unwrap();
+    let first = active(&f.store, &uid("one")).await;
+    let second = active(&f.store, &uid("two")).await;
+    assert_eq!(first.id, one);
+    assert_eq!(second.id, two);
     let TicketState::Matched {
         game_id,
         side,
@@ -79,10 +81,10 @@ async fn first_ready_is_durable_and_the_prospective_game_cannot_be_played() {
     });
     let recovered = SeaOrmStore::connect(f._db.url()).await.unwrap();
     assert_eq!(recovered.ready(&uid("one"), one).await.unwrap(), confirmed);
-    assert_eq!(recovered.ticket(&uid("one"), one).await.unwrap(), confirmed);
+    assert_eq!(active(&recovered, &uid("one")).await, confirmed);
     assert_eq!(f.store.cancel(&uid("one"), one).await.unwrap(), confirmed);
     assert_eq!(f.store.heartbeat(&uid("one"), one, HeartbeatSequence::new(1).unwrap()).await.unwrap(), confirmed);
-    assert_eq!(f.store.ticket(&uid("two"), two).await.unwrap(), second);
+    assert_eq!(active(&f.store, &uid("two")).await, second);
     assert_eq!(f.store.ready(&uid("two"), one).await, Err(MatchmakingError::NotFound));
     assert_eq!(f.store.ready(&uid("one"), TicketId::new()).await, Err(MatchmakingError::NotFound));
     assert_eq!(f.store.join(uid("one"), TicketId::new(), Pool::Byoyomi30).await.unwrap().ticket.state,
@@ -109,11 +111,13 @@ crate::trace_support::case! {
 async fn concurrent_confirmations_start_once_without_advance_consent() {
     let f = Fixture::new().await;
     let one = f.join("one", POOL).await;
-    let waiting = f.store.ticket(&uid("one"), one).await.unwrap();
+    let waiting = active(&f.store, &uid("one")).await;
+    assert_eq!(waiting.id, one);
     assert_eq!(f.store.ready(&uid("one"), one).await.unwrap(), waiting);
     let two = f.join("two", POOL).await;
     let game = f.store.tick(POOL).await.unwrap().unwrap();
-    let before = f.store.ticket(&uid("one"), one).await.unwrap();
+    let before = active(&f.store, &uid("one")).await;
+    assert_eq!(before.id, one);
     assert!(matches!(before.state, TicketState::Matched { ready: false, .. }));
     let owner_one = uid("one");
     let owner_two = uid("two");
@@ -126,7 +130,8 @@ async fn concurrent_confirmations_start_once_without_advance_consent() {
     assert_eq!(identity.white_start, RatingState::Unrated);
     let recovered = SeaOrmStore::connect(f._db.url()).await.unwrap();
     for (user, ticket) in [(&owner_one, one), (&owner_two, two)] {
-        let current = recovered.ticket(user, ticket).await.unwrap();
+        let current = recovered.ready(user, ticket).await.unwrap();
+        assert_eq!(current.id, ticket);
         assert_eq!(current.state, TicketState::Playing {
             game_id: game.clone(), side: identity.participants.side(user).unwrap(),
         });
@@ -142,24 +147,25 @@ async fn concurrent_confirmations_start_once_without_advance_consent() {
 
 crate::trace_support::case! {
     crate::trace_support::Case {
-        scope: "実際の PostgreSQL と SeaOrmStore を使い、片側のみ ready にした後、共有期限を強制的に過去にする。七種類のリポジトリー入口を個別に実行する。",
-        reason: "join・current・ticket・heartbeat・cancel・ready・空プールの tick の各入口が両者を Voided にする。対局・予約枠・ジョブを作らず、両者の再参加を許し、古い再送は新しい待機を変更しない。",
+        scope: "実際の PostgreSQL と SeaOrmStore を使い、片側のみ ready にした後、共有期限を強制的に過去にする。六種類のリポジトリー入口を個別に実行する。",
+        reason: "join・current・heartbeat・cancel・ready・空プールの tick の各入口が両者を Voided にする。対局・予約枠・ジョブを作らず、両者の再参加を許し、古い再送は新しい待機を変更しない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
 #[tokio::test]
 async fn every_entry_point_expires_the_pair_and_stale_retries_leave_new_tickets_alone() {
-    for operation in ["join", "current", "ticket", "heartbeat", "cancel", "ready", "tick"] {
+    for operation in ["join", "current", "heartbeat", "cancel", "ready", "tick"] {
         let f = Fixture::new().await;
         let (one, two, game) = paired(&f).await;
-        f.store.ready(&uid("one"), one).await.unwrap();
+        let confirmed = f.store.ready(&uid("one"), one).await.unwrap();
+        let tracking = HeartbeatSequence::new(1).unwrap();
+        assert_eq!(f.store.heartbeat(&uid("one"), one, tracking).await.unwrap(), confirmed);
         f.raw.execute_unprepared("UPDATE matchmaking_tickets SET ready_deadline=0 WHERE state='matched'").await.unwrap();
         let next = TicketId::new();
         match operation {
             "join" => { assert!(f.store.join(uid("one"), next, POOL).await.unwrap().created); }
             "current" => { assert_eq!(f.store.current(&uid("one")).await.unwrap(), Participation::Idle); }
-            "ticket" => { f.store.ticket(&uid("one"), one).await.unwrap(); }
-            "heartbeat" => { f.store.heartbeat(&uid("one"), one, HeartbeatSequence::new(1).unwrap()).await.unwrap(); }
+            "heartbeat" => { f.store.heartbeat(&uid("one"), one, tracking).await.unwrap(); }
             "cancel" => { f.store.cancel(&uid("one"), one).await.unwrap(); }
             "ready" => { f.store.ready(&uid("one"), one).await.unwrap(); }
             "tick" => { assert_eq!(f.store.tick(Pool::Byoyomi30).await.unwrap(), None); }
@@ -174,15 +180,22 @@ async fn every_entry_point_expires_the_pair_and_stale_retries_leave_new_tickets_
             assert!(f.store.join(uid("one"), next, POOL).await.unwrap().created);
         }
         let other_next = f.join("two", Pool::Byoyomi30).await;
+        let waiting_one = active(&f.store, &uid("one")).await;
+        let waiting_two = active(&f.store, &uid("two")).await;
+        assert_eq!(waiting_one.id, next);
+        assert_eq!(waiting_two.id, other_next);
+        let recovered = SeaOrmStore::connect(f._db.url()).await.unwrap();
         for (user, old) in [("one", one), ("two", two)] {
-            let stored = f.store.ticket(&uid(user), old).await.unwrap();
+            let stored = recovered.heartbeat(&uid(user), old, tracking).await.unwrap();
             assert!(matches!(stored.state, TicketState::Voided { game_id: ref id, .. } if id == &game));
             assert_eq!(f.store.ready(&uid(user), old).await.unwrap(), stored);
             assert_eq!(f.store.cancel(&uid(user), old).await.unwrap(), stored);
             assert_eq!(f.store.join(uid(user), old, POOL).await.unwrap().ticket, stored);
         }
-        assert!(matches!(f.store.ticket(&uid("one"), next).await.unwrap().state, TicketState::Waiting(_)));
-        assert!(matches!(f.store.ticket(&uid("two"), other_next).await.unwrap().state, TicketState::Waiting(_)));
+        assert!(matches!(waiting_one.state, TicketState::Waiting(_)));
+        assert!(matches!(waiting_two.state, TicketState::Waiting(_)));
+        assert_eq!(active(&f.store, &uid("one")).await, waiting_one);
+        assert_eq!(active(&f.store, &uid("two")).await, waiting_two);
     }
 }
 }
@@ -200,8 +213,9 @@ async fn the_database_deadline_is_exclusive_including_concurrent_rejoin() {
         let f = Fixture::new().await;
         fixed_clock(&f).await;
         let (one, two, game) = paired(&f).await;
-        assert!(matches!(f.store.ticket(&uid("one"), one).await.unwrap().state,
-            TicketState::Matched { ready_deadline: 2_000_000_030_000, .. }));
+        let matched = active(&f.store, &uid("one")).await;
+        assert_eq!(matched.id, one);
+        assert!(matches!(matched.state, TicketState::Matched { ready_deadline: 2_000_000_030_000, .. }));
         f.store.ready(&uid("one"), one).await.unwrap();
         f.raw.execute_unprepared(&format!("UPDATE readiness_clock SET now_ms=2000000000000+{elapsed}")).await.unwrap();
         if elapsed == 29_999 {
@@ -219,7 +233,7 @@ async fn the_database_deadline_is_exclusive_including_concurrent_rejoin() {
             assert!(matches!(ready.unwrap().state, TicketState::Voided { .. }));
             assert!(joined.unwrap().created);
             assert_eq!(tick.unwrap(), None);
-            assert!(matches!(f.store.ticket(&uid("one"), one).await.unwrap().state, TicketState::Voided { .. }));
+            assert!(matches!(f.store.heartbeat(&uid("one"), one, HeartbeatSequence::new(1).unwrap()).await.unwrap().state, TicketState::Voided { .. }));
             no_game_artifacts(&f).await;
         }
     }
@@ -255,7 +269,7 @@ async fn a_rating_lock_wait_cannot_extend_the_ready_deadline() {
     f.raw.execute_unprepared("UPDATE readiness_clock SET now_ms=2000000030000").await.unwrap();
     held.commit().await.unwrap();
     assert!(matches!(pending.await.unwrap().unwrap().state, TicketState::Voided { .. }));
-    assert!(matches!(f.store.ticket(&uid("one"), one).await.unwrap().state, TicketState::Voided { .. }));
+    assert!(matches!(f.store.heartbeat(&uid("one"), one, HeartbeatSequence::new(1).unwrap()).await.unwrap().state, TicketState::Voided { .. }));
     no_game_artifacts(&f).await;
 }
 }
@@ -272,11 +286,12 @@ async fn failure_after_game_creation_rolls_back_confirmation_and_all_game_artifa
     let f = Fixture::new().await;
     let (one, two, game) = paired(&f).await;
     let confirmed = f.store.ready(&uid("one"), one).await.unwrap();
-    let unconfirmed = f.store.ticket(&uid("two"), two).await.unwrap();
+    let unconfirmed = active(&f.store, &uid("two")).await;
+    assert_eq!(unconfirmed.id, two);
     f.raw.execute_unprepared("CREATE FUNCTION reject_start() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.state='playing' THEN RAISE EXCEPTION 'injected start failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_start BEFORE UPDATE ON matchmaking_tickets FOR EACH ROW EXECUTE FUNCTION reject_start()").await.unwrap();
     assert_eq!(f.store.ready(&uid("two"), two).await, Err(MatchmakingError::Unavailable));
-    assert_eq!(f.store.ticket(&uid("one"), one).await.unwrap(), confirmed);
-    assert_eq!(f.store.ticket(&uid("two"), two).await.unwrap(), unconfirmed);
+    assert_eq!(active(&f.store, &uid("one")).await, confirmed);
+    assert_eq!(active(&f.store, &uid("two")).await, unconfirmed);
     no_game_artifacts(&f).await;
     f.raw.execute_unprepared("DROP TRIGGER reject_start ON matchmaking_tickets").await.unwrap();
     let started = f.store.ready(&uid("two"), two).await.unwrap();

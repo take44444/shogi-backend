@@ -2,7 +2,7 @@
 
 use game_application::matchmaking::{
     HeartbeatSequence, MatchmakingError, MatchmakingRepository, Participation, RefusalReason,
-    TicketId, TicketState,
+    Ticket, TicketId, TicketState,
 };
 use game_application::rating::{Pool, RatingState};
 use game_application::{GameId, GameRepository, GameService, RequestId, Resign, UserId};
@@ -53,6 +53,13 @@ impl Fixture {
         self.store.ready(&uid(user), ticket.id).await.unwrap();
     }
 }
+async fn active(store: &SeaOrmStore, user: &UserId) -> Ticket {
+    let Participation::Active(ticket) = store.current(user).await.unwrap() else {
+        panic!("expected active participation for {user:?}");
+    };
+    ticket
+}
+
 fn uid(s: &str) -> UserId {
     UserId::new(s).unwrap()
 }

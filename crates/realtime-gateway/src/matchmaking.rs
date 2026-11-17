@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use game_application::UserId;
 use game_application::matchmaking::{HeartbeatSequence, TicketId};
@@ -113,10 +113,7 @@ enum TicketResponse {
 pub(crate) fn router() -> Router<Arc<Gateway>> {
     Router::new()
         .route("/matchmaking/me", get(current))
-        .route(
-            "/matchmaking/tickets/{ticket_id}",
-            get(ticket).put(join).delete(cancel),
-        )
+        .route("/matchmaking/tickets/{ticket_id}", put(join).delete(cancel))
         .route(
             "/matchmaking/tickets/{ticket_id}/heartbeat",
             post(heartbeat),
@@ -205,7 +202,7 @@ fn ticket_response(
     (status, Json(TicketResponse::Ticket(ticket))).into_response()
 }
 
-#[utoipa::path(put,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path,description="Owner-scoped UUID, preserved on retries")),request_body=Join,responses((status=201,body=Ticket,description="New waiting request"),(status=200,body=Ticket,description="Stored retry result"),(status=409,body=TicketResponse,description="Durable refusal or pool conflict"),(status=400,description="Malformed input"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=503,description="Retry the same UUID or query its state")))]
+#[utoipa::path(put,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path,description="Owner-scoped UUID, preserved on retries")),request_body=Join,responses((status=201,body=Ticket,description="New waiting request"),(status=200,body=Ticket,description="Stored retry result"),(status=409,body=TicketResponse,description="Durable refusal or pool conflict"),(status=400,description="Malformed input"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=503,description="Retry the same PUT with the same UUID and pool")))]
 async fn join(
     State(gateway): State<Arc<Gateway>>,
     Path(id): Path<String>,
@@ -271,29 +268,13 @@ async fn current(State(gateway): State<Arc<Gateway>>, headers: HeaderMap) -> Res
         Err(e) => rpc_error(e),
     }
 }
-#[utoipa::path(get,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Stored owner-scoped request"),(status=404,description="No ticket for this owner"),(status=401,description="Authentication required"),(status=503,description="Storage unavailable")))]
-async fn ticket(
-    State(gateway): State<Arc<Gateway>>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-) -> Response {
-    read_or_cancel(gateway, id, headers, false).await
-}
-#[utoipa::path(delete,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Cancelled or terminal ticket"),(status=409,body=Ticket,description="Already matched, including prospective or committed game ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=503,description="Retry the same UUID or query its state")))]
+#[utoipa::path(delete,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Cancelled or terminal ticket"),(status=409,body=Ticket,description="Already matched, including prospective or committed game ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=503,description="Retry the same DELETE with the same UUID")))]
 async fn cancel(
     State(gateway): State<Arc<Gateway>>,
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    read_or_cancel(gateway, id, headers, true).await
-}
-async fn read_or_cancel(
-    gateway: Arc<Gateway>,
-    id: String,
-    headers: HeaderMap,
-    cancel: bool,
-) -> Response {
-    let user = match authenticate(&gateway, &headers, cancel).await {
+    let user = match authenticate(&gateway, &headers, true).await {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
@@ -304,18 +285,12 @@ async fn read_or_cancel(
         user_id: user.as_str().into(),
         ticket_id: id.to_string(),
     };
-    let mut client = gateway.games.client();
-    let result = if cancel {
-        rpc(client.cancel_matchmaking(request)).await
-    } else {
-        rpc(client.get_matchmaking_ticket(request)).await
-    };
-    match result {
-        Ok(t) => ticket_response(t, false, cancel, false),
+    match rpc(gateway.games.client().cancel_matchmaking(request)).await {
+        Ok(t) => ticket_response(t, false, true, false),
         Err(e) => rpc_error(e),
     }
 }
-#[utoipa::path(post,path="/matchmaking/tickets/{ticket_id}/ready",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Current ticket; both confirmations before the deadline start play"),(status=400,description="Malformed ticket ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=404,description="No ticket for this owner"),(status=503,description="Retry the same ticket or query its state")))]
+#[utoipa::path(post,path="/matchmaking/tickets/{ticket_id}/ready",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Current ticket; both confirmations before the deadline start play"),(status=400,description="Malformed ticket ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=404,description="No ticket for this owner"),(status=503,description="Retry the same ready POST with the same UUID")))]
 async fn ready(
     State(gateway): State<Arc<Gateway>>,
     Path(id): Path<String>,
@@ -375,7 +350,7 @@ async fn heartbeat(
 }
 #[derive(OpenApi)]
 #[openapi(
-    paths(join, current, ticket, cancel, ready, heartbeat),
+    paths(join, current, cancel, ready, heartbeat),
     components(schemas(Join, Heartbeat, Ticket, Current, ErrorBody, TicketResponse)),
     security(("session" = []), ("development_session" = [])),
     modifiers(&CookieSecurity)

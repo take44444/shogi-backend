@@ -71,31 +71,51 @@ async fn writer_periodic_matching_progresses_without_another_join() {
                 .created
         );
     }
-    let lookup = proto::MatchmakingRequest {
+    let command = proto::MatchmakingRequest {
         user_id: "one".into(),
-        ticket_id: id,
+        ticket_id: id.clone(),
     };
-    assert_eq!(
-        client
-            .get_matchmaking_ticket(lookup.clone())
-            .await
-            .unwrap()
-            .into_inner()
-            .state,
-        "waiting"
-    );
+    let resumed = client
+        .get_matchmaking(proto::MatchmakingOwner {
+            user_id: "one".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .ticket
+        .unwrap();
+    assert_eq!(resumed.ticket_id, id);
+    assert_eq!(resumed.state, "waiting");
+    assert_eq!(resumed.heartbeat_sequence, Some(0));
     raw.execute_unprepared(
         "UPDATE matchmaking_tickets SET enqueued_at=enqueued_at-30000 WHERE state='waiting'",
     )
     .await
     .unwrap();
     let ticket = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut sequence = 1;
         loop {
-            let ticket = client
-                .get_matchmaking_ticket(lookup.clone())
-                .await
-                .unwrap()
-                .into_inner();
+            let mut first = None;
+            for (user, id) in [("one", &id), ("two", &other)] {
+                let ticket = client
+                    .heartbeat_matchmaking(proto::HeartbeatMatchmakingRequest {
+                        user_id: user.into(),
+                        ticket_id: id.clone(),
+                        sequence,
+                    })
+                    .await
+                    .unwrap()
+                    .into_inner();
+                assert!(matches!(ticket.state.as_str(), "waiting" | "matched"));
+                if ticket.state == "waiting" {
+                    assert_eq!(ticket.heartbeat_sequence, Some(sequence));
+                }
+                if first.is_none() {
+                    first = Some(ticket);
+                }
+            }
+            sequence += 1;
+            let ticket = first.unwrap();
             if ticket.state == "matched" {
                 break ticket;
             }
@@ -117,7 +137,7 @@ async fn writer_periodic_matching_progresses_without_another_join() {
             .code(),
         tonic::Code::NotFound
     );
-    let first = client.ready_matchmaking(lookup).await.unwrap().into_inner();
+    let first = client.ready_matchmaking(command).await.unwrap().into_inner();
     assert_eq!(first.state, "matched");
     assert_eq!(first.ready, Some(true));
     let second = client
@@ -148,19 +168,32 @@ async fn writer_periodic_matching_progresses_without_another_join() {
             .await
             .unwrap();
     }
-    let lookup = proto::MatchmakingRequest {
-        user_id: "three".into(),
-        ticket_id: pending[0].clone(),
-    };
-    let matched = tokio::time::timeout(Duration::from_secs(5), async {
+    let (matched, next_sequence) = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut sequence = 1;
         loop {
-            let ticket = client
-                .get_matchmaking_ticket(lookup.clone())
-                .await
-                .unwrap()
-                .into_inner();
+            let mut first = None;
+            for (user, id) in [("three", &pending[0]), ("four", &pending[1])] {
+                let ticket = client
+                    .heartbeat_matchmaking(proto::HeartbeatMatchmakingRequest {
+                        user_id: user.into(),
+                        ticket_id: id.clone(),
+                        sequence,
+                    })
+                    .await
+                    .unwrap()
+                    .into_inner();
+                assert!(matches!(ticket.state.as_str(), "waiting" | "matched"));
+                if ticket.state == "waiting" {
+                    assert_eq!(ticket.heartbeat_sequence, Some(sequence));
+                }
+                if first.is_none() {
+                    first = Some(ticket);
+                }
+            }
+            sequence += 1;
+            let ticket = first.unwrap();
             if ticket.state == "matched" {
-                break ticket;
+                break (ticket, sequence);
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -188,9 +221,10 @@ async fn writer_periodic_matching_progresses_without_another_join() {
     assert_eq!(row.try_get::<i64>("", "n").unwrap(), 0);
     for (user, id) in ["three", "four"].iter().zip(pending) {
         let voided = client
-            .ready_matchmaking(proto::MatchmakingRequest {
+            .heartbeat_matchmaking(proto::HeartbeatMatchmakingRequest {
                 user_id: (*user).into(),
                 ticket_id: id,
+                sequence: next_sequence,
             })
             .await
             .unwrap()

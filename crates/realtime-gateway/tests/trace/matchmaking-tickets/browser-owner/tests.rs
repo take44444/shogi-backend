@@ -5,7 +5,7 @@ crate::trace_support::case! {
         scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。",
         reason: "未認証での現在状態の取得は401、別の所有者は404、Origin・Hostの不一致は403となる。",
         relationship: crate::trace_support::Relationship::Asserts,
-        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "reads", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "ブラウザーが、チケットの識別情報を使って現在の対局中の対局と保存済みの拒否結果を取得する。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "heartbeat", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "HTTPでは連番0を拒否し、連番1の重複リクエストには同じチケットを返す。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "rpc-boundary", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Exercises, reason: "ブラウザーからの呼び出しで6種類すべてのRPCを通し、現在状態、保存済み状態、ハートビート、準備完了、キャンセルについて検証した結果を返す。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "browser-response", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "新規参加はno-store付きの201、再試行は同じJSONの200、プールの競合は409となる。対局中のキャンセルは、game_id付きの409 already_matchedとなる。" }],
+        also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "current", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "ブラウザーがGET /matchmaking/meで現在のペアと準備期限を取得する。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "heartbeat", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "HTTPでは連番0を拒否し、連番1の重複リクエストには同じチケットを返す。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "rpc-boundary", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Exercises, reason: "ブラウザーからの呼び出しで5種類すべてのRPCを通し、現在状態、参加要求、ハートビート、準備完了、キャンセルについて検証した結果を返す。" }, crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "browser-response", scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", relationship: crate::trace_support::Relationship::Asserts, reason: "新規参加はno-store付きの201、再試行は同じJSONの200、プールの競合は409となる。対局中のキャンセルは、game_id付きの409 already_matchedとなる。" }],
     };
 #[tokio::test]
 async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access() {
@@ -14,6 +14,10 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
     let http = reqwest::Client::new();
     let ticket = uuid::Uuid::new_v4().to_string();
     let endpoint = format!("{}/matchmaking/tickets/{ticket}", services.origin);
+    assert_eq!(
+        http.get(&endpoint).send().await.unwrap().status(),
+        reqwest::StatusCode::METHOD_NOT_ALLOWED
+    );
     assert_eq!(
         http.get(format!("{}/matchmaking/me", services.origin))
             .send()
@@ -89,8 +93,10 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
     assert_eq!(retry.status(), reqwest::StatusCode::OK);
     assert_eq!(retry.json::<Value>().await.unwrap(), first);
     assert_eq!(
-        http.get(&endpoint)
+        http.post(format!("{endpoint}/heartbeat"))
             .header("cookie", services.black.cookie())
+            .header("origin", &services.origin)
+            .json(&json!({"sequence":1}))
             .send()
             .await
             .unwrap()
@@ -113,14 +119,16 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
     assert_eq!(refused.status(), reqwest::StatusCode::CONFLICT);
     let refused: Value = refused.json().await.unwrap();
     assert_eq!(refused["code"], "already_waiting");
-    let lookup = http
-        .get(&refused_endpoint)
+    let recovered_refusal = http
+        .put(&refused_endpoint)
         .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"byoyomi_30"}))
         .send()
         .await
         .unwrap();
-    assert_eq!(lookup.status(), reqwest::StatusCode::OK);
-    assert_eq!(lookup.json::<Value>().await.unwrap(), refused);
+    assert_eq!(recovered_refusal.status(), reqwest::StatusCode::CONFLICT);
+    assert_eq!(recovered_refusal.json::<Value>().await.unwrap(), refused);
     assert_eq!(
         http.post(format!("{endpoint}/heartbeat"))
             .header("cookie", services.viewer.cookie())
@@ -154,7 +162,23 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
         .json::<Value>()
         .await
         .unwrap();
+    assert_eq!(heartbeat["heartbeat_sequence"], 1);
     assert_eq!(heartbeat, duplicate);
+    let progressed = http
+        .post(format!("{endpoint}/heartbeat"))
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"sequence":2}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(progressed["heartbeat_sequence"], 2);
+    assert!(
+        progressed["expires_at"].as_i64().unwrap() >= heartbeat["expires_at"].as_i64().unwrap()
+    );
     let cancelled = http
         .delete(&endpoint)
         .header("cookie", services.viewer.cookie())
@@ -220,6 +244,70 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
         );
         endpoints.push(endpoint);
     }
+    let resumed = http
+        .get(format!("{}/matchmaking/me", services.origin))
+        .header("cookie", services.viewer.cookie())
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(resumed["state"], "waiting");
+    assert_eq!(
+        resumed["ticket"]["ticket_id"].as_str(),
+        endpoints[0].rsplit('/').next()
+    );
+    for original in [
+        http.delete(&endpoint),
+        http.post(format!("{endpoint}/ready")),
+        http.put(&endpoint).json(&json!({"pool":"ten_minute_30"})),
+    ] {
+        let recovered = original
+            .header("cookie", services.viewer.cookie())
+            .header("origin", &services.origin)
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap();
+        assert_eq!(recovered["state"], "cancelled");
+    }
+    let refusal_retry = http
+        .put(&refused_endpoint)
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"pool":"byoyomi_30"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refusal_retry.status(), reqwest::StatusCode::CONFLICT);
+    assert_eq!(refusal_retry.json::<Value>().await.unwrap(), refused);
+    let terminal = http
+        .post(format!("{endpoint}/heartbeat"))
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"sequence":3}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(terminal["state"], "cancelled");
+    assert!(terminal.get("expires_at").is_none());
+    assert!(terminal.get("heartbeat_sequence").is_none());
+    let unchanged = http
+        .get(format!("{}/matchmaking/me", services.origin))
+        .header("cookie", services.viewer.cookie())
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(unchanged, resumed);
     let game = services.games.tick(Pool::Byoyomi30).await.unwrap().unwrap();
     let current = http
         .get(format!("{}/matchmaking/me", services.origin))
@@ -246,6 +334,18 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
         tonic::Code::NotFound
     );
     assert_eq!(current["ticket"]["game_id"], game.as_str());
+    let tracked = http
+        .post(format!("{}/heartbeat", endpoints[0]))
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"sequence":1}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(tracked, current["ticket"]);
     let cancel = http
         .delete(&endpoints[0])
         .header("cookie", services.viewer.cookie())
@@ -323,6 +423,22 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
         .unwrap()
         .into_inner();
     assert_eq!(snapshot.seq, 0);
+    let tracked = http
+        .post(format!("{}/heartbeat", endpoints[0]))
+        .header("cookie", services.viewer.cookie())
+        .header("origin", &services.origin)
+        .json(&json!({"sequence":2}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(tracked["state"], "playing");
+    assert_eq!(tracked["game_id"], playing["game_id"]);
+    assert!(tracked.get("expires_at").is_none());
+    assert!(tracked.get("heartbeat_sequence").is_none());
+    assert!(tracked.get("ready_deadline").is_none());
     let playing_retry = http
         .post(&ready_endpoint)
         .header("cookie", services.viewer.cookie())
@@ -416,7 +532,7 @@ async fn matchmaking_checks_cookie_origin_and_input_before_admission() {
         assert_eq!(response.headers()["cache-control"], "no-store");
     }
     assert_eq!(
-        http.get(&endpoint)
+        http.get(format!("{}/matchmaking/me", services.origin))
             .header(
                 "cookie",
                 format!("{}; {}", services.viewer.cookie(), services.viewer.cookie())
@@ -444,8 +560,10 @@ async fn matchmaking_checks_cookie_origin_and_input_before_admission() {
         );
     }
     assert_eq!(
-        http.get(&endpoint)
+        http.post(format!("{endpoint}/heartbeat"))
             .header("cookie", services.viewer.cookie())
+            .header("origin", &services.origin)
+            .json(&json!({"sequence":1}))
             .send()
             .await
             .unwrap()
@@ -519,6 +637,19 @@ async fn readiness_timeout_returns_a_durable_voided_pair_over_http() {
         (&services.viewer, &endpoints[0]),
         (&opponent, &endpoints[1]),
     ] {
+        let heartbeat = http
+            .post(format!("{endpoint}/heartbeat"))
+            .header("cookie", browser.cookie())
+            .header("origin", &services.origin)
+            .json(&json!({"sequence":1}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(heartbeat.status(), reqwest::StatusCode::OK);
+        let terminal = heartbeat.json::<Value>().await.unwrap();
+        assert_eq!(terminal["state"], "voided");
+        assert!(terminal.get("expires_at").is_none());
+        assert!(terminal.get("heartbeat_sequence").is_none());
         let ready = http
             .post(format!("{endpoint}/ready"))
             .header("cookie", browser.cookie())
@@ -529,6 +660,7 @@ async fn readiness_timeout_returns_a_durable_voided_pair_over_http() {
         assert_eq!(ready.status(), reqwest::StatusCode::OK);
         assert_eq!(ready.headers()["cache-control"], "no-store");
         let voided: Value = ready.json().await.unwrap();
+        assert_eq!(voided, terminal);
         assert_eq!(voided["state"], "voided");
         assert_eq!(voided["game_id"], game.as_str());
         assert!(voided["side"].is_string());

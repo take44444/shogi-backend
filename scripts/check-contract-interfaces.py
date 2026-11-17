@@ -19,6 +19,7 @@ CASES = {
     "no_service_rated_admission": "E0599",
     "no_repository_admission": "E0599",
     "no_repository_rated_admission": "E0599",
+    "no_ticket_lookup": "E0599",
     "frozen_events": "E0616",
 }
 

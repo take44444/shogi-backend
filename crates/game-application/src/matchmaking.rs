@@ -85,7 +85,7 @@ pub struct Waiting {
 /// Exclusive ticket lifecycle. Terminal records remain durable for retries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TicketState {
-    /// Still eligible for pairing and heartbeats.
+    /// Eligible for pairing. Newer heartbeats renew its lease.
     Waiting(Waiting),
     /// A prospective match awaits both owners' confirmation.
     Matched {
@@ -194,9 +194,10 @@ pub trait MatchmakingRepository: Send + Sync {
     ) -> Result<JoinOutcome, MatchmakingError>;
     /// Returns this owner's active ticket, expiring waiting and matched state first.
     async fn current(&self, user: &UserId) -> Result<Participation, MatchmakingError>;
-    /// Reads this owner's request, expiring waiting and matched state first.
-    async fn ticket(&self, user: &UserId, ticket: TicketId) -> Result<Ticket, MatchmakingError>;
-    /// Extends only a live waiting ticket with a strictly newer sequence.
+    /// Returns the owned ticket's lifecycle state, including matched and terminal states,
+    /// after expiring waiting and matched state. Only a live waiting ticket with a
+    /// strictly newer sequence renews its lease. Duplicate or older sequences do not
+    /// extend it. Matched heartbeats neither extend readiness nor confirm readiness.
     async fn heartbeat(
         &self,
         user: &UserId,

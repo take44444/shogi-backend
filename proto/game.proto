@@ -6,15 +6,16 @@ package shogi.v1;
 // IDs contain 1 through 128 UTF-8 bytes with no Unicode whitespace.
 // Cancelled or lost responses can follow a committed command. For MakeMove and
 // Resign, retry identical contents with the same request ID and expected sequence.
-// Matchmaking requests preserve an owner-scoped UUID for durable retry recovery.
+// Retry uncertain matchmaking outcomes with the original command and owner-scoped UUID.
+// Admission retries preserve the pool; heartbeat retries preserve the sequence.
 service GameService {
   // Owner-scoped durable admission. Refusals are returned as stored ticket states.
   rpc JoinMatchmaking(JoinMatchmakingRequest) returns (JoinMatchmakingResponse);
-  // Reads current participation without extending waiting lifetime.
+  // Reads active participation without extending waiting lifetime.
   rpc GetMatchmaking(MatchmakingOwner) returns (MatchmakingCurrent);
-  // Reads one owner-scoped request, including terminal history.
-  rpc GetMatchmakingTicket(MatchmakingRequest) returns (MatchmakingTicket);
-  // Extends a live waiting ticket only for a strictly newer sequence.
+  // Reports tracked state; extends live waiting only for a strictly newer sequence.
+  // Non-waiting responses preserve readiness deadlines and never confirm readiness.
+  // Retry an uncertain heartbeat with the same sequence.
   rpc HeartbeatMatchmaking(HeartbeatMatchmakingRequest) returns (MatchmakingTicket);
   // Cancels waiting state or stores a cancellation before join.
   rpc CancelMatchmaking(MatchmakingRequest) returns (MatchmakingTicket);

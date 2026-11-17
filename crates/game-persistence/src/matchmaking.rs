@@ -430,13 +430,6 @@ impl MatchmakingRepository for SeaOrmStore {
         tx.commit().await.map_err(storage)?;
         Ok(result)
     }
-    async fn ticket(&self, user: &UserId, id: TicketId) -> Result<Ticket, MError> {
-        let tx = begin(self).await?;
-        expire(&tx, Some(user)).await?;
-        let ticket = read(&tx, user, id).await?.ok_or(MError::NotFound)?;
-        tx.commit().await.map_err(storage)?;
-        Ok(ticket)
-    }
     async fn heartbeat(
         &self,
         user: &UserId,
