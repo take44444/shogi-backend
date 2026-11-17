@@ -1,5 +1,106 @@
 use super::*;
 
+async fn recover_job(f: &Fixture, policy: &WorkerPolicy) -> ClaimedRatingJob {
+    f.create("recovered", Pool::TenMinute30).await;
+    f.finish("recovered").await;
+    let claim = f.jobs.claim(&owner("old"), policy).await.unwrap().unwrap();
+    assert_eq!(
+        f.jobs
+            .fail(&claim, JobFailure::Corrupt, policy)
+            .await
+            .unwrap(),
+        TickOutcome::Quarantined
+    );
+    assert_eq!(
+        f.jobs.retry_quarantined(&game("recovered")).await.unwrap(),
+        RecoveryOutcome::Retried
+    );
+    claim
+}
+
+fn claim_on_independent_runtime(f: &Fixture, policy: WorkerPolicy) -> Option<GameId> {
+    let url = f.database.url().to_owned();
+    // Joining pauses this test's runtime so deferred rollback cannot release the job.
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    let jobs = SeaOrmRatingJobs::connect(&url).await.unwrap();
+                    let acquired = jobs.claim(&owner("replacement"), &policy).await.unwrap();
+                    jobs.close().await.unwrap();
+                    acquired.map(|job| job.game_id().clone())
+                })
+                .await
+                .expect("independent claim finished while cleanup runtime was paused")
+            })
+    })
+    .join()
+    .unwrap()
+}
+
+crate::trace_support::case! {
+    crate::trace_support::Case {
+        scope: "実際の PostgreSQL で、復旧後の古い取得権への失敗通知と、返却直後の別 runtime による取得を検証する。",
+        reason: "失敗通知が LostClaim を返した時点で、復旧したジョブを別のワーカーが取得できる。",
+        relationship: crate::trace_support::Relationship::Asserts,
+        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "quarantine-recovery", scope: "実際の PostgreSQL で、復旧後の古い取得権への失敗通知と、返却直後の別 runtime による取得を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "隔離解除後のジョブは、古い取得権への失敗通知を拒否した直後にも取得できる。" }],
+    };
+#[tokio::test]
+async fn stale_failure_releases_recovered_job_before_returning() {
+    let f = Fixture::new().await;
+    let policy = policy(30000, 3);
+    let old = recover_job(&f, &policy).await;
+    assert_eq!(
+        f.jobs.fail(&old, JobFailure::Transient, &policy).await.unwrap(),
+        TickOutcome::LostClaim
+    );
+    assert_eq!(claim_on_independent_runtime(&f, policy), Some(game("recovered")));
+}
+}
+
+crate::trace_support::case! {
+    crate::trace_support::Case {
+        scope: "実際の PostgreSQL で、復旧後の古い取得権での適用と、返却直後の別 runtime による取得を検証する。",
+        reason: "適用が LostClaim を返した時点で、復旧したジョブを別のワーカーが取得できる。",
+        relationship: crate::trace_support::Relationship::Asserts,
+        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "quarantine-recovery", scope: "実際の PostgreSQL で、復旧後の古い取得権での適用と、返却直後の別 runtime による取得を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "隔離解除後のジョブは、古い取得権での適用を拒否した直後にも取得できる。" }],
+    };
+#[tokio::test]
+async fn stale_application_releases_recovered_job_before_returning() {
+    let f = Fixture::new().await;
+    let policy = policy(30000, 3);
+    let old = recover_job(&f, &policy).await;
+    assert_eq!(
+        f.jobs.apply(&old, &change(&old)).await.unwrap(),
+        ApplyOutcome::LostClaim
+    );
+    assert_eq!(claim_on_independent_runtime(&f, policy), Some(game("recovered")));
+}
+}
+
+crate::trace_support::case! {
+    crate::trace_support::Case {
+        scope: "実際の PostgreSQL で、隔離されていないジョブの復旧結果と、返却直後の別 runtime による取得を検証する。",
+        reason: "復旧が NotQuarantined を返した時点で、実行可能なジョブを別のワーカーが取得できる。",
+        relationship: crate::trace_support::Relationship::Asserts,
+        also: &[crate::trace_support::Evidence { feature: "rating-application", contract: "quarantine-recovery", scope: "実際の PostgreSQL で、隔離されていないジョブの復旧結果と、返却直後の別 runtime による取得を検証する。", relationship: crate::trace_support::Relationship::Asserts, reason: "復旧を繰り返して NotQuarantined となっても、復旧済みのジョブを直ちに取得できる。" }],
+    };
+#[tokio::test]
+async fn repeated_recovery_releases_recovered_job_before_returning() {
+    let f = Fixture::new().await;
+    let policy = policy(30000, 3);
+    recover_job(&f, &policy).await;
+    assert_eq!(
+        f.jobs.retry_quarantined(&game("recovered")).await.unwrap(),
+        RecoveryOutcome::NotQuarantined
+    );
+    assert_eq!(claim_on_independent_runtime(&f, policy), Some(game("recovered")));
+}
+}
+
 crate::trace_support::case! {
     crate::trace_support::Case {
         scope: "実際の PostgreSQL で、取得権、期限切れと古い取得権による操作の拒否、試行回数の枠、復旧を検証する。ワーカーのエラー処理経路は対象としない。",

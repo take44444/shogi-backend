@@ -374,10 +374,12 @@ impl RatingJobRepository for SeaOrmRatingJobs {
     ) -> Result<ApplyOutcome, WorkerError> {
         let tx = self.store.db.begin().await.map_err(unavailable)?;
         let Some(row) = job(&tx, claim.game_id()).await? else {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(ApplyOutcome::LostClaim);
         };
         let status: String = row.try_get("", "state").map_err(invalid)?;
         if status != "completed" && !fenced(&row, claim, now(&tx).await?)? {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(ApplyOutcome::LostClaim);
         }
         let input = input(&tx, claim.game_id()).await?;
@@ -560,10 +562,12 @@ impl RatingJobRepository for SeaOrmRatingJobs {
     ) -> Result<TickOutcome, WorkerError> {
         let tx = self.store.db.begin().await.map_err(unavailable)?;
         let Some(row) = job(&tx, claim.game_id()).await? else {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(TickOutcome::LostClaim);
         };
         let time = now(&tx).await?;
         if !fenced(&row, claim, time)? {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(TickOutcome::LostClaim);
         }
         let quarantine = failure == JobFailure::Corrupt
@@ -599,6 +603,7 @@ impl RatingJobRepository for SeaOrmRatingJobs {
             .await
             .map_err(unavailable)?;
         if updated.rows_affected() != 1 {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(TickOutcome::LostClaim);
         }
         tx.commit().await.map_err(unavailable)?;
@@ -611,9 +616,11 @@ impl RatingJobRepository for SeaOrmRatingJobs {
     async fn retry_quarantined(&self, id: &GameId) -> Result<RecoveryOutcome, WorkerError> {
         let tx = self.store.db.begin().await.map_err(unavailable)?;
         let Some(row) = job(&tx, id).await? else {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(RecoveryOutcome::NotFound);
         };
         if row.try_get::<String>("", "state").map_err(invalid)? != "quarantined" {
+            tx.rollback().await.map_err(unavailable)?;
             return Ok(RecoveryOutcome::NotQuarantined);
         }
         let generation = row
