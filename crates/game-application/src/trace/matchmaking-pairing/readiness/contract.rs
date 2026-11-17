@@ -6,6 +6,6 @@ trace::contract!(trace::Contract {
         needle: "async fn ready(&self, user: &UserId, id: TicketId) -> Result<Ticket, MError> {"
     },
     gap: Some(
-        "期限 30 秒は初期方針であり、利用実績に基づく値ではない。高負荷での準備確認や期限切れ処理の待ち時間は測定していない。"
+        "期限 15 秒は初期方針であり、利用実績に基づく値ではない。高負荷での準備確認や期限切れ処理の待ち時間は測定していない。"
     ),
 });

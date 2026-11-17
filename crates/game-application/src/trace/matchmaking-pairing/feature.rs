@@ -28,7 +28,7 @@ trace::feature!(trace::Feature {
         },
         trace::Guarantee {
             id: "ready-before-play",
-            statement: "組合せから 30 秒の共通期限内に双方が準備完了を送った場合だけ対局を作成する。期限ちょうどを含む失効は両者を Voided にし、勝敗・レーティングを作らず再参加を許す。準備確認の再送は期限を延長せず、新しい参加に影響しない。",
+            statement: "組合せから 15 秒の共通期限内に双方が準備完了を送った場合だけ対局を作成する。期限ちょうどを含む失効は両者を Voided にし、勝敗・レーティングを作らず再参加を許す。準備確認の再送は期限を延長せず、新しい参加に影響しない。",
             contracts: &["readiness", "periodic"]
         },
         trace::Guarantee {

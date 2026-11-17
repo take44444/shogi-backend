@@ -10,7 +10,7 @@ use sea_orm::sea_query::{Expr, ExprTrait, OnConflict, Order, Query};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, QueryResult, TransactionTrait};
 use shogi_domain::Player;
 
-const READY_TIMEOUT_MS: i64 = 30_000;
+const READY_TIMEOUT_MS: i64 = 15_000;
 
 pub(crate) async fn admission_lock(tx: &DatabaseTransaction) -> Result<(), Error> {
     tx.execute_unprepared("SELECT pg_advisory_xact_lock(6001133723959083849)")

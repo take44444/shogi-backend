@@ -203,22 +203,22 @@ async fn every_entry_point_expires_the_pair_and_stale_retries_leave_new_tickets_
 crate::trace_support::case! {
     crate::trace_support::Case {
         scope: "実際の独立したテスト用 PostgreSQL データベース内の時計関数を置換し、期限の一ミリ秒前と等号時を固定する。HTTP や RPC は通らない。",
-        reason: "マッチ時刻から三十秒の期限は一ミリ秒前まで開始を許し、等号時は ready・再参加・tick の競合でも両者を Voided にして対局を作らない。",
+        reason: "マッチ時刻から十五秒の期限は一ミリ秒前まで開始を許し、等号時は ready・再参加・tick の競合でも両者を Voided にして対局を作らない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
 #[tokio::test]
 async fn the_database_deadline_is_exclusive_including_concurrent_rejoin() {
-    for elapsed in [29_999, 30_000] {
+    for elapsed in [14_999, 15_000] {
         let f = Fixture::new().await;
         fixed_clock(&f).await;
         let (one, two, game) = paired(&f).await;
         let matched = active(&f.store, &uid("one")).await;
         assert_eq!(matched.id, one);
-        assert!(matches!(matched.state, TicketState::Matched { ready_deadline: 2_000_000_030_000, .. }));
+        assert!(matches!(matched.state, TicketState::Matched { ready_deadline: 2_000_000_015_000, .. }));
         f.store.ready(&uid("one"), one).await.unwrap();
         f.raw.execute_unprepared(&format!("UPDATE readiness_clock SET now_ms=2000000000000+{elapsed}")).await.unwrap();
-        if elapsed == 29_999 {
+        if elapsed == 14_999 {
             assert!(matches!(f.store.ready(&uid("two"), two).await.unwrap().state,
                 TicketState::Playing { game_id, .. } if game_id == game));
             assert_eq!(f.count("games").await, 1);
@@ -266,7 +266,7 @@ async fn a_rating_lock_wait_cannot_extend_the_ready_deadline() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
     }).await.unwrap();
-    f.raw.execute_unprepared("UPDATE readiness_clock SET now_ms=2000000030000").await.unwrap();
+    f.raw.execute_unprepared("UPDATE readiness_clock SET now_ms=2000000015000").await.unwrap();
     held.commit().await.unwrap();
     assert!(matches!(pending.await.unwrap().unwrap().state, TicketState::Voided { .. }));
     assert!(matches!(f.store.heartbeat(&uid("one"), one, HeartbeatSequence::new(1).unwrap()).await.unwrap().state, TicketState::Voided { .. }));
