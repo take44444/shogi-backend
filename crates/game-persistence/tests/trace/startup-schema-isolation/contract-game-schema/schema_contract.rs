@@ -100,7 +100,7 @@ crate::trace_support::case! {
 async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged() {
     let database = TestDatabase::new().await;
     let raw = Database::connect(database.url()).await.unwrap();
-    raw.execute_unprepared(include_str!("../../../fixtures/schema-v7.sql"))
+    raw.execute_unprepared(include_str!("../../../fixtures/schema-v8.sql"))
         .await
         .unwrap();
     raw.execute_unprepared(
@@ -171,4 +171,23 @@ async fn version_six_is_rejected_unchanged() {
     );
     assert_eq!(snapshot(&raw).await, before);
 }
+}
+
+#[tokio::test]
+async fn version_seven_is_rejected_by_writer_and_reader_unchanged() {
+    let database = TestDatabase::new().await;
+    let raw = Database::connect(database.url()).await.unwrap();
+    raw.execute_unprepared(include_str!("../../../fixtures/schema-v7.sql"))
+        .await
+        .unwrap();
+    let before = snapshot(&raw).await;
+    assert_eq!(
+        SeaOrmStore::connect(database.url()).await.map(|_| ()),
+        Err(Error::Corrupt)
+    );
+    assert!(matches!(
+        game_record_persistence::PostgresGameRecords::connect(database.url()).await,
+        Err(game_record_application::Error::Corrupt)
+    ));
+    assert_eq!(snapshot(&raw).await, before);
 }

@@ -67,10 +67,28 @@ Google のリダイレクト URI も合わせて変更すること。
 同じハートビートを再試行する場合は、番号を変えずに再送する。
 リクエストの形式は OpenAPI、間隔の検証課題は[マッチメイキングの設計メモ](../../docs/design/matchmaking.md#初期値と負荷検証)を参照する。
 
+## マッチ成立後に準備完了を送る
+
+現在参加またはチケットを取得し、`matched` を確認する。
+対局に入る準備ができたら、自分のチケット UUID で次を実行する。
+
+```js
+const ticketId = 'YOUR_TICKET_UUID';
+const response = await fetch(`/matchmaking/tickets/${encodeURIComponent(ticketId)}/ready`, {method: 'POST'});
+console.log(await response.json());
+```
+
+応答を失った場合も同じ UUID で再送する。
+`ready` は自分の準備確認、`ready_deadline` は両者共通のデータベース時刻による期限である。
+期限は成立から 30 秒で、再送やハートビートでは延長しない。
+`matched` の `game_id` は予約された ID であり、まだ対局 API では使えない。
+現在参加またはチケットを繰り返し取得し、双方の準備が揃って `playing` になるまで待つ。
+期限切れは `voided` になり、勝敗やレーティングに影響しない。新しい UUID で再参加する。
+
 ## ブラウザーから対局に接続する
 
 ログイン後、同じオリジンのブラウザーコンソールで実行する。
-マッチメイキングで取得した対局 ID に置き換える。
+`playing` のチケットで取得した対局 ID に置き換える。
 
 ```js
 const gameId = 'MATCHED_GAME_ID';

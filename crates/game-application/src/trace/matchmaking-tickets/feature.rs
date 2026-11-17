@@ -1,19 +1,19 @@
 use crate::trace_support as trace;
 trace::feature!(trace::Feature {
-    title: "マッチメイキングの参加・状態取得・継続・キャンセル",
+    title: "マッチメイキングの参加・状態取得・継続・準備確認・キャンセル",
     source: trace::Source {
         path: "crates/game-application/src/matchmaking.rs",
         needle: "pub enum TicketState {"
     },
     flow: &[
-        "ブラウザーの現在参加状態・チケット・参加・ハートビート・取消の各ハンドラーは、Cookie を認証し、所有者を導出してから対応する GameService RPC を呼ぶ。",
-        "GameRpc は型付きの所有者・UUID・プール・ハートビートを検証し、JoinMatchmaking、GetMatchmaking、GetMatchmakingTicket、HeartbeatMatchmaking、CancelMatchmaking を永続リポジトリへ委譲する。",
+        "ブラウザーの現在参加状態・チケット・参加・ハートビート・準備完了・取消の各ハンドラーは、Cookie を認証し、所有者を導出してから対応する GameService RPC を呼ぶ。",
+        "GameRpc は型付きの所有者・UUID・プール・ハートビートを検証し、JoinMatchmaking、GetMatchmaking、GetMatchmakingTicket、HeartbeatMatchmaking、ReadyMatchmaking、CancelMatchmaking を永続リポジトリへ委譲する。",
         "PostgreSQL トランザクションは参加受け入れを直列化し、古い待機状態を失効させ、過去のチケット・拒否・取消記録を保持する。組合せ処理は別に追跡する。"
     ],
     guarantees: &[
         trace::Guarantee {
             id: "owner-admission",
-            statement: "所有者は対応するどちらのレーティングプールにも参加を要求できるが、プール全体で待機中または対局中の参加は一件に限られる。サーバーは参加時のレーティングを固定し、UUID による再試行の識別を保持する。",
+            statement: "所有者は対応するどちらのレーティングプールにも参加を要求できるが、プール全体で待機中・準備待ち・対局中の参加は一件に限られる。サーバーは参加時のレーティングを固定し、UUID による再試行の識別を保持する。",
             contracts: &["admission", "rpc-boundary", "browser-owner"]
         },
         trace::Guarantee {
@@ -28,7 +28,7 @@ trace::feature!(trace::Feature {
         },
         trace::Guarantee {
             id: "browser-contract",
-            statement: "ブラウザーの五つの組合せ操作は有効なセッションを必須とし、Host と変更時の Origin・same-site を確認する。呼び出し元の user_id を拒否し、安定したチケット・エラー JSON を返して no-store を適用する。OpenAPI は五つすべての操作を記述する。",
+            statement: "ブラウザーの六つの組合せ操作は有効なセッションを必須とし、Host と変更時の Origin・same-site を確認する。呼び出し元の user_id を拒否し、安定したチケット・エラー JSON を返して no-store を適用する。OpenAPI は六つすべての操作を記述する。",
             contracts: &["browser-owner", "browser-response", "browser-schema"]
         }
     ],
@@ -88,6 +88,16 @@ trace::feature!(trace::Feature {
             path: "proto/game.proto",
             service: "GameService",
             operation: "CancelMatchmaking"
+        },
+        trace::Surface::Grpc {
+            path: "proto/game.proto",
+            service: "GameService",
+            operation: "ReadyMatchmaking"
+        },
+        trace::Surface::OpenApi {
+            package: "realtime-gateway",
+            example: "matchmaking-openapi",
+            operation: "POST /matchmaking/tickets/{ticket_id}/ready"
         }
     ],
 });

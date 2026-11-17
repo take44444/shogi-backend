@@ -3,7 +3,7 @@ use super::*;
 crate::trace_support::case! {
     crate::trace_support::Case {
         scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。取消と組合せ処理を八回並行させて競合を検証する。",
-        reason: "各競合では、対局を作らず取消をコミットするか、一つの対局に対応する二枚の Playing チケットをコミットする。",
+        reason: "各競合では、対局を作らず取消をコミットするか、一つの予定対局に対応する二枚の Matched チケットをコミットし、対局はまだ作らない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -28,11 +28,12 @@ async fn cancellation_racing_a_match_has_one_committed_outcome() {
                 ));
                 f.store.cancel(&uid(&other), other_id).await.unwrap();
             }
-            TicketState::Playing { game_id, .. } => {
+            TicketState::Matched { game_id, .. } => {
                 assert_eq!(matched, Some(game_id.clone()));
                 assert!(
-                    matches!(f.store.ticket(&uid(&other),other_id).await.unwrap().state,TicketState::Playing {game_id:other_game,..} if other_game==game_id)
+                    matches!(f.store.ticket(&uid(&other),other_id).await.unwrap().state,TicketState::Matched {game_id:other_game,..} if other_game==game_id)
                 );
+                assert_eq!(f.count("games").await, 0);
             }
             unexpected => panic!("unexpected race result: {unexpected:?}"),
         }

@@ -5,7 +5,7 @@ use game_application::matchmaking::{
     TicketId, TicketState,
 };
 use game_application::rating::{Pool, RatingState};
-use game_application::{GameRepository, GameService, RequestId, Resign, UserId};
+use game_application::{GameId, GameRepository, GameService, RequestId, Resign, UserId};
 use game_persistence::SeaOrmStore;
 use pg_test_support::TestDatabase;
 use sea_orm::{
@@ -46,6 +46,12 @@ impl Fixture {
         assert!(self.store.join(uid(user), id, pool).await.unwrap().created);
         id
     }
+    async fn ready(&self, user: &str) {
+        let Participation::Active(ticket) = self.store.current(&uid(user)).await.unwrap() else {
+            panic!("expected an active match");
+        };
+        self.store.ready(&uid(user), ticket.id).await.unwrap();
+    }
 }
 fn uid(s: &str) -> UserId {
     UserId::new(s).unwrap()
@@ -57,6 +63,9 @@ mod matchmaking_tickets_admission;
 
 #[path = "durable-tick/tests.rs"]
 mod matchmaking_pairing_durable_tick;
+
+#[path = "readiness/tests.rs"]
+mod matchmaking_pairing_readiness;
 
 #[path = "../matchmaking-tickets/heartbeat/tests.rs"]
 mod matchmaking_tickets_heartbeat;

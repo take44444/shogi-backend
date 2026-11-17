@@ -13,6 +13,8 @@ async fn missing_both_terminal_tickets_rolls_back_result_receipt_events_and_job(
     f.join("one", POOL).await;
     f.join("two", POOL).await;
     let game = f.store.tick(POOL).await.unwrap().unwrap();
+    f.ready("one").await;
+    f.ready("two").await;
     f.raw
         .execute_unprepared("DELETE FROM matchmaking_tickets")
         .await

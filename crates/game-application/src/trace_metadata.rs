@@ -52,6 +52,8 @@ mod trace_contract_game_snapshots_access_viewer_read;
 mod trace_contract_matchmaking_pairing_durable_tick;
 #[path = "trace/matchmaking-pairing/periodic/contract.rs"]
 mod trace_contract_matchmaking_pairing_periodic;
+#[path = "trace/matchmaking-pairing/readiness/contract.rs"]
+mod trace_contract_matchmaking_pairing_readiness;
 #[path = "trace/matchmaking-pairing/selection/contract.rs"]
 mod trace_contract_matchmaking_pairing_selection;
 #[path = "trace/matchmaking-pairing/windows/contract.rs"]

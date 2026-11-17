@@ -43,6 +43,10 @@ struct Ticket {
     side: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ready_deadline: Option<i64>,
 }
 #[derive(Serialize, ToSchema)]
 struct Current {
@@ -70,7 +74,14 @@ impl TryFrom<proto::MatchmakingTicket> for Ticket {
             .transpose()?;
         if !matches!(
             t.state.as_str(),
-            "waiting" | "playing" | "finished" | "cancelled" | "expired" | "refused"
+            "waiting"
+                | "matched"
+                | "playing"
+                | "finished"
+                | "voided"
+                | "cancelled"
+                | "expired"
+                | "refused"
         ) {
             return Err(Status::data_loss("invalid ticket state"));
         }
@@ -84,6 +95,8 @@ impl TryFrom<proto::MatchmakingTicket> for Ticket {
             game_id: t.game_id,
             side,
             code: t.refusal_reason,
+            ready: t.ready,
+            ready_deadline: t.ready_deadline,
         })
     }
 }
@@ -108,6 +121,7 @@ pub(crate) fn router() -> Router<Arc<Gateway>> {
             "/matchmaking/tickets/{ticket_id}/heartbeat",
             post(heartbeat),
         )
+        .route("/matchmaking/tickets/{ticket_id}/ready", post(ready))
         .layer(middleware::map_response(no_store))
 }
 async fn no_store(mut response: Response) -> Response {
@@ -178,7 +192,7 @@ fn ticket_response(
         Ok(t) => t,
         Err(e) => return rpc_error(e),
     };
-    let status = if cancel && matches!(ticket.state.as_str(), "playing" | "finished") {
+    let status = if cancel && matches!(ticket.state.as_str(), "matched" | "playing" | "finished") {
         ticket.code = Some("already_matched".into());
         StatusCode::CONFLICT
     } else if join && ticket.state == "refused" {
@@ -229,7 +243,7 @@ async fn join(
         Err(e) => rpc_error(e),
     }
 }
-#[utoipa::path(get,path="/matchmaking/me",responses((status=200,body=Current,description="Idle, waiting or playing; GET does not renew the ticket"),(status=401,description="Authentication required"),(status=503,description="Storage unavailable")))]
+#[utoipa::path(get,path="/matchmaking/me",responses((status=200,body=Current,description="Idle, waiting, matched or playing; GET does not renew the ticket"),(status=401,description="Authentication required"),(status=503,description="Storage unavailable")))]
 async fn current(State(gateway): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
     let user = match authenticate(&gateway, &headers, false).await {
         Ok(u) => u,
@@ -265,7 +279,7 @@ async fn ticket(
 ) -> Response {
     read_or_cancel(gateway, id, headers, false).await
 }
-#[utoipa::path(delete,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Cancelled or terminal ticket"),(status=409,body=Ticket,description="Already matched, including committed game ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=503,description="Retry the same UUID or query its state")))]
+#[utoipa::path(delete,path="/matchmaking/tickets/{ticket_id}",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Cancelled or terminal ticket"),(status=409,body=Ticket,description="Already matched, including prospective or committed game ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=503,description="Retry the same UUID or query its state")))]
 async fn cancel(
     State(gateway): State<Arc<Gateway>>,
     Path(id): Path<String>,
@@ -298,6 +312,32 @@ async fn read_or_cancel(
     };
     match result {
         Ok(t) => ticket_response(t, false, cancel, false),
+        Err(e) => rpc_error(e),
+    }
+}
+#[utoipa::path(post,path="/matchmaking/tickets/{ticket_id}/ready",params(("ticket_id"=String,Path)),responses((status=200,body=Ticket,description="Current ticket; both confirmations before the deadline start play"),(status=400,description="Malformed ticket ID"),(status=401,description="Authentication required"),(status=403,description="Origin or Host rejected"),(status=404,description="No ticket for this owner"),(status=503,description="Retry the same ticket or query its state")))]
+async fn ready(
+    State(gateway): State<Arc<Gateway>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let user = match authenticate(&gateway, &headers, true).await {
+        Ok(u) => u,
+        Err(e) => return e.into_response(),
+    };
+    let Ok(id) = TicketId::parse(&id) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    match rpc(gateway
+        .games
+        .client()
+        .ready_matchmaking(proto::MatchmakingRequest {
+            user_id: user.as_str().into(),
+            ticket_id: id.to_string(),
+        }))
+    .await
+    {
+        Ok(t) => ticket_response(t, false, false, false),
         Err(e) => rpc_error(e),
     }
 }
@@ -335,7 +375,7 @@ async fn heartbeat(
 }
 #[derive(OpenApi)]
 #[openapi(
-    paths(join, current, ticket, cancel, heartbeat),
+    paths(join, current, ticket, cancel, ready, heartbeat),
     components(schemas(Join, Heartbeat, Ticket, Current, ErrorBody, TicketResponse)),
     security(("session" = []), ("development_session" = [])),
     modifiers(&CookieSecurity)

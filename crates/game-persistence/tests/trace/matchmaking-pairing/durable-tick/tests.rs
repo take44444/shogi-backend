@@ -3,7 +3,7 @@ use super::*;
 crate::trace_support::case! {
     crate::trace_support::Case {
         scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
-        reason: "同時実行した tick によって、対局一件、rated_game 一件、参加枠二件だけが作られ、一人の現在参加状態が Playing になる。このテストでは参加者や先後の割り当てを比較しない。",
+        reason: "同時実行した tick と両者の ready によって、対局一件、rated_game 一件、参加枠二件だけが作られ、一人の現在参加状態が Playing になる。このテストでは参加者や先後の割り当てを比較しない。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "admission", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。参加受け入れと組合せ処理を並行実行する。", relationship: crate::trace_support::Relationship::Asserts, reason: "異なるプールへの同時参加で、参加受け入れがちょうど一件だけ作られる。" }],
     };
@@ -32,6 +32,9 @@ async fn cross_pool_joins_and_multiple_matchers_have_one_durable_winner() {
             .count(),
         1
     );
+    assert_eq!(f.count("games").await, 0);
+    f.ready("one").await;
+    f.ready("two").await;
     assert_eq!(f.count("games").await, 1);
     assert_eq!(f.count("rated_games").await, 1);
     assert_eq!(f.count("rating_slots").await, 2);
@@ -57,7 +60,7 @@ async fn cross_pool_joins_and_multiple_matchers_have_one_durable_winner() {
 crate::trace_support::case! {
     crate::trace_support::Case {
         scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。",
-        reason: "参加枠の作成失敗を注入すると、対局・レーティング対象対局・参加枠の行は 0 件となり、両者は待機を続ける。成功した再試行では、元の Unrated 状態を固定する。",
+        reason: "参加枠の作成失敗を注入して二人目が ready すると、対局・レーティング対象対局・参加枠の行は 0 件となり、両者は matched を続ける。成功した再試行では、元の Unrated 状態を固定する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[crate::trace_support::Evidence { feature: "matchmaking-tickets", contract: "admission", scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。SQL の失敗を注入し、終局後のレーティング予約枠を確認する。", relationship: crate::trace_support::Relationship::Asserts, reason: "対局終了後、同じプールへの参加は rating_pending となり、別のプールは引き続き利用できる。" }],
     };
@@ -66,22 +69,27 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
     let f = Fixture::new().await;
     let one = f.join("one", POOL).await;
     let two = f.join("two", POOL).await;
+    let game = f.store.tick(POOL).await.unwrap().unwrap();
+    f.store.ready(&uid("one"), one).await.unwrap();
     f.raw.execute_unprepared("CREATE FUNCTION reject_slot() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected slot failure'; END $$; CREATE TRIGGER reject_slot BEFORE INSERT ON rating_slots FOR EACH ROW EXECUTE FUNCTION reject_slot()").await.unwrap();
-    assert_eq!(f.store.tick(POOL).await, Err(MatchmakingError::Unavailable));
+    assert_eq!(
+        f.store.ready(&uid("two"), two).await,
+        Err(MatchmakingError::Unavailable)
+    );
     for table in ["games", "rated_games", "rating_slots"] {
         assert_eq!(f.count(table).await, 0);
     }
     for (user, id) in [("one", one), ("two", two)] {
         assert!(matches!(
             f.store.ticket(&uid(user), id).await.unwrap().state,
-            TicketState::Waiting(_)
+            TicketState::Matched { .. }
         ));
     }
     f.raw
         .execute_unprepared("DROP TRIGGER reject_slot ON rating_slots")
         .await
         .unwrap();
-    let game = f.store.tick(POOL).await.unwrap().unwrap();
+    f.store.ready(&uid("two"), two).await.unwrap();
     let identity = pg_test_support::rated_identity(f._db.url(), &game)
         .await
         .unwrap();
@@ -186,6 +194,8 @@ async fn widening_without_a_new_join_skips_an_incompatible_head() {
         .await
         .unwrap();
     let game = f.store.tick(POOL).await.unwrap().unwrap();
+    f.ready("one").await;
+    f.ready("two").await;
     let record = f.store.load_game(&game).await.unwrap();
     assert!(record.participants.side(&uid("one")).is_ok());
     assert!(record.participants.side(&uid("two")).is_ok());
@@ -208,6 +218,8 @@ async fn lost_observations_recover_and_worker_retries_preserve_the_next_match() 
     assert!(!recovered.join(uid("one"), one, POOL).await.unwrap().created);
     f.store.join(uid("two"), two, POOL).await.unwrap();
     let _ = f.store.tick(POOL).await.unwrap();
+    recovered.ready(&uid("one"), one).await.unwrap();
+    f.store.ready(&uid("two"), two).await.unwrap();
     let game = match recovered.ticket(&uid("one"), one).await.unwrap().state {
         TicketState::Playing { game_id, .. } => game_id,
         other => panic!("{other:?}"),
@@ -247,6 +259,8 @@ async fn lost_observations_recover_and_worker_retries_preserve_the_next_match() 
     f.join("one", POOL).await;
     f.join("two", POOL).await;
     let next = f.store.tick(POOL).await.unwrap().unwrap();
+    f.ready("one").await;
+    f.ready("two").await;
     let frozen = pg_test_support::rated_identity(f._db.url(), &next)
         .await
         .unwrap();

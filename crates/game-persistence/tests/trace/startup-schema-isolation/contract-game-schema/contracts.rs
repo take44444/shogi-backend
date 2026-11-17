@@ -133,7 +133,7 @@ async fn failed_bootstrap_rolls_back_the_entire_schema() {
         .unwrap();
     assert_eq!(
         integer_query(&raw, "SELECT version AS value FROM schema_version").await,
-        7
+        8
     );
 }
 

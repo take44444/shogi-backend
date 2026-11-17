@@ -18,6 +18,8 @@ service GameService {
   rpc HeartbeatMatchmaking(HeartbeatMatchmakingRequest) returns (MatchmakingTicket);
   // Cancels waiting state or stores a cancellation before join.
   rpc CancelMatchmaking(MatchmakingRequest) returns (MatchmakingTicket);
+  // Confirms readiness for the current pair; retries preserve the stored state.
+  rpc ReadyMatchmaking(MatchmakingRequest) returns (MatchmakingTicket);
   // Returns current participants, board, hands, legal moves, and sequence.
   rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
   // Authenticated viewer snapshot. Inaccessible games are indistinguishable from missing games.
@@ -258,7 +260,7 @@ message JoinMatchmakingResponse {
 }
 // No ticket means idle. Rating application may still be pending.
 message MatchmakingCurrent {
-  // The single waiting or playing ticket, absent when idle.
+  // The single waiting, matched or playing ticket, absent when idle.
   MatchmakingTicket ticket = 1;
 }
 // Owner-scoped ticket response. State determines which details are present.
@@ -267,7 +269,7 @@ message MatchmakingTicket {
   string ticket_id = 1;
   // Absent only for a cancellation received before join.
   optional RatingPool pool = 2;
-  // waiting, playing, finished, cancelled, expired, or refused.
+  // waiting, matched, playing, finished, voided, cancelled, expired, or refused.
   string state = 3;
   // Immutable database epoch milliseconds, for waiting state.
   optional int64 enqueued_at = 4;
@@ -275,10 +277,14 @@ message MatchmakingTicket {
   optional int64 expires_at = 5;
   // Last accepted heartbeat sequence, initially zero.
   optional int64 heartbeat_sequence = 6;
-  // Committed game ID, for playing or finished.
+  // Prospective game ID in matched/voided, committed in playing/finished.
   optional string game_id = 7;
-  // Permanent side, for playing or finished.
+  // Assigned side, for matched, playing, finished or voided.
   optional Player side = 8;
-  // Durable already_waiting, already_playing, or rating_pending refusal.
+  // Durable already_waiting, already_matched, already_playing or rating_pending refusal.
   optional string refusal_reason = 9;
+  // This owner's confirmation, present only while matched.
+  optional bool ready = 10;
+  // Exclusive readiness deadline in database epoch milliseconds, only while matched.
+  optional int64 ready_deadline = 11;
 }

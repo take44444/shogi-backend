@@ -32,7 +32,18 @@ pub async fn pair(
             })
             .await?
             .into_inner();
-        if let Some(game_id) = ticket.game_id {
+        if ticket.state == "matched" {
+            for (user, ticket_id) in users.iter().zip(&tickets) {
+                client
+                    .ready_matchmaking(proto::MatchmakingRequest {
+                        user_id: (*user).into(),
+                        ticket_id: ticket_id.clone(),
+                    })
+                    .await?;
+            }
+        }
+        if ticket.state == "playing" {
+            let game_id = ticket.game_id.ok_or("playing ticket has no game ID")?;
             return Ok(client
                 .get_snapshot(proto::GetSnapshotRequest { game_id })
                 .await?

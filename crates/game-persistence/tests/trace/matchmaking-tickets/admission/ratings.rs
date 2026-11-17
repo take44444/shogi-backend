@@ -56,12 +56,19 @@ async fn admission_waits_for_application_and_freezes_the_new_committed_states() 
     wait_for_blocked_transactions(&f, 2).await;
     held.commit().await.unwrap();
     assert_eq!(applying.await.unwrap().unwrap(), ApplyOutcome::Applied);
-    assert!(admission.await.unwrap().unwrap().created);
+    let admitted = admission.await.unwrap().unwrap();
+    assert!(admitted.created);
+    let white_ticket = TicketId::new();
     f.store
-        .join(user("white"), TicketId::new(), Pool::TenMinute30)
+        .join(user("white"), white_ticket, Pool::TenMinute30)
         .await
         .unwrap();
     let next = f.store.tick(Pool::TenMinute30).await.unwrap().unwrap();
+    f.store
+        .ready(&user("black"), admitted.ticket.id)
+        .await
+        .unwrap();
+    f.store.ready(&user("white"), white_ticket).await.unwrap();
     let identity = pg_test_support::rated_identity(f.database.url(), &next)
         .await
         .unwrap();

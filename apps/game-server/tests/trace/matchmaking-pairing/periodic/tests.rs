@@ -2,7 +2,7 @@ use game_application::matchmaking::TicketId;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 use game_persistence::SeaOrmStore;
 use pg_test_support::TestDatabase;
-use sea_orm::{ConnectionTrait, Database};
+use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use std::{
     process::{Child, Command, Stdio},
     time::Duration,
@@ -19,7 +19,7 @@ impl Drop for Process {
 crate::trace_support::case! {
     crate::trace_support::Case {
         scope: "実際のgame-serverプロセス、PostgreSQL、生成されたgRPCクライアントを使う。DBの時刻を操作してマッチング条件を満たすようにする。",
-        reason: "実際のgame-server実行ファイルを起動する。追加の参加要求がなくても、待機中のチケットがPlayingとなり、両ユーザーを含む連番0のスナップショットを取得できることを確認する。",
+        reason: "実際のgame-server実行ファイルを起動する。追加の参加要求がなくても、待機中のチケットがMatchedとなり、両者の準備完了後にPlayingとなり、両ユーザーを含む連番0のスナップショットを取得できることを確認する。",
         relationship: crate::trace_support::Relationship::Asserts,
         also: &[],
     };
@@ -56,7 +56,8 @@ async fn writer_periodic_matching_progresses_without_another_join() {
     .await
     .unwrap();
     let id = TicketId::new().to_string();
-    for (user, ticket) in [("one", id.clone()), ("two", TicketId::new().to_string())] {
+    let other = TicketId::new().to_string();
+    for (user, ticket) in [("one", id.clone()), ("two", other.clone())] {
         assert!(
             client
                 .join_matchmaking(proto::JoinMatchmakingRequest {
@@ -95,7 +96,7 @@ async fn writer_periodic_matching_progresses_without_another_join() {
                 .await
                 .unwrap()
                 .into_inner();
-            if ticket.state == "playing" {
+            if ticket.state == "matched" {
                 break ticket;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -103,15 +104,113 @@ async fn writer_periodic_matching_progresses_without_another_join() {
     })
     .await
     .unwrap();
-    let game = client
-        .get_snapshot(proto::GetSnapshotRequest {
-            game_id: ticket.game_id.unwrap(),
+    assert_eq!(ticket.ready, Some(false));
+    assert!(ticket.ready_deadline.is_some());
+    let game_id = ticket.game_id.unwrap();
+    assert_eq!(
+        client
+            .get_snapshot(proto::GetSnapshotRequest {
+                game_id: game_id.clone(),
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    let first = client.ready_matchmaking(lookup).await.unwrap().into_inner();
+    assert_eq!(first.state, "matched");
+    assert_eq!(first.ready, Some(true));
+    let second = client
+        .ready_matchmaking(proto::MatchmakingRequest {
+            user_id: "two".into(),
+            ticket_id: other,
         })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(second.state, "playing");
+    let game = client
+        .get_snapshot(proto::GetSnapshotRequest { game_id })
         .await
         .unwrap()
         .into_inner();
     assert_eq!(game.seq, 0);
     assert!([game.black_user_id.as_str(), game.white_user_id.as_str()].contains(&"one"));
     assert!([game.black_user_id.as_str(), game.white_user_id.as_str()].contains(&"two"));
+    let pending = [TicketId::new().to_string(), TicketId::new().to_string()];
+    for (user, id) in ["three", "four"].iter().zip(&pending) {
+        client
+            .join_matchmaking(proto::JoinMatchmakingRequest {
+                user_id: (*user).into(),
+                ticket_id: id.clone(),
+                pool: proto::RatingPool::Byoyomi30 as i32,
+            })
+            .await
+            .unwrap();
+    }
+    let lookup = proto::MatchmakingRequest {
+        user_id: "three".into(),
+        ticket_id: pending[0].clone(),
+    };
+    let matched = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let ticket = client
+                .get_matchmaking_ticket(lookup.clone())
+                .await
+                .unwrap()
+                .into_inner();
+            if ticket.state == "matched" {
+                break ticket;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let prospective = matched.game_id.unwrap();
+    raw.execute_unprepared("UPDATE matchmaking_tickets SET ready_deadline=0 WHERE state='matched'")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let row = raw.query_one_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+                "SELECT count(*) AS n FROM matchmaking_tickets WHERE prospective_game_id=$1 AND state='voided'",
+                [prospective.clone().into()],
+            )).await.unwrap().unwrap();
+            if row.try_get::<i64>("", "n").unwrap() == 2 { break; }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("periodic matching must expire the pair without an RPC request");
+    let row = raw.query_one_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+        "SELECT (SELECT count(*) FROM games WHERE id=$1)+(SELECT count(*) FROM rated_games WHERE game_id=$1)+(SELECT count(*) FROM rating_slots WHERE game_id=$1) AS n",
+        [prospective.clone().into()],
+    )).await.unwrap().unwrap();
+    assert_eq!(row.try_get::<i64>("", "n").unwrap(), 0);
+    for (user, id) in ["three", "four"].iter().zip(pending) {
+        let voided = client
+            .ready_matchmaking(proto::MatchmakingRequest {
+                user_id: (*user).into(),
+                ticket_id: id,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(voided.state, "voided");
+        assert_eq!(voided.game_id.as_deref(), Some(prospective.as_str()));
+        assert!(voided.ready.is_none());
+        assert!(voided.ready_deadline.is_none());
+        assert!(
+            client
+                .get_matchmaking(proto::MatchmakingOwner {
+                    user_id: (*user).into()
+                })
+                .await
+                .unwrap()
+                .into_inner()
+                .ticket
+                .is_none()
+        );
+    }
+    raw.close().await.unwrap();
 }
 }
