@@ -24,6 +24,10 @@ class Preservation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "lost or changed original tests"):
             migration.compare(self.before, changed)
 
+    def test_optional_call_comma_formats_identically_but_tuple_change_does_not(self):
+        self.assertEqual(migration.fingerprint("fn x() { f(1,); }"), migration.fingerprint("fn x() { f(1); }"))
+        self.assertNotEqual(migration.fingerprint("fn x() { f((1,)); }"), migration.fingerprint("fn x() { f((1)); }"))
+
     def test_reassignment_to_another_package_is_rejected(self):
         changed = copy.deepcopy(self.before)
         changed["tests"][0]["package"] = "transport"

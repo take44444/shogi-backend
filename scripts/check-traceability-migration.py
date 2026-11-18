@@ -2,9 +2,20 @@
 """Compare collector --scan snapshots without depending on module or target names."""
 import argparse
 from collections import Counter
+from functools import lru_cache
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+
+
+@lru_cache(maxsize=None)
+def fingerprint(tokens):
+    result = subprocess.run(["rustfmt", "--edition", "2024", "--emit", "stdout"], input=tokens,
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(f"cannot format scanned Rust function: {result.stderr}")
+    return hashlib.sha256(result.stdout.encode()).hexdigest()
 
 
 def bodies(snapshot):
@@ -20,7 +31,7 @@ def bodies(snapshot):
         tokens = test["function_tokens"]
         if not tokens or not test["body_source"]:
             raise ValueError("complete function tokens and body source are required")
-        digest = hashlib.sha256(tokens.encode()).hexdigest()
+        digest = fingerprint(tokens)
         result[test["package"], test["function"], digest] += 1
     if not result:
         raise ValueError("empty scan cannot establish preservation")
