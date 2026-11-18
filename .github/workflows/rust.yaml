@@ -55,6 +55,7 @@ jobs:
       - name: Check feature traceability
         run: |
           python3 scripts/test-traceability.py
+          python3 scripts/test-check-traceability-migration.py
           python3 scripts/test-traceability-viewer.py
           CARGO_TARGET_DIR=target python3 scripts/test-directory-traceability.py
           python3 scripts/traceability.py check

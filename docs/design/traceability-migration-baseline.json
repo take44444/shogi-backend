@@ -1,0 +1,2224 @@
+{
+  "version": 1,
+  "base_commit": "3d0240c",
+  "test_fingerprints": [
+    {
+      "package": "game-server",
+      "function": "writer_periodic_matching_progresses_without_another_join",
+      "sha256": "6d68aa7e13b4d80cdcb74cc8778437d746b0ff8efc48a77f00e427b6219c3705",
+      "previous_file": "apps/game-server/tests/trace/matchmaking-pairing/periodic/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::writer_periodic_matching_progresses_without_another_join"
+    },
+    {
+      "package": "game-application",
+      "function": "actor_supplies_events_before_commit_change_and_skips_retries_and_rejections",
+      "sha256": "28f68c2ae194e6136e459a3e4524d784126a4b0264f5b06fec214e67158f8f60",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/actor-apply/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_actor_apply::actor_supplies_events_before_commit_change_and_skips_retries_and_rejections"
+    },
+    {
+      "package": "game-application",
+      "function": "mutation_errors_prioritize_request_conflict_then_sequence_mismatch_then_game_finished",
+      "sha256": "4bcb3ff180e92cda25abe7d4a931ab5e5d02243f8579b3ef7bb7d274440f6e8d",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/actor-apply/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_actor_apply::mutation_errors_prioritize_request_conflict_then_sequence_mismatch_then_game_finished"
+    },
+    {
+      "package": "game-application",
+      "function": "sequence_cap_is_portable",
+      "sha256": "3932d01e5b79a009e9737109bcab2f8fe0ceb1b5fda46d27e0176dc9f835b000",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/sequence-cap/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_sequence_cap::sequence_cap_is_portable"
+    },
+    {
+      "package": "game-application",
+      "function": "exhausted_state_still_checks_expected_sequence_before_advancing",
+      "sha256": "e17a70f41b38d63e8227176b7f505d404f92ca95a37ee4f521b69cad1dd89093",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/sequence-cap/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_sequence_cap::exhausted_state_still_checks_expected_sequence_before_advancing"
+    },
+    {
+      "package": "game-application",
+      "function": "cancelled_reply_and_closed_mailbox_still_drain_commands",
+      "sha256": "195b819016250e9ac0c50c3cf9c2be0d40860df7f3375a5e84581a170cf34350",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_mailbox::cancelled_reply_and_closed_mailbox_still_drain_commands"
+    },
+    {
+      "package": "game-application",
+      "function": "cancelled_call_after_enqueue_executes_and_before_enqueue_does_not",
+      "sha256": "f4b85ca9b6579bd8c05de82abb3bebd6a4cb13a3713051702465eea9978932c7",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_mailbox::cancelled_call_after_enqueue_executes_and_before_enqueue_does_not"
+    },
+    {
+      "package": "game-application",
+      "function": "closed_actor_is_recovered_from_store_and_last_service_drop_closes_senders",
+      "sha256": "7081bf7ca835a587ae7a46a1a1ef88b1f8a826d0de44d051c26a00a97c000d99",
+      "previous_file": "crates/game-application/src/trace/game-command-recovery/mailbox/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_command_recovery_mailbox::closed_actor_is_recovered_from_store_and_last_service_drop_closes_senders"
+    },
+    {
+      "package": "game-application",
+      "function": "unknown_games_never_register_actors",
+      "sha256": "435568196ffc485fdcf18c72e2c27b7d444bb0c282913be83d4cef2f9c246ce5",
+      "previous_file": "crates/game-application/src/trace/game-snapshots-access/snapshot-refresh/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "actor::tests::game_snapshots_access_snapshot_refresh::unknown_games_never_register_actors"
+    },
+    {
+      "package": "game-application",
+      "function": "canonical_move_mate_and_resignation_events",
+      "sha256": "8ca29c61affb5ae81ab5d4a65819ec438e766ea83611b478400b2e4e20a28904",
+      "previous_file": "crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "events::tests::canonical_facts::canonical_move_mate_and_resignation_events"
+    },
+    {
+      "package": "game-application",
+      "function": "staging_checks_sequence_bounds_before_continuity",
+      "sha256": "960e1535d50b810f31538c3bea2579d5530e262351001e236403df99d196aa5c",
+      "previous_file": "crates/game-application/src/trace/durable-event-dispatch/canonical-facts/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "events::tests::canonical_facts::staging_checks_sequence_bounds_before_continuity"
+    },
+    {
+      "package": "game-application",
+      "function": "failed_publish_and_uncertain_mark_preserve_identity_and_order",
+      "sha256": "c039f62bdd640d27e9df75da98e4b66b32d6df0709d5a0b847fb950604e3aa46",
+      "previous_file": "crates/game-application/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "events::tests::confirmed_dispatch::failed_publish_and_uncertain_mark_preserve_identity_and_order"
+    },
+    {
+      "package": "game-application",
+      "function": "widening_is_bilateral_and_includes_boundary",
+      "sha256": "a6428b805bdd16a3e0fc6b3cf9a36a14fec045ca3f4d06739cea4ce885ce53b7",
+      "previous_file": "crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "matchmaking::tests::widening_is_bilateral_and_includes_boundary"
+    },
+    {
+      "package": "game-application",
+      "function": "skips_unmatched_head_and_prefers_nearest_then_oldest_then_id",
+      "sha256": "916a03305c6e919fc5964ff4d2286c6e515c19b1883e55e194b91b961a8f2eec",
+      "previous_file": "crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "matchmaking::tests::skips_unmatched_head_and_prefers_nearest_then_oldest_then_id"
+    },
+    {
+      "package": "game-application",
+      "function": "extremes_expiry_and_pool_separation",
+      "sha256": "baa77fe8538667cf5512281b9a174eeb89041735f48c249bbc2b7b8afafff13e",
+      "previous_file": "crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "matchmaking::tests::extremes_expiry_and_pool_separation"
+    },
+    {
+      "package": "game-application",
+      "function": "owner_scoped_equal_uuids_have_a_stable_opponent",
+      "sha256": "ce7d4216555f22984b4f473f2437e706984ef02d0537ce78d99187f22f6f01c9",
+      "previous_file": "crates/game-application/src/trace/matchmaking-pairing/selection/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "matchmaking::tests::owner_scoped_equal_uuids_have_a_stable_opponent"
+    },
+    {
+      "package": "game-application",
+      "function": "participant_bindings_are_distinct_and_preserve_sides",
+      "sha256": "83dccbe11668faba4ec7cd818012494744bc5f05a8aa89f70ac9f822b7ed1d3a",
+      "previous_file": "crates/game-application/src/trace/game-play/binding/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "types::tests::participant_bindings_are_distinct_and_preserve_sides"
+    },
+    {
+      "package": "game-grpc",
+      "function": "infrastructure_and_rules_errors_have_stable_status_codes",
+      "sha256": "4145de2c9dba29b31a3ce7225f32f625f4e11b7c3d7fbc6e0eefc6fe5830aab3",
+      "previous_file": "crates/game-grpc/src/trace/game-play/rpc-errors/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "conversion::tests::infrastructure_and_rules_errors_have_stable_status_codes"
+    },
+    {
+      "package": "game-grpc",
+      "function": "checkmate_result_preserves_winner_and_reason",
+      "sha256": "f76bd33fd0063a215e09d5d3249974dd3c6db451e7e1d6591a8ae54fde5a1d2d",
+      "previous_file": "crates/game-grpc/src/trace/game-play/rpc-errors/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "conversion::tests::checkmate_result_preserves_winner_and_reason"
+    },
+    {
+      "package": "game-grpc",
+      "function": "generated_client_plays_capture_promotion_recapture_drop_and_resignation",
+      "sha256": "b4e00b64d16363ee168f7de1f19fa27a9b7d095bea781071d0a93cc960bdbcbe",
+      "previous_file": "crates/game-grpc/tests/trace/game-play/domain-play/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_play_domain_play::generated_client_plays_capture_promotion_recapture_drop_and_resignation"
+    },
+    {
+      "package": "game-grpc",
+      "function": "malformed_wire_values_are_invalid_arguments_without_changes",
+      "sha256": "72cd27c96f442528d2a7b13586a70e7d4077583fab173090570a0673c91def6f",
+      "previous_file": "crates/game-grpc/tests/trace/game-play/notation/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_play_notation::malformed_wire_values_are_invalid_arguments_without_changes"
+    },
+    {
+      "package": "game-grpc",
+      "function": "statuses_sequence_metadata_and_rejected_request_correction",
+      "sha256": "121a4ebbbbb8039649379483de464ad4c4562502489760d7c7951e525ff8a28d",
+      "previous_file": "crates/game-grpc/tests/trace/game-play/rpc-errors/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_play_rpc_errors::statuses_sequence_metadata_and_rejected_request_correction"
+    },
+    {
+      "package": "game-grpc",
+      "function": "exact_replay_returns_original_receipt_after_finish_and_conflicts_are_rejected",
+      "sha256": "bd8378393a47fc3294533a5bebc9fbc24858350aa1b41b96022908a578062be4",
+      "previous_file": "crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_command_recovery_replay::exact_replay_returns_original_receipt_after_finish_and_conflicts_are_rejected"
+    },
+    {
+      "package": "game-grpc",
+      "function": "generated_tcp_client_restores_database_across_two_server_restarts",
+      "sha256": "8b2ccd5868f2d95099afd4242a2f11136e0e616e3ec59d05659ac8a487503477",
+      "previous_file": "crates/game-grpc/tests/trace/game-command-recovery/replay/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_command_recovery_replay::generated_tcp_client_restores_database_across_two_server_restarts"
+    },
+    {
+      "package": "game-grpc",
+      "function": "independent_tcp_clients_serialize_competing_commands_and_retry_identically",
+      "sha256": "c5e1ade2ad375bf7f6547ebdd1d0547cc4e050a1d6a3e23f668bcd46fee2fd9a",
+      "previous_file": "crates/game-grpc/tests/trace/game-command-recovery/actor-apply/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_command_recovery_actor_apply::independent_tcp_clients_serialize_competing_commands_and_retry_identically"
+    },
+    {
+      "package": "game-grpc",
+      "function": "id_bindings_and_permission_statuses_are_enforced_at_the_wire",
+      "sha256": "6c1b0bba07e48a4c2d09d2335ef8d4e820ddcb05a326bc1913570675e294bfca",
+      "previous_file": "crates/game-grpc/tests/trace/game-play/binding/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::game_play_binding::id_bindings_and_permission_statuses_are_enforced_at_the_wire"
+    },
+    {
+      "package": "game-grpc",
+      "function": "matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results",
+      "sha256": "31982e9dfd9e3211d81387e9f726eff1d2cea3a5b504d20dcf99bc6da15771ac",
+      "previous_file": "crates/game-grpc/tests/trace/matchmaking-tickets/cancel/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "tcp"
+      },
+      "previous_name": "tcp::matchmaking_tickets_cancel::matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results"
+    },
+    {
+      "package": "game-messaging",
+      "function": "decoder_roundtrips_publisher_and_rejects_mismatches",
+      "sha256": "4f67c3217b1ca9ad542beef34464e47a862f4e5a40273f6795fb86a00f4836be",
+      "previous_file": "crates/game-messaging/src/trace/realtime-game-feed/event-frame/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::realtime_game_feed_event_frame::decoder_roundtrips_publisher_and_rejects_mismatches"
+    },
+    {
+      "package": "game-messaging",
+      "function": "version_one_json_has_explicit_moves_results_and_identity",
+      "sha256": "7e812eaaf412c63ec114951c830fd0d2ba9ae11f4e216e99cae480b51dcc1de7",
+      "previous_file": "crates/game-messaging/src/trace/durable-event-dispatch/wire-format/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::wire_format::version_one_json_has_explicit_moves_results_and_identity"
+    },
+    {
+      "package": "game-messaging",
+      "function": "channels_encode_every_id_byte_without_collisions_or_glob_metacharacters",
+      "sha256": "2d02a3a22d0d449eca1ee95882c01385069eb14cf0b63832d2278abaeb46a660",
+      "previous_file": "crates/game-messaging/src/trace/durable-event-dispatch/wire-format/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::wire_format::channels_encode_every_id_byte_without_collisions_or_glob_metacharacters"
+    },
+    {
+      "package": "game-messaging",
+      "function": "outbox_marks_only_after_a_valid_publish_response_including_no_subscribers",
+      "sha256": "b1e3136c7de8955bfa9cd01ab2065693b8257e6859fb9691643cbd92bec1e3e9",
+      "previous_file": "crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "transport_tests::confirmed_dispatch::outbox_marks_only_after_a_valid_publish_response_including_no_subscribers"
+    },
+    {
+      "package": "game-messaging",
+      "function": "cancelled_publication_cannot_reuse_a_connection_or_reconnect",
+      "sha256": "5422867eca8668fa06a7bde3586943b75fe8abc72ff8c74c8de0bd7b124c9194",
+      "previous_file": "crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "transport_tests::confirmed_dispatch::cancelled_publication_cannot_reuse_a_connection_or_reconnect"
+    },
+    {
+      "package": "game-messaging",
+      "function": "publication_timeout_leaves_the_outbox_pending",
+      "sha256": "db847a85fb10e41c31e72b1ec5cba1ccc4f6beb1c2a1e5f95fab6babaf386244",
+      "previous_file": "crates/game-messaging/src/trace/durable-event-dispatch/confirmed-dispatch/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "transport_tests::confirmed_dispatch::publication_timeout_leaves_the_outbox_pending"
+    },
+    {
+      "package": "game-persistence",
+      "function": "closing_the_pool_makes_the_game_service_unavailable",
+      "sha256": "c1fe259e7ef359c602e49fb628f6fdceb7e6a32299a57b013b470b11bfadc04d",
+      "previous_file": "crates/game-persistence/tests/trace/game-snapshots-access/snapshot-refresh/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_snapshots_access_snapshot_refresh::closing_the_pool_makes_the_game_service_unavailable"
+    },
+    {
+      "package": "game-persistence",
+      "function": "distinct_ids_create_games_without_accounts_and_bindings_are_immutable",
+      "sha256": "3de0f3abe18c9e9f6a764cdb3a1ccb0566048fafe3edfe18433fbaba853bae78",
+      "previous_file": "crates/game-persistence/tests/trace/game-play/binding/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_play_binding::distinct_ids_create_games_without_accounts_and_bindings_are_immutable"
+    },
+    {
+      "package": "game-persistence",
+      "function": "identifiers_with_nul_and_backslashes_round_trip_without_collisions",
+      "sha256": "7f8fa94af1d73c12450dc75b81c8482533775c301d0be4ff133b56c1c0797123",
+      "previous_file": "crates/game-persistence/tests/trace/game-play/binding/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_play_binding::identifiers_with_nul_and_backslashes_round_trip_without_collisions"
+    },
+    {
+      "package": "game-persistence",
+      "function": "reconnecting_restores_position_hands_promotion_and_receipts_even_after_finish",
+      "sha256": "00079a12e6442e5d2d374908090e24342db7f525ca6ceb298ff13fed8ab5ae93",
+      "previous_file": "crates/game-persistence/tests/trace/game-snapshots-access/restore/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_snapshots_access_restore::reconnecting_restores_position_hands_promotion_and_receipts_even_after_finish"
+    },
+    {
+      "package": "game-persistence",
+      "function": "corrupt_history_and_metadata_fail_closed",
+      "sha256": "f1f6e78ac93c1e4f9a2ff691e5d63f12a0243c9cb3b5c6fe2eac3675d8c60a19",
+      "previous_file": "crates/game-persistence/tests/trace/game-snapshots-access/restore/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_snapshots_access_restore::corrupt_history_and_metadata_fail_closed"
+    },
+    {
+      "package": "game-persistence",
+      "function": "independent_instances_cas_refresh_and_identical_concurrent_replay",
+      "sha256": "5ad67c62f8263f5bfab915724cfe28ff70a7403a1631933844cec28534efd220",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/actor-apply/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_command_recovery_actor_apply::independent_instances_cas_refresh_and_identical_concurrent_replay"
+    },
+    {
+      "package": "game-persistence",
+      "function": "uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery",
+      "sha256": "17fd66e28179f9bb61c2f8da1ba80fd113f9cd253976bdcb29b41acd94a56823",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/actor-apply/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_command_recovery_actor_apply::uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery"
+    },
+    {
+      "package": "game-persistence",
+      "function": "real_statement_and_commit_failures_roll_back_both_metadata_and_receipt",
+      "sha256": "81481a854f1da17e34fcad5ca5a00f02426f098349ccd063f542aa81564e6688",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/durable-commit/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_command_recovery_durable_commit::real_statement_and_commit_failures_roll_back_both_metadata_and_receipt"
+    },
+    {
+      "package": "game-persistence",
+      "function": "direct_store_constraints_and_sequence_overflow_leave_no_changes",
+      "sha256": "fa3951a736a7df3d7d68045904be2e9378dcc2d4aa8ca3e6c7e3d4a591d22897",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/durable-commit/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_command_recovery_durable_commit::direct_store_constraints_and_sequence_overflow_leave_no_changes"
+    },
+    {
+      "package": "game-persistence",
+      "function": "schema_bootstrap_is_serialized_and_future_versions_are_rejected",
+      "sha256": "37f19b2906f532862131f826f8e1e6a8200ad9822b916ea1ae3cc5ea8097c870",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::schema_bootstrap_is_serialized_and_future_versions_are_rejected"
+    },
+    {
+      "package": "game-persistence",
+      "function": "an_existing_empty_schema_ledger_is_rejected_without_modification",
+      "sha256": "5724e4746caa01dff2a604b2a07e82e8670e63528a88d564343dcfe66367db4d",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::an_existing_empty_schema_ledger_is_rejected_without_modification"
+    },
+    {
+      "package": "game-persistence",
+      "function": "a_missing_schema_ledger_is_not_recreated_for_existing_game_tables",
+      "sha256": "03eaf5305e2bf94f82142d4d50a91e58ade560533aa6c84f0e961f20236ee9be",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::a_missing_schema_ledger_is_not_recreated_for_existing_game_tables"
+    },
+    {
+      "package": "game-persistence",
+      "function": "fresh_game_database_has_no_account_tables",
+      "sha256": "5f8c351d02ce28b36d2d17537ed1cfc1830b46a887b366cf615061148cd2e020",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::fresh_game_database_has_no_account_tables"
+    },
+    {
+      "package": "game-persistence",
+      "function": "failed_bootstrap_rolls_back_the_entire_schema",
+      "sha256": "0cbd6ec42e790512cdc9228049d3e304e1914487381767e80f74837a272ba0c2",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::failed_bootstrap_rolls_back_the_entire_schema"
+    },
+    {
+      "package": "game-persistence",
+      "function": "incompatible_or_incomplete_existing_schema_is_not_modified",
+      "sha256": "94f31724d1c865f72021f844a70aeccbbcac469ac45105a9fcfa4c1c90db77fa",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::incompatible_or_incomplete_existing_schema_is_not_modified"
+    },
+    {
+      "package": "game-persistence",
+      "function": "unrelated_tables_require_a_current_application_schema",
+      "sha256": "32e11bb01480ead997256bf68082f4bcf0c0310c31cbbfc6fb6cc812c5f2d4ae",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::startup_schema_isolation_contract_game_schema::unrelated_tables_require_a_current_application_schema"
+    },
+    {
+      "package": "game-persistence",
+      "function": "postgres_enforces_result_pairs_foreign_keys_and_distinct_participants",
+      "sha256": "dfa7ea5d1f3200fd2d00fcf2fa5a763ed30d8c5c642c0fbf10e937487c54e010",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/contracts.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::public_record_detail_metadata_invariants::postgres_enforces_result_pairs_foreign_keys_and_distinct_participants"
+    },
+    {
+      "package": "game-persistence",
+      "function": "joined_history_load_remains_coherent_during_concurrent_commits",
+      "sha256": "6b8610026cf172683bd1e1f261aa3103a007eb7114855ed282558ed785c4fd56",
+      "previous_file": "crates/game-persistence/tests/trace/game-snapshots-access/durable-read/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "contracts"
+      },
+      "previous_name": "contracts::game_snapshots_access_durable_read::joined_history_load_remains_coherent_during_concurrent_commits"
+    },
+    {
+      "package": "game-persistence",
+      "function": "durable_retry_refusal_and_cancel_before_join_survive_reconnect",
+      "sha256": "0e4854fb1ef79f15281ed7d5e2fadc9cae6bf538af1dfffa1d5f1ca28b7dd319",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/admission/selection.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_tickets_admission::durable_retry_refusal_and_cancel_before_join_survive_reconnect"
+    },
+    {
+      "package": "game-persistence",
+      "function": "cross_pool_joins_and_multiple_matchers_have_one_durable_winner",
+      "sha256": "f796af8e5ff4809f3ab1ed987b9525759825cbf2b77caf895b91cca27fe23931",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_durable_tick::cross_pool_joins_and_multiple_matchers_have_one_durable_winner"
+    },
+    {
+      "package": "game-persistence",
+      "function": "pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets",
+      "sha256": "8d35dabcc69c837443aa183d6d729904e71ec6f65c2c3f7b98896a8e987079d2",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_durable_tick::pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets"
+    },
+    {
+      "package": "game-persistence",
+      "function": "expiry_after_rating_lock_wait_prevents_match",
+      "sha256": "ab4c4578d5bace7e57068f644f8678c6d5f679101494511f7b143642a3839ec8",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_durable_tick::expiry_after_rating_lock_wait_prevents_match"
+    },
+    {
+      "package": "game-persistence",
+      "function": "widening_without_a_new_join_skips_an_incompatible_head",
+      "sha256": "2d20d84fec57ccc757f16e3c3859b52ff274be63e800186a8ce25886adee5436",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_durable_tick::widening_without_a_new_join_skips_an_incompatible_head"
+    },
+    {
+      "package": "game-persistence",
+      "function": "lost_observations_recover_and_worker_retries_preserve_the_next_match",
+      "sha256": "65a7e49a4f82902d10e66153c5e4f029dc6ba880368f4c787ce95e22f5667daf",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/durable-tick/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_durable_tick::lost_observations_recover_and_worker_retries_preserve_the_next_match"
+    },
+    {
+      "package": "game-persistence",
+      "function": "first_ready_is_durable_and_the_prospective_game_cannot_be_played",
+      "sha256": "2eb861b44e1e05bdfdbb0fb8f90adeb642d39407445e82de077ba6c67e897110",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::first_ready_is_durable_and_the_prospective_game_cannot_be_played"
+    },
+    {
+      "package": "game-persistence",
+      "function": "concurrent_confirmations_start_once_without_advance_consent",
+      "sha256": "05d1f98a5db2df75661969f93123d83f796bc8e5260d97de5b3a560fe5adff31",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::concurrent_confirmations_start_once_without_advance_consent"
+    },
+    {
+      "package": "game-persistence",
+      "function": "every_entry_point_expires_the_pair_and_stale_retries_leave_new_tickets_alone",
+      "sha256": "8366cab5866ce3497cd6d8f5011be4c0d6ed10dd96363592263ba88dccab9502",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::every_entry_point_expires_the_pair_and_stale_retries_leave_new_tickets_alone"
+    },
+    {
+      "package": "game-persistence",
+      "function": "the_database_deadline_is_exclusive_including_concurrent_rejoin",
+      "sha256": "940734e547e0304b30213514d8054288256e4c5e0cb2ba411fe98f7979bf4bea",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::the_database_deadline_is_exclusive_including_concurrent_rejoin"
+    },
+    {
+      "package": "game-persistence",
+      "function": "a_rating_lock_wait_cannot_extend_the_ready_deadline",
+      "sha256": "57392ed8e3ad3e3e3634adae2b4ecc860baa4b4fedc340d6169ee6d2c1f3b39c",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::a_rating_lock_wait_cannot_extend_the_ready_deadline"
+    },
+    {
+      "package": "game-persistence",
+      "function": "failure_after_game_creation_rolls_back_confirmation_and_all_game_artifacts",
+      "sha256": "197b3615118a2886629408519ae970056ddacd57032ed26f90f9a60427c546e6",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::failure_after_game_creation_rolls_back_confirmation_and_all_game_artifacts"
+    },
+    {
+      "package": "game-persistence",
+      "function": "inconsistent_pairs_are_rejected_before_start_or_expiry",
+      "sha256": "7c248105a80174240f18c82cde0ef8a0f16866467687dc0c344c64294fb9b86c",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-pairing/readiness/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_pairing_readiness::inconsistent_pairs_are_rejected_before_start_or_expiry"
+    },
+    {
+      "package": "game-persistence",
+      "function": "heartbeat_retries_do_not_extend_and_expired_waiting_never_revives",
+      "sha256": "c1e9eec27ebe43bdfa9ddbcd1c256d8c3f1853ad00f8e9d3212baab740236c92",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/heartbeat/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_tickets_heartbeat::heartbeat_retries_do_not_extend_and_expired_waiting_never_revives"
+    },
+    {
+      "package": "game-persistence",
+      "function": "terminal_heartbeats_survive_reconnect_without_creating_participation",
+      "sha256": "8a4857809cb076a6481ba9bb83c9aef948e9581084db2234dc38beb5f9b01c58",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/heartbeat/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_tickets_heartbeat::terminal_heartbeats_survive_reconnect_without_creating_participation"
+    },
+    {
+      "package": "game-persistence",
+      "function": "heartbeat_retries_follow_lifecycle_without_readiness_or_deadline_changes",
+      "sha256": "6cd1598ffe5ae4d725209a45458879810169bb8ef3d306f45202b2b1fc62306b",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/heartbeat/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_tickets_heartbeat::heartbeat_retries_follow_lifecycle_without_readiness_or_deadline_changes"
+    },
+    {
+      "package": "game-persistence",
+      "function": "cancellation_racing_a_match_has_one_committed_outcome",
+      "sha256": "66d810ee43762db1b5e49f13c012b61de4fda9e4c61c7888e51013ce959a7821",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/cancel/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::matchmaking_tickets_cancel::cancellation_racing_a_match_has_one_committed_outcome"
+    },
+    {
+      "package": "game-persistence",
+      "function": "missing_both_terminal_tickets_rolls_back_result_receipt_events_and_job",
+      "sha256": "c24e2375b82608d08fe4516f8249a150196689dcc23bdce8760574b26decf990",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/durable-commit/selection.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "matchmaking"
+      },
+      "previous_name": "selection::game_command_recovery_durable_commit::missing_both_terminal_tickets_rolls_back_result_receipt_events_and_job"
+    },
+    {
+      "package": "game-persistence",
+      "function": "publisher_lock_probe",
+      "sha256": "a9636c0121cf830b0afb2b7c7b4cecb7434455ef7acd1d599c9db83fc1bb949d",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/support.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::publisher_lock_probe"
+    },
+    {
+      "package": "game-persistence",
+      "function": "malformed_ledgers_and_orphaned_outbox_tables_fail_closed",
+      "sha256": "938e0c1707d56a673fe415bab684c3610ef5307f71941a823ae2834da12ce933",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/outbox.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::startup_schema_isolation_contract_game_schema::malformed_ledgers_and_orphaned_outbox_tables_fail_closed"
+    },
+    {
+      "package": "game-persistence",
+      "function": "retry_rejection_restoration_and_frozen_payload",
+      "sha256": "6748d42bcecdd45258459df1005d272060950ef2e3dbd42fc398ede6095d59b5",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::atomic_outbox::retry_rejection_restoration_and_frozen_payload"
+    },
+    {
+      "package": "game-persistence",
+      "function": "failed_enqueue_rolls_back_metadata_journal_and_events",
+      "sha256": "88d98fa7afa9a45ac07d44023b97fa22c3b2a0408cbb63ee5d00dcd1d715fa59",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::atomic_outbox::failed_enqueue_rolls_back_metadata_journal_and_events"
+    },
+    {
+      "package": "game-persistence",
+      "function": "uncertain_commit_and_retry_enqueue_once",
+      "sha256": "2cb8f41619da4fe7ac1be7fd54abae3577c2186a2ab23dd97d696cf681f21805",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/atomic-outbox/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::atomic_outbox::uncertain_commit_and_retry_enqueue_once"
+    },
+    {
+      "package": "game-persistence",
+      "function": "publisher_session_lock_excludes_a_second_process_and_releases_on_drop",
+      "sha256": "76e27e1aa09493059bd7bb420bc28ab0a4a622a2ae5185a29a05c273b5aa7c3d",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::exclusive_queue::publisher_session_lock_excludes_a_second_process_and_releases_on_drop"
+    },
+    {
+      "package": "game-persistence",
+      "function": "publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue",
+      "sha256": "49c428a19e8e39b904e7d55a86be2b7e26e70fee696d7003e4188fa7b102d7cf",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::exclusive_queue::publisher_holds_no_transaction_while_awaiting_delivery_and_writes_continue"
+    },
+    {
+      "package": "game-persistence",
+      "function": "lost_publisher_session_fails_closed_and_pending_work_can_be_reopened",
+      "sha256": "f6c9490101d47ddca03b48a099d5558fe09dcd836c659b2dafd03746bea01215",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::exclusive_queue::lost_publisher_session_fails_closed_and_pending_work_can_be_reopened"
+    },
+    {
+      "package": "game-persistence",
+      "function": "unsupported_frozen_encoding_fails_closed",
+      "sha256": "0ff8492257621c47f0c11cfd736dd26d32d113a7ee09f27d9acf31932b355c98",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::exclusive_queue::unsupported_frozen_encoding_fails_closed"
+    },
+    {
+      "package": "game-persistence",
+      "function": "frozen_events_preserve_identifiers_with_nul_and_backslashes",
+      "sha256": "1b94811a09c3a9591643a9db6fb5c61bb09838e5e5eb5c696d133b8eb6dc15d4",
+      "previous_file": "crates/game-persistence/tests/trace/durable-event-dispatch/exclusive-queue/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "outbox"
+      },
+      "previous_name": "outbox::exclusive_queue::frozen_events_preserve_identifiers_with_nul_and_backslashes"
+    },
+    {
+      "package": "game-persistence",
+      "function": "participation_is_global_and_refused_retries_remain_refused",
+      "sha256": "56325a01ad8dbd990d35dda64edad8825db9cd745d8a9f9d59a2be62536d137f",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/admission/ratings.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::matchmaking_tickets_admission::participation_is_global_and_refused_retries_remain_refused"
+    },
+    {
+      "package": "game-persistence",
+      "function": "admission_waits_for_application_and_freezes_the_new_committed_states",
+      "sha256": "8abf1d8f27bb89b84b607a94ed20a14fde7350453255743ca05e3db28ebd76e3",
+      "previous_file": "crates/game-persistence/tests/trace/matchmaking-tickets/admission/ratings.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::matchmaking_tickets_admission::admission_waits_for_application_and_freezes_the_new_committed_states"
+    },
+    {
+      "package": "game-persistence",
+      "function": "terminal_receipt_outbox_and_rating_job_commit_or_rollback_together",
+      "sha256": "19c9d01d5ab9cf0afd966683263ded08b81624d80b009a6093b3c272f301768a",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/terminal-job/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_terminal_job::terminal_receipt_outbox_and_rating_job_commit_or_rollback_together"
+    },
+    {
+      "package": "game-persistence",
+      "function": "completed_replay_is_read_only_and_never_releases_the_next_games_slots",
+      "sha256": "c78cbb57510bc71f3c26ab554bc703d504c2f2e063006e503c903ef6b6bee62c",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_atomic_application::completed_replay_is_read_only_and_never_releases_the_next_games_slots"
+    },
+    {
+      "package": "game-persistence",
+      "function": "both_pools_update_independently_from_their_frozen_start_states",
+      "sha256": "549c2982f55191f20dd632ba432cc7a75cdd6a14346e5ed7e5aa3719c35e162f",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_atomic_application::both_pools_update_independently_from_their_frozen_start_states"
+    },
+    {
+      "package": "game-persistence",
+      "function": "failed_ledger_insert_rolls_back_both_ratings_and_reservations",
+      "sha256": "6293ba27df9f1ac2cf934d6bd08323303fe2a308cedaa7925815c011be84492d",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/atomic-application/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_atomic_application::failed_ledger_insert_rolls_back_both_ratings_and_reservations"
+    },
+    {
+      "package": "game-persistence",
+      "function": "worker_reconciles_errors_before_and_after_a_real_application_commit",
+      "sha256": "d972e9c12a324a6cde8168a9a6c4f6d4eb95b8fc09779c58c4d855e6ecc84430",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/worker-reconciliation/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_worker_reconciliation::worker_reconciles_errors_before_and_after_a_real_application_commit"
+    },
+    {
+      "package": "game-persistence",
+      "function": "stale_failure_releases_recovered_job_before_returning",
+      "sha256": "2ce95fe9d2291bd3c380b560ff3c43e1690dba0d0ac4287f2839787faaef515d",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_claims_fences::stale_failure_releases_recovered_job_before_returning"
+    },
+    {
+      "package": "game-persistence",
+      "function": "stale_application_releases_recovered_job_before_returning",
+      "sha256": "714810f226473fd552e5ce60c61bde72929234e97355419d83c3064b303f6820",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_claims_fences::stale_application_releases_recovered_job_before_returning"
+    },
+    {
+      "package": "game-persistence",
+      "function": "repeated_recovery_releases_recovered_job_before_returning",
+      "sha256": "bbca6de165ed2427f9efc0057b91b2880f246aff479c0ebef1b2965794d50a4c",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_claims_fences::repeated_recovery_releases_recovered_job_before_returning"
+    },
+    {
+      "package": "game-persistence",
+      "function": "expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots",
+      "sha256": "a67c692c9b99b4944978725001d2715f15d205166a34761c1b45d91e955dedb9",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_claims_fences::expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots"
+    },
+    {
+      "package": "game-persistence",
+      "function": "lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations",
+      "sha256": "329e2cf43f77c221ffecce05fe0b738f5d30d742891d5a227a8f53a8975cd323",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_claims_fences::lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations"
+    },
+    {
+      "package": "game-persistence",
+      "function": "concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job",
+      "sha256": "2092a474d4b04d74c76d8bef31d3caa721dad911e2bd15302f32181b230e9290",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/claims-fences/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_claims_fences::concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job"
+    },
+    {
+      "package": "game-persistence",
+      "function": "corrupt_current_state_quarantines_and_retry_requires_repair",
+      "sha256": "7c7cb804deea9b329e7347ed5c8cfa7f15dbdcc9628cdbed16df82aabe056995",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/quarantine-recovery/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_quarantine_recovery::corrupt_current_state_quarantines_and_retry_requires_repair"
+    },
+    {
+      "package": "game-persistence",
+      "function": "transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit",
+      "sha256": "94e4b4e590e539176f0d91dd92eefcb4b2c82c64547d2ba0b085d9a9ad0646d3",
+      "previous_file": "crates/game-persistence/tests/trace/rating-application/quarantine-recovery/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::rating_application_quarantine_recovery::transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit"
+    },
+    {
+      "package": "game-persistence",
+      "function": "actual_reader_role_can_read_only_the_public_rating_table",
+      "sha256": "4f40603fcb26c3abd5961438fc008ba90ae600752362e695af3f312c1cc7f52f",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/reader-permissions/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "ratings"
+      },
+      "previous_name": "ratings::startup_schema_isolation_reader_permissions::actual_reader_role_can_read_only_the_public_rating_table"
+    },
+    {
+      "package": "game-persistence",
+      "function": "public_completed_metadata_only_filters_and_stable_keysets",
+      "sha256": "9e674efc7fd4c615ce24feb6fe71759cf9583fa0c99015ae1b35c17b347f8063",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/snapshot-history/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_snapshot_history::public_completed_metadata_only_filters_and_stable_keysets"
+    },
+    {
+      "package": "game-persistence",
+      "function": "corrupt_and_oversized_details_fail_without_partial_history",
+      "sha256": "94b7f81c2d4d153afca6d23511a4d45d664d1855eee43cb4d8312c3f83c8601b",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/snapshot-history/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_snapshot_history::corrupt_and_oversized_details_fail_without_partial_history"
+    },
+    {
+      "package": "game-persistence",
+      "function": "detail_keeps_one_database_view_when_history_changes_between_reads",
+      "sha256": "94fc4851dc5c1c0ae082c33086d4f3181b1ef53b35bb001414c93f162dfa3338",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/snapshot-history/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_snapshot_history::detail_keeps_one_database_view_when_history_changes_between_reads"
+    },
+    {
+      "package": "game-persistence",
+      "function": "public_history_accepts_4096_structural_operations_without_replaying_legality",
+      "sha256": "3328d42c906f54880dcfe4131d842555da86f2a711db88b2754e685649d1adf3",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/snapshot-history/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_snapshot_history::public_history_accepts_4096_structural_operations_without_replaying_legality"
+    },
+    {
+      "package": "game-persistence",
+      "function": "writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_time",
+      "sha256": "b3391b41b3e6b69b8267310f1fd56210699b512301d6f5463076d53b62c13dd7",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/records.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_metadata_invariants::writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_time"
+    },
+    {
+      "package": "game-persistence",
+      "function": "current_schema_rejects_missing_metadata_and_inconsistent_finish_time",
+      "sha256": "6e9db19772597f6ed7e81cbae16e850d28e2328291b578198a88774decb2badc",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/records.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_metadata_invariants::current_schema_rejects_missing_metadata_and_inconsistent_finish_time"
+    },
+    {
+      "package": "game-persistence",
+      "function": "finish_time_is_writer_utc_and_retries_preserve_it",
+      "sha256": "901354a166b5a934296d87aff36327127296c74ee6f5571c9bb86130fe797944",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-detail/metadata-invariants/records.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_detail_metadata_invariants::finish_time_is_writer_utc_and_retries_preserve_it"
+    },
+    {
+      "package": "game-persistence",
+      "function": "reader_does_not_create_or_accept_wrong_schema",
+      "sha256": "9c8189e38f2cb9547a56e56c6a7b1e01cfd5e3176a782f12efbddc4132e16044",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/reader-boundary/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::startup_schema_isolation_reader_boundary::reader_does_not_create_or_accept_wrong_schema"
+    },
+    {
+      "package": "game-persistence",
+      "function": "reopening_preserves_current_records_history_and_outbox",
+      "sha256": "d2eebafc1d6d1f36d0090017a660e7714a1d5dfd3764a6155725275b28621864",
+      "previous_file": "crates/game-persistence/tests/trace/game-snapshots-access/restore/records.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::game_snapshots_access_restore::reopening_preserves_current_records_history_and_outbox"
+    },
+    {
+      "package": "game-persistence",
+      "function": "identifier_encoding_preserves_binary_ties_and_cursor_round_trips",
+      "sha256": "de224ae8af56361cfc374fa9beec54139361a8bc80a29c49b791257a1a8347ce",
+      "previous_file": "crates/game-persistence/tests/trace/public-record-search/public-keysets/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::public_record_search_public_keysets::identifier_encoding_preserves_binary_ties_and_cursor_round_trips"
+    },
+    {
+      "package": "game-persistence",
+      "function": "current_schema_remains_readable_and_writable_with_query_builders",
+      "sha256": "8fb1450e1aec45e51cb9ad71be50ef34918ab9326ffdd0617c3803723fa32695",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/records.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::startup_schema_isolation_contract_game_schema::current_schema_remains_readable_and_writable_with_query_builders"
+    },
+    {
+      "package": "game-persistence",
+      "function": "fresh_builder_schema_matches_the_current_schema_fixture",
+      "sha256": "d056cf49911dfd5fdbedce8584b383a74eb4182b330ef37a5fd3aae75b8767bb",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/records.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "records"
+      },
+      "previous_name": "records::startup_schema_isolation_contract_game_schema::fresh_builder_schema_matches_the_current_schema_fixture"
+    },
+    {
+      "package": "game-persistence",
+      "function": "changed_required_schema_is_rejected_without_modifying_schema_or_data",
+      "sha256": "2ed94701bcfdaf7569689f4c176d98b154c1c325d87b5eedd5831edb850e5f84",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/schema_contract.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "previous_name": "schema_contract::changed_required_schema_is_rejected_without_modifying_schema_or_data"
+    },
+    {
+      "package": "game-persistence",
+      "function": "current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged",
+      "sha256": "87d0453ce8f89a8bd0d9f697c50ed415a5c24bec80387e39a248644cda7750fb",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/schema_contract.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "previous_name": "schema_contract::current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged"
+    },
+    {
+      "package": "game-persistence",
+      "function": "version_five_is_rejected_without_migration_or_deletion",
+      "sha256": "83199e9cf57e01c3eee4672b96c41f1e0ecc912128204606bcf303b4f66bb3cc",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/schema_contract.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "previous_name": "schema_contract::version_five_is_rejected_without_migration_or_deletion"
+    },
+    {
+      "package": "game-persistence",
+      "function": "version_six_is_rejected_unchanged",
+      "sha256": "f4fd9e67cb39a2c329dc2d6de905d3827d419bdd7a94f65d97a90c4e698908e9",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/schema_contract.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "previous_name": "schema_contract::version_six_is_rejected_unchanged"
+    },
+    {
+      "package": "game-persistence",
+      "function": "version_seven_is_rejected_by_writer_and_reader_unchanged",
+      "sha256": "89b158c960d1504271c504fe1fe7851d1eb7cd1f4157128b37bd29af855887b5",
+      "previous_file": "crates/game-persistence/tests/trace/startup-schema-isolation/contract-game-schema/schema_contract.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "schema_contract"
+      },
+      "previous_name": "schema_contract::version_seven_is_rejected_by_writer_and_reader_unchanged"
+    },
+    {
+      "package": "game-persistence",
+      "function": "ids_validate_bytes_and_unicode_whitespace",
+      "sha256": "2d53b70352589417dd53372aa70e581e947ca60cfaec7a7e7d4436bbba4d38e2",
+      "previous_file": "crates/game-persistence/tests/trace/game-play/binding/service.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_play_binding::ids_validate_bytes_and_unicode_whitespace",
+      "expected_package": "game-application",
+      "move_reason": "GameId と RequestId の内部検査を型の定義元へ移す。"
+    },
+    {
+      "package": "game-persistence",
+      "function": "concurrent_creation_has_exactly_one_winner_and_shared_state",
+      "sha256": "c9ab22a62f9c791116e5f5796877fb2ed050b6546108aaf29697fc834348372d",
+      "previous_file": "crates/game-persistence/tests/trace/game-play/binding/service.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_play_binding::concurrent_creation_has_exactly_one_winner_and_shared_state"
+    },
+    {
+      "package": "game-persistence",
+      "function": "competing_commands_at_one_sequence_accept_exactly_one",
+      "sha256": "d3256847c231d3a89d9ac664159e18d543a3af2d4926a4eea8f4ece943b85ed9",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/actor-apply/service.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_command_recovery_actor_apply::competing_commands_at_one_sequence_accept_exactly_one"
+    },
+    {
+      "package": "game-persistence",
+      "function": "concurrent_identical_retries_all_receive_original_acceptance",
+      "sha256": "4aefd9089d6e9772e7c5d5bbd7010f24bd27118b928e9555a18ff2c4d422af70",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_command_recovery_replay::concurrent_identical_retries_all_receive_original_acceptance"
+    },
+    {
+      "package": "game-persistence",
+      "function": "every_rejection_preserves_snapshot_and_does_not_reserve_id",
+      "sha256": "9b5be5b841d68f77d8f424477a650ad8bf41f3647bdfe139340a9340e6cf3393",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_command_recovery_replay::every_rejection_preserves_snapshot_and_does_not_reserve_id"
+    },
+    {
+      "package": "game-persistence",
+      "function": "replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact",
+      "sha256": "aae0bb8b9399ac841c2b266c5709e66204db18a083030ebc2d0f8b64e49de678",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_command_recovery_replay::replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact"
+    },
+    {
+      "package": "game-persistence",
+      "function": "games_and_independent_services_have_separate_id_namespaces",
+      "sha256": "8e8e2fe7e718dedace123264072dff6e20323579c58c0f5afc3f56b6914a5b57",
+      "previous_file": "crates/game-persistence/tests/trace/game-command-recovery/replay/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "service"
+      },
+      "previous_name": "service::game_command_recovery_replay::games_and_independent_services_have_separate_id_namespaces"
+    },
+    {
+      "package": "game-persistence",
+      "function": "production_sql_uses_builders_or_reviewed_postgres_operations",
+      "sha256": "344dabca15ddfa310a26b495f2cdc587172345c904a7e05976f00c1f286449a0",
+      "previous_file": "crates/game-persistence/tests/sql_policy.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "sql_policy"
+      },
+      "previous_name": "production_sql_uses_builders_or_reviewed_postgres_operations"
+    },
+    {
+      "package": "game-persistence",
+      "function": "policy_rejects_application_sql_and_interpolation",
+      "sha256": "193cf58064ac6338a8c61749d0fdeb2698569a0a266c39c13cff62034cd88a36",
+      "previous_file": "crates/game-persistence/tests/sql_policy.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "sql_policy"
+      },
+      "previous_name": "policy_rejects_application_sql_and_interpolation"
+    },
+    {
+      "package": "game-persistence",
+      "function": "policy_accepts_builders_bound_catalog_queries_and_test_fixtures",
+      "sha256": "7ab1d757d7ac67243f2aea9aab40c19706418e11df3b138b0b4d559d3f50c0ff",
+      "previous_file": "crates/game-persistence/tests/sql_policy.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "sql_policy"
+      },
+      "previous_name": "policy_accepts_builders_bound_catalog_queries_and_test_fixtures"
+    },
+    {
+      "package": "game-persistence",
+      "function": "policy_distinguishes_test_functions_from_production_sql",
+      "sha256": "d81eee1c881de684ddb68dd25d6999d0e3fd5dd8af608af54812ce64a125f5d1",
+      "previous_file": "crates/game-persistence/tests/sql_policy.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "sql_policy"
+      },
+      "previous_name": "policy_distinguishes_test_functions_from_production_sql"
+    },
+    {
+      "package": "game-record-application",
+      "function": "record_scalars_reject_values_outside_storage_bounds",
+      "sha256": "ff4c1c8d1998b7019bd7a1d02efbddff76f17e1a74dcd11db8073e35f960daa2",
+      "previous_file": "crates/game-record-application/src/trace/public-record-detail/metadata-invariants/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_detail_metadata_invariants::record_scalars_reject_values_outside_storage_bounds"
+    },
+    {
+      "package": "game-record-application",
+      "function": "metadata_construction_requires_distinct_players_and_consistent_finish_counts",
+      "sha256": "1e90e7d2d6aebe685ad41bd0f2baec800409df80928a08e8d31122ecc58f0b3e",
+      "previous_file": "crates/game-record-application/src/trace/public-record-detail/metadata-invariants/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_detail_metadata_invariants::metadata_construction_requires_distinct_players_and_consistent_finish_counts"
+    },
+    {
+      "package": "game-record-application",
+      "function": "bounds_and_cursor_binding",
+      "sha256": "78459c7d3e225677088cebd8bac20d8abb19b074736e163626dcce82c65ad9e0",
+      "previous_file": "crates/game-record-application/src/trace/public-record-search/bounds-cursor/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_search_bounds_cursor::bounds_and_cursor_binding"
+    },
+    {
+      "package": "game-record-persistence",
+      "function": "identifier_codec_preserves_storage_escapes_and_rejects_malformed_values",
+      "sha256": "bc2feaf1739ca042d52ef5f01dac7f528bbedd662a1e53d30120b8164f809af8",
+      "previous_file": "crates/game-record-persistence/src/trace/public-record-search/public-keysets/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_search_public_keysets::identifier_codec_preserves_storage_escapes_and_rejects_malformed_values"
+    },
+    {
+      "package": "game-record-persistence",
+      "function": "database_role_denies_writes_even_when_read_only_mode_is_disabled",
+      "sha256": "3e14315c558897b238965f4ab592872371778bf2e5a3fb21db4eba54efb8b573",
+      "previous_file": "crates/game-record-persistence/src/trace/startup-schema-isolation/reader-permissions/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::startup_schema_isolation_reader_permissions::database_role_denies_writes_even_when_read_only_mode_is_disabled"
+    },
+    {
+      "package": "game-record-persistence",
+      "function": "fifth_reader_connection_times_out_until_one_of_four_is_released",
+      "sha256": "19f0a360fd41b0f4246ff5683371359f6e4c5b1564694d7499ae5f93a9459feb",
+      "previous_file": "crates/game-record-persistence/src/trace/startup-schema-isolation/reader-boundary/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::startup_schema_isolation_reader_boundary::fifth_reader_connection_times_out_until_one_of_four_is_released"
+    },
+    {
+      "package": "game-record-persistence",
+      "function": "statement_timeout_interrupts_real_database_work_and_connection_recovers",
+      "sha256": "68ebef05344b3994595819f9d35cc65fc0cebd040a99c1958d382ea16a04621e",
+      "previous_file": "crates/game-record-persistence/src/trace/startup-schema-isolation/reader-boundary/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::startup_schema_isolation_reader_boundary::statement_timeout_interrupts_real_database_work_and_connection_recovers"
+    },
+    {
+      "package": "pg-test-support",
+      "function": "test_databases_have_independent_names_and_contents",
+      "sha256": "1a56cd5081fda5d290cee4663cda3cb0a4a82dcfe78810093e6a1b103ac95fdb",
+      "previous_file": "crates/pg-test-support/src/lib.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::test_databases_have_independent_names_and_contents"
+    },
+    {
+      "package": "player-http",
+      "function": "anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions",
+      "sha256": "01ca8fb40c640d85a419d8faf88b8a8d84ff761aa7288354905115e4c1733bdb",
+      "previous_file": "crates/player-http/src/trace/public-record-detail/application-forwarding/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_detail_application_forwarding::anonymous_list_is_metadata_only_and_detail_contains_only_public_ordered_actions"
+    },
+    {
+      "package": "player-http",
+      "function": "bounded_detail_and_storage_errors_are_generic",
+      "sha256": "ccb213171bdf706f6edea6043833ccd86670293086e0564e4443dc4b12662cba",
+      "previous_file": "crates/player-http/src/trace/public-record-detail/application-forwarding/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_detail_application_forwarding::bounded_detail_and_storage_errors_are_generic"
+    },
+    {
+      "package": "player-http",
+      "function": "query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage",
+      "sha256": "ba0ae6e4e75c9c42f097102d87bbff72f8af7ee75c45b3e127d3dd63251e455f",
+      "previous_file": "crates/player-http/src/trace/public-record-detail/http-boundary/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::public_record_detail_http_boundary::query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage"
+    },
+    {
+      "package": "player-http",
+      "function": "document_identifies_this_service_without_dependency_attribution",
+      "sha256": "de970bd8112e3ce72e2e98b07ea81bf9d6c07a1149d31903376bb48f30cb1fa0",
+      "previous_file": "crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_contract_player_schema::document_identifies_this_service_without_dependency_attribution"
+    },
+    {
+      "package": "player-http",
+      "function": "paths_queries_and_error_contract_are_derived_from_routes",
+      "sha256": "9998680dfc7fd72ed4b274211d6abe47037ff446c4d716a3de653ddb73dd4cc1",
+      "previous_file": "crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_contract_player_schema::paths_queries_and_error_contract_are_derived_from_routes"
+    },
+    {
+      "package": "player-http",
+      "function": "response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers",
+      "sha256": "f0c724c4f737d1bd2b83f377ad017a1d6f053faeba78de5fbf94679fe8f2f6bc",
+      "previous_file": "crates/player-http/src/trace/public-api-documents/contract-player-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_contract_player_schema::response_schemas_preserve_flattened_actions_required_null_and_unsigned_integers"
+    },
+    {
+      "package": "player-http",
+      "function": "runtime_document_equals_offline_document_without_storage_access",
+      "sha256": "92ee016efb383e03522416285d73d7792effca107b126c2d25b750e871f605af",
+      "previous_file": "crates/player-http/src/trace/public-api-documents/player-runtime/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_player_runtime::runtime_document_equals_offline_document_without_storage_access"
+    },
+    {
+      "package": "player-http",
+      "function": "sixteen_active_requests_admit_no_seventeenth_and_release_capacity",
+      "sha256": "15f421593bbbc533f9108932d273394e76a0dfadec2f6f6f358bf177370dd72d",
+      "previous_file": "crates/player-http/src/trace/public-record-search/http-resource-policy/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "contract_tests::sixteen_active_requests_admit_no_seventeenth_and_release_capacity"
+    },
+    {
+      "package": "player-http",
+      "function": "serialized_response_accepts_one_mib_and_rejects_the_next_byte",
+      "sha256": "a7217969f5b8716d6c921cc12ea092c22ded348e5dbd3a14143fcaf2c7276d62",
+      "previous_file": "crates/player-http/src/trace/public-record-search/http-resource-policy/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "contract_tests::serialized_response_accepts_one_mib_and_rejects_the_next_byte"
+    },
+    {
+      "package": "player-http",
+      "function": "anonymous_unknown_user_has_two_explicit_null_pools_and_zero_counts",
+      "sha256": "dfd18601c7e3b380d0a3d22ec7d651e7b3dd4ff73e8c59193466aae56f830fda",
+      "previous_file": "crates/player-http/src/trace/user-ratings/application-forwarding/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "rating_tests::user_ratings_application_forwarding::anonymous_unknown_user_has_two_explicit_null_pools_and_zero_counts"
+    },
+    {
+      "package": "player-http",
+      "function": "committed_values_are_pool_specific_and_storage_failures_are_503",
+      "sha256": "dba9d0964cdc61500c245249ced82bbdc07b5ad2ddaea9710bb5a4c38eb82fd6",
+      "previous_file": "crates/player-http/src/trace/user-ratings/application-forwarding/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "rating_tests::user_ratings_application_forwarding::committed_values_are_pool_specific_and_storage_failures_are_503"
+    },
+    {
+      "package": "player-http",
+      "function": "invalid_user_ids_are_rejected_before_storage",
+      "sha256": "4722ea44dca76616bb2bb27a8ae4e6f5193baad29388f33c4ef33b8273d289fc",
+      "previous_file": "crates/player-http/src/trace/user-ratings/http-input/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "rating_tests::user_ratings_http_input::invalid_user_ids_are_rejected_before_storage"
+    },
+    {
+      "package": "player-http",
+      "function": "rating_openapi_contains_required_null_rating_and_both_named_pools",
+      "sha256": "2df79b790a987d6d3d42ab3d0772ce080aa30e5ef99c2dace864c5fa8ce801d4",
+      "previous_file": "crates/player-http/src/trace/user-ratings/http-openapi/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "rating_tests::user_ratings_http_openapi::rating_openapi_contains_required_null_rating_and_both_named_pools"
+    },
+    {
+      "package": "rating-domain",
+      "function": "equal_players_gain_and_lose_sixteen",
+      "sha256": "668dc67f65a2238927184985b574604ea78ffd02ef0ddf42d430bc1b965c5163",
+      "previous_file": "crates/rating-domain/src/trace/rating-application/pure-calculation/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::equal_players_gain_and_lose_sixteen"
+    },
+    {
+      "package": "rating-domain",
+      "function": "expected_upsets_and_extremes_are_zero_sum_and_checked",
+      "sha256": "b3d798395885bd3ccf70bd896ae74f3fad351c794426f1bf7045330dc82b8374",
+      "previous_file": "crates/rating-domain/src/trace/rating-application/pure-calculation/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::expected_upsets_and_extremes_are_zero_sum_and_checked"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "same_sequence_checkmate_pair_and_conflicts",
+      "sha256": "541433894189462409e3c2b8864eb8f435f0e0f85ebebebb2e338142426dd2ef",
+      "previous_file": "crates/realtime-gateway/src/trace/realtime-game-feed/cursor/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "cursor::tests::same_sequence_checkmate_pair_and_conflicts"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "gaps_and_unpaired_checkmate_finish_require_resync",
+      "sha256": "d2d1ae268391e93f84117ba417bdfc82cd8e3a1c7eba4134da28a8c565ec32a6",
+      "previous_file": "crates/realtime-gateway/src/trace/realtime-game-feed/cursor/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "cursor::tests::gaps_and_unpaired_checkmate_finish_require_resync"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot",
+      "sha256": "0e366f01eb3d8e050f3f146d26a05d72df1efedf324f614d1c6ba2184d31d8ef",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_game_feed_bootstrap_contract::committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "participants_and_spectator_receive_committed_moves_and_resignation",
+      "sha256": "64845b2a6cc0fe56437a37faa20c61d62eb3eacc545ec37439e07d617d713130",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_game_feed_bootstrap_contract::participants_and_spectator_receive_committed_moves_and_resignation"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move",
+      "sha256": "7ee1179068d9c9dab48c7120a1d442fb140f936d8f9e95d37343afa629a46332",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-game-feed/bootstrap-contract/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_game_feed_bootstrap_contract::lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "bounded_valkey_subscription_overflow_is_terminal",
+      "sha256": "726cf9a36d33a17625d9351521b0ff5e86ff1965c1dfa2b6722b62151533c427",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-game-feed/subscription-pump/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_game_feed_subscription_pump::bounded_valkey_subscription_overflow_is_terminal"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant",
+      "sha256": "4569a9658e0e71041dc98620cc077dad6f1ad31a03552b2c7fb3d1ba0bd3eb45",
+      "previous_file": "crates/realtime-gateway/tests/trace/game-snapshots-access/access-policy/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::game_snapshots_access_access_policy::private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "handshake_requires_exact_origin_unique_session_and_supported_subprotocol",
+      "sha256": "920d70dc6edc6a40f34902b542c165c8d241315552369a25b45114cef0f0ad0d",
+      "previous_file": "crates/realtime-gateway/tests/trace/account-session/realtime-authentication/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::account_session_realtime_authentication::handshake_requires_exact_origin_unique_session_and_supported_subprotocol"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "logout_closes_before_command_and_expiry_closes_before_notification",
+      "sha256": "353b220b947b840b3e043f40a4b122be9d05561d7decfb68d03c9e04a9731bb1",
+      "previous_file": "crates/realtime-gateway/tests/trace/account-session/realtime-authentication/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::account_session_realtime_authentication::logout_closes_before_command_and_expiry_closes_before_notification"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "malformed_or_gapped_broker_notifications_require_a_new_connection",
+      "sha256": "068234dae9648e2f9bcf1eb2670d72a420677acd5651f456695144c847b60677",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-game-feed/cursor/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_game_feed_cursor::malformed_or_gapped_broker_notifications_require_a_new_connection"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "shutdown_closes_active_connections_and_refuses_new_upgrades",
+      "sha256": "57e9689ae27ac364808673411196f26d3abcb6bfe53be145ef722aa5c3256d60",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-session-commands-limits/shutdown-contract/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_session_commands_limits_shutdown_contract::shutdown_closes_active_connections_and_refuses_new_upgrades"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "shutdown_before_any_connection_refuses_the_first_upgrade",
+      "sha256": "48f2a113bc6180c85f9d00cc141e8cf02c1e4aa3a5e86559fcebf5da45e63995",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-session-commands-limits/shutdown-contract/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_session_commands_limits_shutdown_contract::shutdown_before_any_connection_refuses_the_first_upgrade"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "connection_and_user_limits_release_capacity_after_disconnect",
+      "sha256": "3d3975190df6e0c9e62176285f8535334fc07671209d5c1db946d864faa6e0c3",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-session-commands-limits/upgrade-permits/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_session_commands_limits_upgrade_permits::connection_and_user_limits_release_capacity_after_disconnect"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "oversized_frames_and_input_rate_close_without_committing_commands",
+      "sha256": "25490a84a83f3a64c915e5194353b80de83f5b340849f3c434c81c5b0d7f6589",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-session-commands-limits/command-input/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_session_commands_limits_command_input::oversized_frames_and_input_rate_close_without_committing_commands"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "snapshot_size_limit_closes_without_sending_a_partial_position",
+      "sha256": "ec3e478ba9ebd4208e51b52381f72916169c5aa8f9393e54939041023e3eeabf",
+      "previous_file": "crates/realtime-gateway/tests/trace/realtime-session-commands-limits/outgoing/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::realtime_session_commands_limits_outgoing::snapshot_size_limit_closes_without_sending_a_partial_position"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access",
+      "sha256": "35c783e0ddd7e89855ef5187f0b6ecd795a4253aebc19c40fb6e26caa563c843",
+      "previous_file": "crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::matchmaking_tickets_browser_owner::authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "matchmaking_checks_cookie_origin_and_input_before_admission",
+      "sha256": "e751b1a736455072584b827dc4559b4910beab64444fc5dde28d726146287e68",
+      "previous_file": "crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::matchmaking_tickets_browser_owner::matchmaking_checks_cookie_origin_and_input_before_admission"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "readiness_timeout_returns_a_durable_voided_pair_over_http",
+      "sha256": "960e8904556cbaa494cb7a00b7d99b6f472a46df666c8496b152654c187bee5b",
+      "previous_file": "crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-owner/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::matchmaking_tickets_browser_owner::readiness_timeout_returns_a_durable_voided_pair_over_http"
+    },
+    {
+      "package": "realtime-gateway",
+      "function": "matchmaking_openapi_covers_all_owner_scoped_routes",
+      "sha256": "6ea93bad68ed5139ef32f22a3879e8e6eedd8c289f10c47b7dbcd0588cffa090",
+      "previous_file": "crates/realtime-gateway/tests/trace/matchmaking-tickets/browser-schema/tests.rs",
+      "previous_target": {
+        "kind": "test",
+        "name": "services"
+      },
+      "previous_name": "services::matchmaking_tickets_browser_schema::matchmaking_openapi_covers_all_owner_scoped_routes"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "initial_position_and_snapshot_independence",
+      "sha256": "7e6b3a398d100b9f662bc18153c599f5efb5ee82d7108045edbd3bddba14e28c",
+      "previous_file": "crates/shogi-domain/src/trace/game-snapshots-access/owned-position/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_snapshots_access_owned_position::initial_position_and_snapshot_independence"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "cloned_games_own_their_position_and_terminal_result",
+      "sha256": "d765d0e947f11d9f25b1b1bb5bfe932e469606e2c2096bc405e7b0457b894c5c",
+      "previous_file": "crates/shogi-domain/src/trace/game-snapshots-access/owned-position/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_snapshots_access_owned_position::cloned_games_own_their_position_and_terminal_result"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "square_bounds_and_notation_are_strict",
+      "sha256": "79d3bdea1428a44dea641c8e86dc673dfabc3c1ca778d1d3a805930633c8177c",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/notation/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_notation::square_bounds_and_notation_are_strict"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "rejection_preserves_all_observable_state",
+      "sha256": "060bf999f98d4684fa69dd4009cc4774be6fa33887dcf06ff2d5f6bfbb46a55b",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/domain-play/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_domain_play::rejection_preserves_all_observable_state"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "checkmate_finishes_and_finished_precedes_turn_or_legality",
+      "sha256": "c982d5f8f3007c3038c9829bf3e99619baec4c7444754ace4253cd306ccab5da",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/domain-play/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_domain_play::checkmate_finishes_and_finished_precedes_turn_or_legality"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "no_legal_moves_without_check_is_not_checkmate",
+      "sha256": "5892d79f569eb0a0b88aa4f8e7668c54636a73c03b0baec9a3cbd06e0a036ed7",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/domain-play/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_domain_play::no_legal_moves_without_check_is_not_checkmate"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "repeated_positions_and_perpetual_check_remain_playable",
+      "sha256": "b772ae0a28e455c9ae0e499a8b5a984e03632ef8e2d7aa0a2acb87eef81e8279",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/domain-play/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_domain_play::repeated_positions_and_perpetual_check_remain_playable"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "public_errors_implement_standard_error",
+      "sha256": "df1e0d7d500963391e0d6bdf3a35e5d96bc642c285bc679eaab9d56d5bf10681",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/domain-play/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_domain_play::public_errors_implement_standard_error"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "every_piece_has_the_expected_moves_for_both_colors",
+      "sha256": "69ed9049d1c257bd61d7ca71ee78e5d58cc0238db98f4da0f784373f7d22fcd9",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::every_piece_has_the_expected_moves_for_both_colors"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "sliders_stop_at_friendly_and_enemy_blockers",
+      "sha256": "2b31211ab3f5700f1f82038096666cdf5b6463291480decbf51ed905243b0f52",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::sliders_stop_at_friendly_and_enemy_blockers"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "capture_demotes_every_promoted_kind_and_drop_consumes_hand",
+      "sha256": "c263de186ece3d085d5d5e3ba69f6247f1ee1e91796cc2349c6b1a7ab8fc3bc0",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::capture_demotes_every_promoted_kind_and_drop_consumes_hand"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "promotions_include_optional_nonpromotions_and_require_dead_rank_promotion",
+      "sha256": "c92d3fa52cfbb0e033479c430350ddc07a6a2ff5d9c7b90d82aad1b54ef7ed37",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::promotions_include_optional_nonpromotions_and_require_dead_rank_promotion"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "nifu_promoted_pawn_exception_occupied_and_missing_drops",
+      "sha256": "571c671805b84cd43c005a899300549c74cf39ed96f1995680b3c4d5782bae68",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::nifu_promoted_pawn_exception_occupied_and_missing_drops"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "dead_rank_drops_for_both_players",
+      "sha256": "929879635187b2e057f09fc289ff3403b48910645b7b9f36b80718881d34073f",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::dead_rank_drops_for_both_players"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "king_safety_pins_check_evasions_and_double_check",
+      "sha256": "74737a9bfae89bb40cecb1efaad836987049b0b3e23ddf793433e50c4055a43f",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::king_safety_pins_check_evasions_and_double_check"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "pawn_drop_mate_is_rejected_but_checking_pawn_with_escape_is_allowed",
+      "sha256": "228a204b8c1b7e04358fc145f6ad69da91f222e79dd37c64f12ef0682abdab7e",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::pawn_drop_mate_is_rejected_but_checking_pawn_with_escape_is_allowed"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "counter_failure_is_distinct_and_atomic",
+      "sha256": "3d53dfcabdfa8d89ae4a915119698a52ab249dfa7b9e8f9f074a31a5387c9305",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::counter_failure_is_distinct_and_atomic"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "ordinary_pawn_advance_mate_is_accepted",
+      "sha256": "d5b8e249758ae56a7984484a9e9a45bddb4983260d9d0dac97fca036cc0bd379",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::ordinary_pawn_advance_mate_is_accepted"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "promotion_can_start_in_zone_and_end_outside_it",
+      "sha256": "2d6f38f0a748b5553468a377593caaaa502bfbc1caa9bf6cd3a680002d3ee649",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/legal-moves/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_legal_moves::promotion_can_start_in_zone_and_end_outside_it"
+    },
+    {
+      "package": "shogi-domain",
+      "function": "either_player_can_resign_on_or_off_turn",
+      "sha256": "a72625592627288798bcaaac1cea53f134f090fa54b019a26212397ce3d2f037",
+      "previous_file": "crates/shogi-domain/src/trace/game-play/domain-resign/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::game_play_domain_resign::either_player_can_resign_on_or_off_turn"
+    },
+    {
+      "package": "user-application",
+      "function": "display_names_are_trimmed_and_bound_in_unicode_characters",
+      "sha256": "9d1455f7fce3c6d60ced9a31fdc018a2400c32323ec8ddbf928b558f9c271c57",
+      "previous_file": "crates/user-application/src/trace/account-profile/display-name/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::display_names_are_trimmed_and_bound_in_unicode_characters"
+    },
+    {
+      "package": "user-http",
+      "function": "signed_valid_token_resolves_only_issuer_and_subject",
+      "sha256": "cd05ab390fecb838b43cd8ddd11829675a178a35e7e18b6b257a2539eed14117",
+      "previous_file": "crates/user-http/src/trace/account-google-login/verified-claims/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "google::tests::account_google_login_verified_claims::signed_valid_token_resolves_only_issuer_and_subject"
+    },
+    {
+      "package": "user-http",
+      "function": "signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected",
+      "sha256": "ab3df7aea24383322a937320d066d25fc4db093f3593f64df1c3c1cd25f79c33",
+      "previous_file": "crates/user-http/src/trace/account-google-login/verified-claims/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "google::tests::account_google_login_verified_claims::signed_wrong_issuer_audience_nonce_expiry_or_azp_is_rejected"
+    },
+    {
+      "package": "user-http",
+      "function": "substituted_access_token_and_tampered_signature_are_rejected",
+      "sha256": "370c5ff0a68eb406b4532c636e5be0a93faffdc72cd5069ed24295477d33e374",
+      "previous_file": "crates/user-http/src/trace/account-google-login/verified-claims/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "google::tests::account_google_login_verified_claims::substituted_access_token_and_tampered_signature_are_rejected"
+    },
+    {
+      "package": "user-http",
+      "function": "authorization_uses_openid_profile_state_nonce_and_s256_pkce",
+      "sha256": "1ad8cbb6a978783d2523c76571d5a33b25f7dde1b7ba7e8b95349c7ea3063b2d",
+      "previous_file": "crates/user-http/src/trace/account-google-login/provider-authorization/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "google::tests::account_google_login_provider_authorization::authorization_uses_openid_profile_state_nonce_and_s256_pkce"
+    },
+    {
+      "package": "user-http",
+      "function": "code_exchange_sends_pkce_and_verifies_signed_token_over_http",
+      "sha256": "6ff85f0c9236907a9485c7d452034a7337add00e1d0cd8f3a543370697bacd6a",
+      "previous_file": "crates/user-http/src/trace/account-google-login/provider-exchange/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "google::tests::account_google_login_provider_exchange::code_exchange_sends_pkce_and_verifies_signed_token_over_http"
+    },
+    {
+      "package": "user-http",
+      "function": "registration_profile_update_csrf_logout_and_restart",
+      "sha256": "c0bed8022f7815d2e951717d138c1e5ef8fa73fa192ff666a4436cf03da13335",
+      "previous_file": "crates/user-http/src/trace/account-profile/existing-identity/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_profile_existing_identity::registration_profile_update_csrf_logout_and_restart"
+    },
+    {
+      "package": "user-http",
+      "function": "login_is_browser_bound_and_consumed_before_any_exchange",
+      "sha256": "1b08227ff11a8a6df3189f78809829191a37e463ea6a7170aa35f38908f37fa6",
+      "previous_file": "crates/user-http/src/trace/account-google-login/http-attempt/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_google_login_http_attempt::login_is_browser_bound_and_consumed_before_any_exchange"
+    },
+    {
+      "package": "user-http",
+      "function": "browser_flow_over_real_tcp_http_routes",
+      "sha256": "0a38dc35afdd4dd12ec7859d2685a8e5bb4229870c6d1f75133f50383ed0ba07",
+      "previous_file": "crates/user-http/src/trace/account-google-login/http-attempt/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_google_login_http_attempt::browser_flow_over_real_tcp_http_routes"
+    },
+    {
+      "package": "user-http",
+      "function": "persisted_browser_credentials_are_hashes_not_cookie_values",
+      "sha256": "8c9a334b5bf10801bb5eb3f89e2d7278eb7c3e2913cab4ef26acfca2ec5f75c1",
+      "previous_file": "crates/user-http/src/trace/account-google-login/http-attempt/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_google_login_http_attempt::persisted_browser_credentials_are_hashes_not_cookie_values"
+    },
+    {
+      "package": "user-http",
+      "function": "tampered_and_duplicate_session_cookies_never_authenticate",
+      "sha256": "f21f6dd4599107b98ef4b32f82687a15b45822d319e14cc1c29fa68c8e489bb4",
+      "previous_file": "crates/user-http/src/trace/account-session/session-cookie-input/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_session_session_cookie_input::tampered_and_duplicate_session_cookies_never_authenticate"
+    },
+    {
+      "package": "user-http",
+      "function": "production_cookies_have_host_prefix_and_secure_attributes",
+      "sha256": "fdbf7a969979f2534b3536eabf117ff2d241379d6c1fc176d1e607c004d7be5f",
+      "previous_file": "crates/user-http/src/trace/account-session/cookie-issuance/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_session_cookie_issuance::production_cookies_have_host_prefix_and_secure_attributes"
+    },
+    {
+      "package": "user-http",
+      "function": "configuration_fails_closed",
+      "sha256": "d442470d9674a5753dba441fbd1dc651966091ea5e1e6be5ff43fb12cda7f32a",
+      "previous_file": "crates/user-http/src/trace/startup-schema-isolation/contract-browser-config/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::startup_schema_isolation_contract_browser_config::configuration_fails_closed"
+    },
+    {
+      "package": "user-http",
+      "function": "document_identifies_this_service_without_dependency_attribution",
+      "sha256": "de970bd8112e3ce72e2e98b07ea81bf9d6c07a1149d31903376bb48f30cb1fa0",
+      "previous_file": "crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_contract_user_schema::document_identifies_this_service_without_dependency_attribution"
+    },
+    {
+      "package": "user-http",
+      "function": "document_has_all_routes_real_schemas_and_cookie_security_alternatives",
+      "sha256": "dbe65a2930576b3665ceae1cea298ac3d54ade1127df65839fb03ae5caefefda",
+      "previous_file": "crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_contract_user_schema::document_has_all_routes_real_schemas_and_cookie_security_alternatives"
+    },
+    {
+      "package": "user-http",
+      "function": "document_distinguishes_json_errors_and_framework_text_rejections",
+      "sha256": "b687896e7adbf77f1ad14a2aeb8aef0cd6814ffdb18a181c1f33f43e2f151ee9",
+      "previous_file": "crates/user-http/src/trace/public-api-documents/contract-user-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_contract_user_schema::document_distinguishes_json_errors_and_framework_text_rejections"
+    },
+    {
+      "package": "user-http",
+      "function": "runtime_rejection_status_and_media_match_documented_contract",
+      "sha256": "60e449507bad490d6a62197bb5ba8696a3734ae888d002fbe108ec4812fcb650",
+      "previous_file": "crates/user-http/src/trace/account-profile/http-rename/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::account_profile_http_rename::runtime_rejection_status_and_media_match_documented_contract"
+    },
+    {
+      "package": "user-http",
+      "function": "runtime_document_equals_offline_document_without_storage_or_provider_calls",
+      "sha256": "6c5dba558b9667fb05ee20cd33d5c88cdbd7179c3c127fad0ad5216fc5904f9e",
+      "previous_file": "crates/user-http/src/trace/public-api-documents/user-runtime/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "openapi_tests::public_api_documents_user_runtime::runtime_document_equals_offline_document_without_storage_or_provider_calls"
+    },
+    {
+      "package": "user-id",
+      "function": "preserves_valid_identifiers_and_rejects_byte_and_whitespace_boundaries",
+      "sha256": "651e93c920c851ba425c0de10445a6105b40b3a9508645e54a710d753102e5cc",
+      "previous_file": "crates/user-id/src/trace/account-profile/user-id/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::preserves_valid_identifiers_and_rejects_byte_and_whitespace_boundaries"
+    },
+    {
+      "package": "user-persistence",
+      "function": "concurrent_first_logins_and_callback_consumption_converge",
+      "sha256": "819ee27c78e81b83cd5d96bc3b93a90bb8b0c7168255e448aee67875066ffed5",
+      "previous_file": "crates/user-persistence/src/trace/account-google-login/account-session-transaction/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_google_login_account_session_transaction::concurrent_first_logins_and_callback_consumption_converge"
+    },
+    {
+      "package": "user-persistence",
+      "function": "failed_session_insert_rolls_back_a_new_identity",
+      "sha256": "41c28bbe9d014465ffa90ddee9e6a04e58a7dfe91cde5526484dee04314f6057",
+      "previous_file": "crates/user-persistence/src/trace/account-google-login/account-session-transaction/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_google_login_account_session_transaction::failed_session_insert_rolls_back_a_new_identity"
+    },
+    {
+      "package": "user-persistence",
+      "function": "expired_attempts_and_sessions_cannot_be_used",
+      "sha256": "fac1cb4567636305306b40517921475e07851a6b0948b3d103d38245ec419fbe",
+      "previous_file": "crates/user-persistence/src/trace/account-google-login/attempt-consumption/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_google_login_attempt_consumption::expired_attempts_and_sessions_cannot_be_used"
+    },
+    {
+      "package": "user-persistence",
+      "function": "existing_schema_and_data_survive_builder_refactor",
+      "sha256": "42ad29872145e092935f798cdafa7cdab9ec077bb3a2eca49ae45b4b04be4a29",
+      "previous_file": "crates/user-persistence/src/trace/account-profile/existing-identity/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::account_profile_existing_identity::existing_schema_and_data_survive_builder_refactor"
+    },
+    {
+      "package": "user-persistence",
+      "function": "missing_ledger_or_changed_indexes_fail_closed",
+      "sha256": "002a3bd7ce8faf9d3e619d2580cd8abf004498b49cc2afa8b2f07c1d99a1360e",
+      "previous_file": "crates/user-persistence/src/trace/startup-schema-isolation/contract-account-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::startup_schema_isolation_contract_account_schema::missing_ledger_or_changed_indexes_fail_closed"
+    },
+    {
+      "package": "user-persistence",
+      "function": "schema_constraints_and_ledger_are_checked_on_reopen",
+      "sha256": "94bfe59d42dfe9c39c437a3676c9d7f1c2befd5ce6b05a7653f138a95b3c4ce7",
+      "previous_file": "crates/user-persistence/src/trace/startup-schema-isolation/contract-account-schema/tests.rs",
+      "previous_target": {
+        "kind": "lib"
+      },
+      "previous_name": "tests::startup_schema_isolation_contract_account_schema::schema_constraints_and_ledger_are_checked_on_reopen"
+    }
+  ]
+}
