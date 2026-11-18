@@ -2,9 +2,12 @@
 
 フロントエンド利用者への保証から、直接やり取りするコンポーネント間の契約と、その境界を検証するテストをたどれるようにする。
 内部テストは所属コンポーネントの中で管理する。
-本書は実装前の提案であり、既存の宣言、テスト配置、ツールの動作はまだ変更しない。
+本書は実装前に承認された設計と、実装時の照合結果を記録する。
+宣言の正確なフィールドは[共通モデル](../../scripts/traceability_model.rs)、更新手順は[操作ガイド](../how-to/check-traceability.md)を参照する。
 
-## 現状と変更理由
+## 移行前の構造と変更理由
+
+この節は移行前の commit `3d0240c` の構造を説明する。
 
 [共通モデル](../../scripts/traceability_model.rs)の `Contract` は説明、実装ソース、gap だけを持つ。
 契約の当事者や上下関係を持たない。
@@ -13,7 +16,7 @@
 [Python validator](../../scripts/traceability.py) は feature ごとの平坦なグラフを検査し、[viewer](../../scripts/traceability_viewer/viewer.js) は保証、契約、テストの固定三列を表示する。
 
 この構造では、内部テストの収録にも契約が必要になり、内部責務の収録にも feature が必要になる。
-実際に [rating-application](../../crates/game-application/src/trace/rating-application/feature.rs) と [startup-schema-isolation](../../crates/game-persistence/src/trace/startup-schema-isolation/feature.rs) はフロントエンド向け操作を持たない。
+実際に `rating-application` と `startup-schema-isolation` はフロントエンド向け操作を持たなかった。
 
 Git の `d630bcb` は Rust 宣言による収集、`426d6e7` は feature と契約によるテスト配置、`396f786` は生成 Markdown の廃止を導入している。
 これらと[現行手順](../how-to/check-traceability.md)から、ソースを正本にすること、通常の Rust モジュールでテストを接続すること、実際の Cargo テスト一覧と照合することを維持する。
@@ -172,12 +175,12 @@ public-record-detail の保証
         game-record-persistence → PostgreSQL の読み取り契約
 ```
 
-[現在の application-forwarding テスト](../../crates/player-http/src/trace/public-record-detail/application-forwarding/tests.rs)は、実ルーターと実 DB を通る複数境界のテストである。
+[application-forwarding テスト](../../crates/player-http/tests/contracts/public-record-detail/application-forwarding/tests.rs)には、実ルーターと実 DB を通る複数境界のテストがある。
 その存在だけで全境界を `asserts` に変更しない。
 HTTP 応答を検査する関係、repository を通過するだけの関係など、現在の説明を読み直して対応付ける。
 `metadata-invariants` のコンストラクター検査は application 内部へ戻す。
 
-`worker-reconciliation` は、実 `RatingWorker` と実 PostgreSQL repository のコミット前後に失敗を注入する[既存テスト](../../crates/game-persistence/tests/trace/rating-application/worker-reconciliation/tests.rs)を持つ。
+`worker-reconciliation` は、実 `RatingWorker` と実 PostgreSQL repository のコミット前後に失敗を注入する[既存テスト](../../crates/game-persistence/tests/contracts/rating-application/worker-reconciliation/tests.rs)を持つ。
 これは game-application → game-persistence の境界根拠として残す。
 feature 名 `rating-application` を残すための架空のフロントエンド操作は作らない。
 公開レート取得の保証を「即時にジョブ処理が完了する」へ強めない。
@@ -418,5 +421,35 @@ python3 scripts/traceability.py viewer --output /tmp/traceability.html
 根拠のない保証に gap が残ることを確認し、移動だけで検証済み範囲を増やさない。
 既定の host・Cargo feature 構成以外を網羅しないという現在の制限は維持する。
 
-この設計段階ではコードやテストを移動せず、上記の実装後検査もまだ実行しない。
-次の実装単位は、新しい bundle とテスト分類を collector の fixture で表し、`public-record-detail` の一経路を新構造へ通すことである。
+## 実装との照合
+
+bundle version 2 に移行し、全 package に同じ宣言・テスト分類の規約を適用した。
+API・port 仕様の所有者は呼出元と別に記録する。
+例えば `MatchmakingRepository` の定義元は game-application、実呼出元は game-grpc、提供元は game-persistence になる。
+外部提供元の実装ソースを偽装せず、`implementation` を None としてローカルの通信箇所を記録する。
+
+private なルール fixture は内部テストとして維持した。
+公開 Game API だけを使う境界テストを二件追加した。
+公開 API で構築できる HTTP ルーターの既存テストは、製品 API の可視性を広げず integration target へ移した。
+API 仕様のオフライン生成だけを検査するテストを、実 HTTP 操作の根拠へ関連付けない。
+
+通知購読と Google のコード交換は、実際に呼び出す外部境界を requires に含めた。
+購読コンポーネントの接続・復号・溢れの処理と、ゲートウェイのシーケンス欠落判定を区別した。
+信頼済み GetSnapshot と、閲覧者のアクセス権を確認する GetSnapshotForViewer も、契約と根拠を分けた。
+
+元の 210 テストの関数 tokens を rustfmt で正規化した SHA-256 を[履歴スナップショット](traceability-migration-baseline.json)へ保存した。
+[移行検査](../../scripts/check-traceability-migration.py)は、その SHA-256 を比較し、本文変更・欠落・意図しない package 変更を拒否する。
+書式変更で省略可能な関数引数末尾のカンマを同一視する一方、タプルの要素数を変えるカンマは同一視しない。
+型の所有者へ移した ID 検査一件だけは、元と移動先の package をスナップショットに明記した。
+このファイルは移行の履歴資料であり、現行テスト一覧の正本として更新し続けるものではない。
+
+収集結果を照合する場合は次を実行する。
+
+```sh
+cargo run --quiet --locked --manifest-path tools/traceability/Cargo.toml --target-dir target -- --scan . > /tmp/traceability-scan.json
+python3 scripts/check-traceability-migration.py docs/design/traceability-migration-baseline.json /tmp/traceability-scan.json
+```
+
+viewer では契約の下位参照、上位からの逆参照、入口にする保証を表示する。
+複数 feature に関係するテストから別の契約へ移動する場合は、その契約の所有コンポーネントへ切り替える。
+port の仕様所有者が当事者と異なる場合も、所有コンポーネントから契約を参照できる。

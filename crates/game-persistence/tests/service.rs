@@ -1,4 +1,4 @@
-#[path = "trace/game-play/support.rs"]
+#[path = "contracts/game-play/support.rs"]
 mod service;
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]

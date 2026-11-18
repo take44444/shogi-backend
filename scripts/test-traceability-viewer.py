@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import copy
-import importlib.util
+import shutil
 import json
 from pathlib import Path
 import subprocess
@@ -10,10 +10,6 @@ from unittest.mock import patch
 
 import traceability_viewer as viewer
 
-CHECKER = Path(__file__).with_name("traceability.py")
-spec = importlib.util.spec_from_file_location("traceability", CHECKER)
-traceability = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(traceability)
 
 
 class ViewerTests(unittest.TestCase):
@@ -26,27 +22,50 @@ class ViewerTests(unittest.TestCase):
         self.record = Path("trace/feature.rs")
         (self.root / self.record).parent.mkdir()
         (self.root / self.record).write_text("// feature declaration\n")
-        self.graph = {
-            "version": 1,
-            "feature": {"id": "demo", "title": "日本語 </script><script>alert(1)</script>", "flow": ["処理"],
-                        "source": {"path": self.source.name, "needle": "// feature"}},
-            "guarantees": [{"id": "guarantee", "statement": "保証", "contracts": ["contract"]},
-                           {"id": "shared", "statement": "共有の保証", "contracts": ["contract"]}],
-            "contracts": [{"id": "contract", "statement": "契約", "source": {"path": self.source.name, "needle": "// contract"},
-                           "gap": "未検証事項", "evidence": [{"test": "test", "relationship": "asserts", "reason": "根拠"}]}],
-            "tests": [{"id": "test", "package": "sample", "target": {"kind": "lib"}, "name": "module::selected", "scope": "範囲",
-                       "source": {"path": self.source.name, "needle": "fn selected() {}", "line": 3}}],
-            "limitations": ["限界"],
+        anchor = lambda needle: {"path": self.source.name, "needle": needle}
+        self.bundle = {
+            "version": 2,
+            "components": [{"id": "sample", "package": "sample", "path": ".", "description": "コンポーネント",
+                            "notes": ["内部の注記"], "external": [{"id": "frontend", "title": "ブラウザー"}],
+                            "operations": [], "entrypoints": [{"name": "起動", "source": anchor("// feature")}], "record": self.record.as_posix()}],
+            "features": [{"id": "demo", "title": "日本語 </script><script>alert(1)</script>", "flow": ["処理"],
+                          "owner": "sample", "record": self.record.as_posix(), "source": anchor("// feature"),
+                          "guarantees": [{"id": "guarantee", "statement": "保証", "roots": ["sample/root"]},
+                                         {"id": "shared", "statement": "共有の保証", "roots": ["sample/root"]}], "limitations": ["限界"]}],
+            "contracts": [], "tests": [], "inventories": [], "packages": [], "examples": [], "excluded_targets": [],
         }
+        for component in ("middle", "storage"):
+            self.bundle["components"].append({"id": component, "package": component, "path": component,
+                "description": component, "notes": [], "external": [], "operations": [], "entrypoints": [], "record": None})
+        for name, consumer, provider, dependencies in [
+            ("root", "frontend", "sample", ["middle/left", "middle/right"]),
+            ("left", "sample", "middle", ["storage/leaf"]),
+            ("right", "sample", "middle", ["storage/leaf"]),
+            ("leaf", "middle", "storage", []),
+        ]:
+            self.bundle["contracts"].append({"id": f"{provider}/{name}", "owner": provider, "record": self.record.as_posix(),
+                "consumer": consumer, "provider": provider, "interface": "Http" if name == "root" else "RustApi",
+                "statement": f"契約 {name}", "source": anchor("// contract"), "call": anchor("// feature"),
+                "implementation": anchor("fn selected() {}"), "binding": None,
+                "assumptions": ["前提"], "limitations": ["限界"], "gap": "未検証事項",
+                "requires": [{"contract": child, "reason": "下位の責務が必要"} for child in dependencies]})
+        for classification in ["boundary", "internal", "infrastructure", "helper"]:
+            semantics = {"evidence": [{"contract": "storage/leaf", "relationship": "asserts", "scope": "範囲", "reason": "根拠",
+                                       "observation": "ProviderBoundary", "real": ["storage"], "fake": ["middle"]}]} if classification == "boundary" else {}
+            if classification in ("infrastructure", "helper"):
+                semantics = {"reason": "分類の理由"}
+                if classification == "infrastructure":
+                    semantics["category"] = "環境"
+            self.bundle["tests"].append({"id": classification, "package": "sample", "target": {"kind": "test", "name": "contracts"},
+                                        "name": f"module::{classification}", "source": {**anchor("fn selected() {}"), "line": 3},
+                                        "classification": classification, "semantics": semantics})
         self.destination = self.root / "target/viewer.html"
 
-    def traces(self, graph=None):
-        graph = graph or self.graph
-        graph, lines = traceability.validate_graph(self.root, graph, parsed_tests=True)
-        return [(self.record, graph, lines)]
+    def traces(self):
+        return self.bundle
 
-    def export(self, traces=None):
-        viewer.write_viewer(self.root, traces or self.traces(), self.destination)
+    def export(self, bundle=None):
+        viewer.write_viewer(self.root, bundle if bundle is not None else self.bundle, self.destination)
         content = self.destination.read_text()
         start = '<script id="viewer-data" type="application/json">'
         data = content.split(start, 1)[1].split("</script>", 1)[0]
@@ -67,41 +86,40 @@ class ViewerTests(unittest.TestCase):
             self.git("remote", "add", "origin", origin)
         return self.git("rev-parse", "HEAD")
 
-    def test_graph_payload_is_preserved_scoped_and_sources_are_deduplicated(self):
-        traces = self.traces()
-        for relationship in ("exercises", "unreviewed"):
-            other = copy.deepcopy(self.graph)
-            other["feature"]["id"] = relationship
-            other["contracts"][0]["evidence"][0]["relationship"] = relationship
-            traces.extend(self.traces(other))
-        content, payload = self.export(traces)
-        self.assertEqual(payload["version"], 1)
+    def test_bundle_payload_and_all_source_anchors_are_captured_without_duplication(self):
+        content, payload = self.export()
+        self.assertEqual(payload["version"], 2)
+        self.assertEqual(payload["bundle"], self.bundle)
         self.assertEqual(set(payload["files"]), {self.record.as_posix(), self.source.name})
         self.assertEqual(payload["files"][self.source.name]["content"].encode(), self.source.read_bytes())
-        self.assertEqual(payload["features"][0]["graph"], self.graph)
-        self.assertEqual(payload["features"][0]["locations"]["test"], {"path": self.source.name, "line": 3})
-        self.assertNotIn("guarantee", payload["features"][0]["locations"])
-        self.assertEqual([item["graph"]["contracts"][0]["evidence"][0]["relationship"] for item in payload["features"]],
-                         ["asserts", "exercises", "unreviewed"])
+        self.assertEqual(payload["locations"][self.source.name], {"// feature": 1, "// contract": 2, "fn selected() {}": 3})
         self.assertNotIn(str(self.root), content)
         self.assertNotIn('</script><script>alert(1)</script>', content)
         self.assertNotIn('<img src=x', content)
         self.assertNotIn("/* VIEWER_", content)
         self.assertNotIn("<!-- VIEWER_DATA -->", content)
-        self.assertIsNone(payload["repository"]["revision"])
-        self.assertIsNone(payload["files"][self.source.name]["github_url"])
         first = self.destination.read_bytes()
-        self.export(traces)
+        self.export()
         self.assertEqual(first, self.destination.read_bytes())
 
-    def test_gap_without_tests_and_multiple_guarantees_are_preserved(self):
-        self.graph["contracts"][0]["evidence"] = []
-        self.graph["tests"] = []
+    def test_gaps_shared_contracts_and_all_classifications_are_preserved(self):
+        self.bundle["tests"][0]["semantics"]["evidence"] = []
         _, payload = self.export()
-        graph = payload["features"][0]["graph"]
-        self.assertEqual(graph["tests"], [])
-        self.assertEqual(graph["contracts"][0]["gap"], "未検証事項")
-        self.assertEqual(len(graph["guarantees"]), 2)
+        self.assertEqual(payload["bundle"], self.bundle)
+        self.assertEqual(len(payload["bundle"]["contracts"]), 4)
+        self.assertEqual([test["classification"] for test in payload["bundle"]["tests"]],
+                         ["boundary", "internal", "infrastructure", "helper"])
+        self.assertEqual(payload["bundle"]["contracts"][0]["gap"], "未検証事項")
+
+    def test_optional_anchors_and_records_are_validated(self):
+        extra = self.root / "optional.rs"
+        extra.write_text("fn bind() {}\n")
+        self.bundle["contracts"][0]["binding"] = {"path": extra.name, "needle": "fn bind() {}"}
+        _, payload = self.export()
+        self.assertIn(extra.name, payload["files"])
+        extra.write_text("fn changed() {}\n")
+        with self.assertRaisesRegex(ValueError, "anchor changed"):
+            self.export()
 
     def test_revision_links_require_exact_bytes_for_each_file(self):
         revision = self.repository()
@@ -162,9 +180,15 @@ class ViewerTests(unittest.TestCase):
 
     def test_declaration_path_cannot_embed_absolute_checkout_paths(self):
         traces = self.traces()
-        traces[0] = (self.root / self.record, traces[0][1], traces[0][2])
+        traces["features"][0]["record"] = str(self.root / self.record)
         with self.assertRaisesRegex(ValueError, "repository-relative"):
             viewer.write_viewer(self.root, traces, self.destination)
+
+    def test_rejects_source_paths_that_escape_the_repository(self):
+        for path in ("../source.rs", str(self.source), "./" + self.source.name):
+            self.bundle["features"][0]["source"]["path"] = path
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "repository-relative"):
+                self.export()
 
     def test_rejects_inputs_tracked_files_tool_assets_and_git_metadata(self):
         self.repository()
@@ -186,11 +210,109 @@ class ViewerTests(unittest.TestCase):
             viewer.write_viewer(self.root, self.traces(), link)
         worktree = self.root / "linked-worktree"
         self.git("worktree", "add", "--detach", str(worktree), "HEAD")
-        traces = [(record, graph, lines) for record, graph, lines in self.traces()]
+        traces = self.traces()
         metadata = worktree / ".git"
         for destination in (metadata, self.root / ".git/worktrees/linked-worktree/HEAD", self.root / ".git/config"):
             with self.assertRaisesRegex(ValueError, "refusing to overwrite"):
                 viewer.write_viewer(worktree, traces, destination)
+
+    def test_browser_navigation_dag_classifications_and_source_snapshot(self):
+        node = shutil.which("node")
+        candidates = [Path(__file__).resolve().parents[1] / "node_modules/playwright"]
+        candidates.extend((Path.home() / ".npm/_npx").glob("*/node_modules/playwright"))
+        playwright = next((path for path in candidates if path.is_dir()), None)
+        if node is None or playwright is None:
+            self.skipTest("Node and Playwright are required for the browser driver")
+        detached = copy.deepcopy(self.bundle["contracts"][-1])
+        detached.update(id="middle/detached", owner="middle", consumer="sample", provider="storage", requires=[])
+        self.bundle["contracts"].append(detached)
+        extra_evidence = copy.deepcopy(self.bundle["tests"][0]["semantics"]["evidence"][0])
+        extra_evidence["contract"] = "middle/detached"
+        self.bundle["tests"][0]["semantics"]["evidence"].append(extra_evidence)
+        for relationship in ("exercises", "unreviewed"):
+            test = copy.deepcopy(self.bundle["tests"][0])
+            test["id"] = relationship
+            test["name"] = f"module::{relationship}"
+            test["semantics"]["evidence"][0]["relationship"] = relationship
+            self.bundle["tests"].append(test)
+        self.export()
+        component_only = copy.deepcopy(self.bundle)
+        component_only["features"] = []
+        component_destination = self.destination.with_name("components.html")
+        viewer.write_viewer(self.root, component_only, component_destination)
+        driver = r"""
+const assert = require('node:assert/strict');
+const { chromium } = require(process.argv[1]);
+(async () => {
+  const browser = await chromium.launch({headless: true});
+  const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(process.argv[2]);
+  assert.equal(await page.locator('.graph-node[data-kind="contract"]').count(), 4);
+  assert.equal(await page.locator('.graph-node[data-node-id="storage/leaf"]').count(), 1);
+  const depth = await page.locator('.graph-node[data-kind="contract"]').evaluateAll(nodes => new Set(nodes.map(node => node.style.left)).size);
+  assert.equal(depth, 3);
+  assert.equal(await page.locator('.graph-node[data-kind="test"]').count(), 0);
+  await page.locator('.graph-node[data-node-id="storage/leaf"]').click();
+  for (const parent of ['middle/left', 'middle/right']) {
+    assert.equal(await page.locator(`#details [data-related-id="${parent}"]`).count(), 1);
+  }
+  for (const relationship of ['asserts', 'exercises', 'unreviewed']) {
+    assert.equal(await page.locator(`.edge-button[data-relationship="${relationship}"]`).count(), 1);
+  }
+  const evidence = page.locator('.edge-button[data-relationship="asserts"]');
+  await evidence.focus();
+  await page.keyboard.press('Enter');
+  assert.match(await page.locator('#details').innerText(), /harness/);
+  assert.match(await page.locator('#details').innerText(), /範囲/);
+  const hash = new URL(page.url()).hash;
+  assert.ok(!hash.includes('undefined'));
+  await page.reload();
+  assert.match(await page.locator('#details').innerText(), /harness/);
+  await page.locator('#details [data-related-id="boundary"]').click();
+  const source = page.locator('#details [data-source-open]');
+  await source.click();
+  assert.equal(await page.locator('#source-dialog').evaluate(dialog => dialog.open), true);
+  assert.match(await page.locator('#source-lines [aria-current="true"]').innerText(), /fn selected/);
+  await page.keyboard.press('Escape');
+  assert.equal(await source.evaluate(control => document.activeElement === control), true);
+  await page.locator('#details [data-related-id="middle/detached"]').click();
+  assert.match(page.url(), /component=middle/);
+  assert.match(page.url(), /id=middle%2Fdetached/);
+  assert.equal(await page.locator('#notice').evaluate(node => node.hidden), true);
+  assert.match(await page.locator('#details').innerText(), /sample → storage/);
+  await page.reload();
+  assert.match(await page.locator('#details').innerText(), /sample → storage/);
+  await page.locator('[data-entry-kind="component"][data-entry-id="sample"]').click();
+  for (const classification of ['internal', 'infrastructure', 'helper']) {
+    const control = page.locator(`.graph-node[data-node-id="${classification}"]`);
+    await control.focus();
+    await page.keyboard.press('Enter');
+    assert.match(await page.locator('#details').innerText(), /契約の根拠リンクを付けません/);
+    assert.equal(await page.locator(`.edge-button[data-to="test:${classification}"]`).count(), 0);
+  }
+  await page.goBack();
+  assert.match(page.url(), /id=infrastructure/);
+  await page.locator('[data-entry-kind="feature"]').click();
+  await page.locator('.graph-node[data-node-id="sample/root"]').click();
+  assert.equal(await page.locator('#details [data-parent-feature="demo"]').count(), 2);
+  assert.equal(await page.locator('.edge-button[data-relationship="asserts"]').count(), 0);
+  assert.match(await page.locator('#details').innerText(), /直接の根拠はありません/);
+  await page.evaluate(() => { location.hash = 'feature=demo&kind=contract&id=missing'; });
+  await page.waitForFunction(() => !document.getElementById('notice').hidden);
+  await page.goto(process.argv[3]);
+  assert.equal(await page.locator('[data-entry-kind="feature"]').count(), 0);
+  assert.equal(await page.locator('[data-entry-kind="component"]').count(), 3);
+  await page.locator('[data-entry-kind="component"][data-entry-id="storage"]').click();
+  await page.locator('.graph-node[data-node-id="storage/leaf"]').click();
+  assert.equal(await page.locator('.edge-button[data-relationship="asserts"]').count(), 1);
+  assert.deepEqual(errors, []);
+  await browser.close();
+})().catch(error => { console.error(error); process.exit(1); });
+"""
+        result = subprocess.run([node, "-e", driver, str(playwright), self.destination.as_uri(), component_destination.as_uri()], capture_output=True, text=True, timeout=90)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_replace_failure_preserves_output_and_cleans_temporary_file(self):
         self.export()

@@ -143,5 +143,5 @@ impl From<Snapshot> for proto::Snapshot {
 }
 
 #[cfg(test)]
-#[path = "trace/game-play/rpc-errors/tests.rs"]
+#[path = "tests/game-play/rpc-errors/tests.rs"]
 mod tests;

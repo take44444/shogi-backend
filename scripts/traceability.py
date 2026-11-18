@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate source-backed feature graphs and export the HTML viewer."""
+"""Validate component contracts and test identities, and export the HTML viewer."""
 import argparse
 from collections import Counter
 import json
@@ -73,75 +73,330 @@ def source_location(source, root, *, parsed_test=False):
     return content[:content.index(needle)].count("\n") + 1
 
 
-def validate_graph(root, graph, *, parsed_tests=False):
-    fields(graph, ("version", "feature", "guarantees", "contracts", "tests", "limitations"))
-    require(type(graph["version"]) is int and graph["version"] == 1, "unsupported version")
-    fields(graph["feature"], ("id", "title", "source", "flow"))
-    text(graph["feature"]["title"])
-    for step in sequence(graph["feature"]["flow"]):
-        text(step)
-    for limitation in sequence(graph["limitations"]):
-        text(limitation)
-    nodes = [graph["feature"]]
-    for group, required, optional in (
-        ("guarantees", ("id", "statement", "contracts"), ()),
-        ("contracts", ("id", "statement", "source", "evidence"), ("gap",)),
-        ("tests", ("id", "package", "target", "name", "source", "scope"), ()),
-    ):
-        for node in sequence(graph[group], nonempty=group != "tests"):
-            fields(node, required, optional)
-            nodes.append(node)
-    for node in nodes:
-        require(ID.fullmatch(text(node["id"])), f"invalid ID: {node['id']}")
-    unique([node["id"] for node in nodes], "graph IDs")
-    contracts = {node["id"]: node for node in graph["contracts"]}
-    tests = {node["id"]: node for node in graph["tests"]}
-    used_contracts, used_tests = set(), set()
-    for guarantee in graph["guarantees"]:
-        text(guarantee["statement"])
-        refs = [text(ref) for ref in sequence(guarantee["contracts"])]
-        unique(refs, guarantee["id"])
-        require(set(refs) <= contracts.keys(), f"{guarantee['id']}: unknown contract")
-        used_contracts.update(refs)
-    for contract in contracts.values():
+def repository_file(root, path):
+    relative = PurePosixPath(text(path))
+    require(not relative.is_absolute() and ".." not in relative.parts and str(relative) == path,
+            f"source path must be repository-relative: {path}")
+    resolved = (root / path).resolve()
+    require(resolved.is_relative_to(root) and resolved.is_file(), f"source file missing or outside repository: {path}")
+    return resolved
+
+
+def cargo_target(value):
+    fields(value, ("kind",), ("name",))
+    require(value["kind"] in ("lib", "test", "bin"), "unsupported target kind")
+    require((value["kind"] != "lib") == ("name" in value), "test and bin targets need name; lib has none")
+    if "name" in value:
+        require(CARGO_NAME.fullmatch(text(value["name"])), "invalid target name")
+
+
+def strings(value, *, nonempty=False):
+    return [text(item) for item in sequence(value, nonempty=nonempty)]
+
+
+def cargo_production_dependencies(root):
+    if not (root / "Cargo.toml").is_file():
+        return None
+    metadata = json.loads(execute(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], root),
+                          object_pairs_hook=no_duplicate_keys)
+    return {package["name"]: {dependency["name"] for dependency in package["dependencies"]
+                              if dependency.get("kind") is None}
+            for package in metadata["packages"]}
+
+
+def validate_bundle(root, bundle):
+    root = Path(root).resolve()
+    fields(bundle, ("version", "components", "features", "contracts", "tests", "inventories", "packages", "examples", "excluded_targets"))
+    require(type(bundle["version"]) is int and bundle["version"] == 2, "unsupported version")
+    for key in ("components", "features", "contracts", "tests", "inventories", "packages", "examples", "excluded_targets"):
+        sequence(bundle[key], nonempty=False)
+    packages = {}
+    for package in bundle["packages"]:
+        fields(package, ("name", "path"))
+        name, path = text(package["name"]), text(package["path"])
+        require(CARGO_NAME.fullmatch(name), f"invalid package: {name}")
+        relative = PurePosixPath(path)
+        require(not relative.is_absolute() and ".." not in relative.parts and str(relative) == path, "invalid package path")
+        require(name not in packages, "duplicate package")
+        resolved = (root / path).resolve()
+        require(resolved.is_relative_to(root) and resolved.is_dir(), f"package directory missing or outside repository: {path}")
+        packages[name] = path
+    unique(list(packages.values()), "package paths")
+
+    def belongs(path, owner):
+        resolved = (root / path).resolve()
+        matches = [package for package, directory in packages.items() if resolved.is_relative_to((root / directory).resolve())]
+        return bool(matches) and max(matches, key=lambda package: len(PurePosixPath(packages[package]).parts)) == owner
+
+    def anchor(source, owner=None, *, parsed=False):
+        source_location(source, root, parsed_test=parsed)
+        if owner is not None:
+            require(belongs(source["path"], owner), f"source ownership mismatch: {source['path']} must belong to {owner}")
+
+    def record(node, category):
+        owner = text(node["owner"])
+        require(owner in packages, f"unknown declaration owner: {owner}")
+        path = text(node["record"])
+        repository_file(root, path)
+        require(belongs(path, owner), f"declaration source ownership mismatch: {path}")
+        base = PurePosixPath(packages[owner]) / "src/trace" / category
+        require(PurePosixPath(path).parent == base and path.endswith(".rs"), f"invalid {category} declaration path: {path}")
+        return owner
+
+    components, actors = {}, set()
+    for component in bundle["components"]:
+        fields(component, ("id", "package", "path", "description", "notes", "external", "operations", "entrypoints", "record"))
+        identity = text(component["id"])
+        require(identity in packages and component["package"] == identity and component["path"] == packages[identity], "component must match Cargo package")
+        require(identity not in components, "duplicate component ID")
+        text(component["description"])
+        strings(component["notes"])
+        if component["record"] is not None:
+            path = component["record"]
+            require(path == str(PurePosixPath(packages[identity]) / "src/trace/component.rs"), "invalid component declaration path")
+            repository_file(root, path)
+        sequence(component["operations"], nonempty=False)
+        sequence(component["entrypoints"], nonempty=False)
+        for external in sequence(component["external"], nonempty=False):
+            fields(external, ("id", "title"))
+            actor = text(external["id"])
+            require(ID.fullmatch(actor), "invalid external component ID")
+            require(actor not in actors and actor not in packages, f"duplicate external component ID: {actor}")
+            text(external["title"])
+            actors.add(actor)
+        names = []
+        for entry in component["entrypoints"]:
+            fields(entry, ("name", "source"))
+            names.append(text(entry["name"]))
+            anchor(entry["source"], identity)
+        unique(names, "component entrypoints")
+        components[identity] = component
+    require(components.keys() == packages.keys(), "components must cover every Cargo package")
+    participants = set(components) | actors
+    contracts = {}
+    for contract in bundle["contracts"]:
+        fields(contract, ("id", "owner", "record", "consumer", "provider", "interface", "statement", "assumptions", "limitations", "source", "call", "implementation", "binding", "requires", "gap"))
+        owner = record(contract, "contracts")
+        identity = text(contract["id"])
+        require(identity.startswith(owner + "/") and ID.fullmatch(identity[len(owner) + 1:]), f"invalid global contract ID: {identity}")
+        require(identity not in contracts, "duplicate contract ID")
+        consumer, provider, interface = (text(contract[key]) for key in ("consumer", "provider", "interface"))
+        require(consumer in participants and provider in participants, f"{identity}: unknown component")
+        require(consumer != provider, f"{identity}: same component contract")
+        require(interface in ("RustApi", "Port", "Http", "Grpc", "WebSocket", "External"), f"{identity}: invalid interface")
+        require(consumer in components or provider in components, f"{identity}: contract needs workspace participant")
+        if interface == "Port":
+            require(consumer in components and provider in components, f"{identity}: Port parties must be workspace components")
+        elif interface == "External":
+            require(consumer in components and provider in actors and owner == consumer, f"{identity}: External owner must be local consumer")
+        else:
+            require(provider in components and owner == provider, f"{identity}: API owner must be provider")
         text(contract["statement"])
-        if "gap" in contract:
+        strings(contract["assumptions"])
+        strings(contract["limitations"])
+        anchor(contract["source"], owner)
+        if contract["gap"] is not None:
             text(contract["gap"])
-        evidence = sequence(contract["evidence"], nonempty=False)
-        require(evidence or "gap" in contract, f"{contract['id']}: evidence or explicit gap required")
-        for edge in evidence:
-            fields(edge, ("test", "relationship", "reason"))
-            require(text(edge["test"]) in tests, f"{contract['id']}: unknown test")
-            require(edge["relationship"] in ("asserts", "exercises", "unreviewed"), f"{contract['id']}: invalid relationship")
-            text(edge["reason"])
-            used_tests.add(edge["test"])
-        require(any(edge["relationship"] in ("asserts", "exercises") for edge in evidence) or "gap" in contract,
-                f"{contract['id']}: evidence or explicit gap required; unreviewed ownership is insufficient")
-        unique([edge["test"] for edge in evidence], contract["id"])
-    require(used_contracts == contracts.keys(), "orphan contract")
-    require(used_tests == tests.keys(), "orphan test")
-    for test in tests.values():
-        require(CARGO_NAME.fullmatch(text(test["package"])), f"{test['id']}: invalid package")
-        fields(test["target"], ("kind",), ("name",))
-        kind = test["target"]["kind"]
-        require(kind in ("lib", "test", "bin"), f"{test['id']}: unsupported target kind")
-        require((kind != "lib") == ("name" in test["target"]), f"{test['id']}: test and bin targets need name; lib has none")
-        if kind != "lib":
-            require(CARGO_NAME.fullmatch(text(test["target"]["name"])), f"{test['id']}: invalid target name")
-        require(TEST_NAME.fullmatch(text(test["name"])), f"{test['id']}: expected a complete Rust test identity")
-        fields(test["source"], ("path", "needle", "line") if parsed_tests else ("path", "needle"))
-        require(f"fn {test['name'].split('::')[-1]}(" in text(test["source"]["needle"]),
-                f"{test['id']}: source needle must name the declared test function")
-        text(test["scope"])
-    unique([(*target_key(test), test["name"]) for test in tests.values()], "Cargo tests")
-    lines = {node["id"]: source_location(node["source"], root, parsed_test=parsed_tests and node["id"] in tests) for node in nodes if "source" in node}
-    return graph, lines
+        for key in ("call", "implementation", "binding"):
+            if contract[key] is not None:
+                anchor(contract[key])
+        if consumer in components:
+            require(contract["call"] is not None, f"{identity}: workspace consumer call anchor required")
+            anchor(contract["call"], consumer)
+        if contract["implementation"] is not None:
+            require(provider in components, f"{identity}: external provider has no workspace implementation")
+            anchor(contract["implementation"], provider)
+        if interface == "Port":
+            require(contract["implementation"] is not None and contract["binding"] is not None, f"{identity}: Port implementation and binding required")
+            require(any(belongs(contract["binding"]["path"], package) for package in packages), f"{identity}: binding must belong to workspace component")
+        sequence(contract["requires"], nonempty=False)
+        contracts[identity] = contract
 
+    dependencies = cargo_production_dependencies(root) if any(contract["interface"] == "Port" for contract in contracts.values()) else None
+    for contract in contracts.values():
+        identity = contract["id"]
+        if contract["interface"] == "Port" and dependencies is not None:
+            require(contract["owner"] in dependencies.get(contract["provider"], set()),
+                    f"{identity}: Port provider must have production dependency on interface owner")
+        children = []
+        for dependency in contract["requires"]:
+            fields(dependency, ("contract", "reason"))
+            child = text(dependency["contract"])
+            text(dependency["reason"])
+            require(child in contracts, f"{identity}: unknown required contract {child}")
+            require(child != identity, f"{identity}: self reference")
+            require(contract["provider"] == contracts[child]["consumer"], f"{identity}: nonadjacent required contract {child}")
+            children.append(child)
+        unique(children, f"{identity} requires")
+    active, finished = set(), set()
 
-class Traces(list):
-    def __init__(self, bundle):
-        super().__init__()
-        self.directory_bundle = bundle
+    def visit(identity):
+        require(identity not in active, f"contract cycle: {identity}")
+        if identity in finished:
+            return
+        active.add(identity)
+        for dependency in contracts[identity]["requires"]:
+            visit(dependency["contract"])
+        active.remove(identity)
+        finished.add(identity)
+
+    for identity in contracts:
+        visit(identity)
+    roots, feature_ids = set(), []
+    for feature in bundle["features"]:
+        fields(feature, ("id", "title", "source", "flow", "guarantees", "limitations", "owner", "record"))
+        owner = record(feature, "features")
+        identity = text(feature["id"])
+        require(ID.fullmatch(identity), "invalid feature ID")
+        feature_ids.append(identity)
+        text(feature["title"])
+        anchor(feature["source"], owner)
+        strings(feature["flow"], nonempty=True)
+        strings(feature["limitations"])
+        guarantee_ids = []
+        for guarantee in sequence(feature["guarantees"]):
+            fields(guarantee, ("id", "statement", "roots"))
+            require(ID.fullmatch(text(guarantee["id"])), "invalid guarantee ID")
+            guarantee_ids.append(guarantee["id"])
+            text(guarantee["statement"])
+            refs = strings(guarantee["roots"], nonempty=True)
+            unique(refs, "guarantee roots")
+            for ref in refs:
+                require(ref in contracts, f"{identity}: unknown root contract {ref}")
+                contract = contracts[ref]
+                require(contract["consumer"] == "frontend" and contract["provider"] in components
+                        and contract["interface"] in ("Http", "WebSocket", "Grpc"), f"{identity}: feature root must be frontend boundary")
+                roots.add(ref)
+        unique(guarantee_ids, f"{identity} guarantees")
+    unique(feature_ids, "global feature IDs")
+    operation_contracts, operation_keys = set(), set()
+    for component in components.values():
+        for operation in component["operations"]:
+            fields(operation, ("contract", "audience", "surface", "reason"))
+            ref = text(operation["contract"])
+            require(ref in contracts and contracts[ref]["provider"] == component["id"], f"operation needs contract provided by component: {ref}")
+            audience = operation["audience"]
+            require(audience in ("Frontend", "Internal", "Operator"), "invalid operation audience")
+            require(isinstance(operation["reason"], str) and "\n" not in operation["reason"] and "\r" not in operation["reason"], "operation reason must be single-line text")
+            if audience == "Frontend":
+                require(ref in roots, f"frontend operation must be feature root: {ref}")
+            else:
+                text(operation["reason"])
+                require(ref not in roots, f"internal/operator operation cannot be feature root: {ref}")
+            surface = operation["surface"]
+            require(isinstance(surface, dict), "expected operation surface object")
+            kind = surface.get("kind")
+            if kind == "OpenApi":
+                fields(surface, ("kind", "package", "example", "operation"))
+                require(surface["package"] == component["id"], "OpenAPI operation package must match component")
+                require(CARGO_NAME.fullmatch(text(surface["example"])), "invalid OpenAPI example")
+                require(re.fullmatch(r"(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE) /\S*", text(surface["operation"])), "invalid OpenAPI operation")
+                expected_interface = "Http"
+                key = kind, surface["package"], surface["example"], surface["operation"]
+            elif kind == "Grpc":
+                fields(surface, ("kind", "path", "service", "operation"))
+                repository_file(root, surface["path"])
+                require(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", text(surface[field])) for field in ("service", "operation")), "invalid gRPC operation")
+                expected_interface = "Grpc"
+                key = kind, surface["path"], surface["service"], surface["operation"]
+            elif kind == "WebSocket":
+                fields(surface, ("kind", "path", "command", "source"))
+                text(surface["path"])
+                text(surface["command"])
+                anchor(surface["source"], component["id"])
+                expected_interface = "WebSocket"
+                key = kind, component["id"], surface["path"], surface["command"]
+            else:
+                raise InvalidTrace(f"unsupported surface kind: {kind}")
+            require(contracts[ref]["interface"] == expected_interface, "operation interface mismatch")
+            require(key not in operation_keys, f"duplicate operation owner: {key}")
+            operation_keys.add(key)
+            operation_contracts.add(ref)
+    require(roots <= operation_contracts, f"feature root lacks declared operation: {sorted(roots - operation_contracts)}")
+    asserted, identities, test_ids = set(), [], []
+    for test in bundle["tests"]:
+        fields(test, ("id", "package", "target", "name", "source", "classification", "semantics"))
+        text(test["id"])
+        test_ids.append(test["id"])
+        require(text(test["package"]) in components, "unknown test package")
+        cargo_target(test["target"])
+        require(TEST_NAME.fullmatch(text(test["name"])), "expected a complete Rust test identity")
+        fields(test["source"], ("path", "needle", "line"))
+        require(f"fn {test['name'].split('::')[-1]}(" in text(test["source"]["needle"]), "source needle must name the declared test function")
+        anchor(test["source"], test["package"], parsed=True)
+        identities.append((*target_key(test), test["name"]))
+        classification, semantics = test["classification"], test["semantics"]
+        require(classification in ("boundary", "internal", "infrastructure", "helper"), "unknown test classification")
+        if classification == "boundary":
+            require(test["target"]["kind"] == "test" and PurePosixPath(test["source"]["path"]).is_relative_to(PurePosixPath(packages[test["package"]]) / "tests/contracts"), "boundary tests must be integration tests under tests/contracts/")
+            fields(semantics, ("evidence",))
+            refs = []
+            for evidence in sequence(semantics["evidence"]):
+                fields(evidence, ("contract", "relationship", "scope", "reason", "observation", "real", "fake"))
+                ref = text(evidence["contract"])
+                require(ref in contracts, f"unknown evidence contract: {ref}")
+                refs.append(ref)
+                require(evidence["relationship"] in ("asserts", "exercises", "unreviewed"), "invalid relationship")
+                text(evidence["scope"])
+                text(evidence["reason"])
+                require(evidence["observation"] in ("ProviderBoundary", "CompleteInteraction"), "invalid observation")
+                real, fake = strings(evidence["real"]), strings(evidence["fake"])
+                unique(real, "real participants")
+                unique(fake, "fake participants")
+                require(set(real + fake) <= participants, "unknown evidence participant")
+                require(not set(real) & set(fake), "real and fake participants overlap")
+                require(contracts[ref]["provider"] in real, f"{ref}: evidence provider must be real")
+                if evidence["observation"] == "CompleteInteraction":
+                    require(contracts[ref]["consumer"] in real, f"{ref}: complete interaction consumer must be real")
+                if evidence["relationship"] == "asserts":
+                    asserted.add(ref)
+            unique(refs, "test evidence")
+        elif classification == "internal":
+            fields(semantics, ())
+            path = PurePosixPath(test["source"]["path"])
+            package_path = PurePosixPath(packages[test["package"]])
+            require(path.is_relative_to(package_path / "src") or path.is_relative_to(package_path / "tests/internal"), "internal test must be in src/ or tests/internal/")
+        else:
+            fields(semantics, ("category", "reason") if classification == "infrastructure" else ("reason",))
+            text(semantics["reason"])
+            if classification == "infrastructure":
+                text(semantics["category"])
+    unique(test_ids, "global test IDs")
+    unique(identities, "Cargo tests")
+    for contract in contracts.values():
+        require(contract["id"] in asserted or contract["gap"] is not None, f"{contract['id']}: asserts evidence or explicit gap required")
+    inventory_keys, inventoried = [], []
+    for inventory in bundle["inventories"]:
+        fields(inventory, ("package", "target", "tests"))
+        require(text(inventory["package"]) in packages, "unknown inventory package")
+        cargo_target(inventory["target"])
+        names = strings(inventory["tests"])
+        require(all(TEST_NAME.fullmatch(name) for name in names), "invalid inventory test name")
+        unique(names, "inventory test identities")
+        key = target_key(inventory)
+        inventory_keys.append(key)
+        inventoried.extend((*key, name) for name in names)
+    unique(inventory_keys, "Cargo inventory targets")
+    require(Counter(identities) == Counter(inventoried), "parsed tests and inventory declarations differ")
+    excluded_keys = []
+    for excluded in bundle["excluded_targets"]:
+        fields(excluded, ("package", "target", "reason"))
+        require(text(excluded["package"]) in packages, "unknown excluded package")
+        cargo_target(excluded["target"])
+        require(target_key(excluded) not in inventory_keys, "excluded target is inventoried")
+        text(excluded["reason"])
+        excluded_keys.append(target_key(excluded))
+    unique(excluded_keys, "excluded target identities")
+    for example in bundle["examples"]:
+        fields(example, ("package", "example", "source", "kind", "reason"))
+        require(text(example["package"]) in packages, "unknown example package")
+        require(CARGO_NAME.fullmatch(text(example["example"])), "invalid Cargo example identity")
+        require(example["kind"] in ("OpenApi", "Program"), "unsupported example kind")
+        text(example["reason"])
+        repository_file(root, example["source"])
+        require(belongs(example["source"], example["package"]), "example source ownership mismatch")
+    unique([(example["package"], example["example"]) for example in bundle["examples"]], "Cargo examples")
+    return bundle
 
 
 def directory_traces(root):
@@ -151,25 +406,11 @@ def directory_traces(root):
     if "CARGO_TARGET_DIR" not in os.environ:
         args += ["--target-dir", str(repository / "target")]
     output = execute(args + ["--", str(root)], root)
-    bundle = json.loads(output, object_pairs_hook=no_duplicate_keys)
-    fields(bundle, ("graphs", "inventories", "classifications", "entrypoints", "surfaces", "excluded_targets", "packages", "examples"))
-    return bundle
+    return json.loads(output, object_pairs_hook=no_duplicate_keys)
 
 
 def load_traces(root):
-    bundle = directory_traces(root)
-    require(bundle.get("graphs"), "no feature declarations under workspace src/trace/ or tests/trace/")
-    traces = Traces(bundle)
-    for fragment in bundle.get("graphs", []):
-        fields(fragment, ("record", "graph"))
-        try:
-            graph, lines = validate_graph(root, fragment["graph"], parsed_tests=True)
-            traces.append((Path(fragment["record"]), graph, lines))
-        except (InvalidTrace, OSError, ValueError) as error:
-            raise InvalidTrace(f"{fragment['record']}: {error}") from error
-    unique([graph["feature"]["id"] for _, graph, _ in traces], "global feature IDs")
-    traces.sort(key=lambda trace: trace[1]["feature"]["id"])
-    return traces
+    return validate_bundle(root, directory_traces(root))
 
 
 def target_key(test):
@@ -189,39 +430,16 @@ def execute(args, root):
     return result.stdout
 
 
-def check_surfaces(traces, root):
-    bundle = traces.directory_bundle
-    features = {graph["feature"]["id"] for _, graph, _ in traces}
-    owned_features = set()
-
-    def own(feature, label):
-        require(text(feature) in features, f"{label}: unknown feature owner {feature}")
-        owned_features.add(feature)
-
+def check_surfaces(bundle, root):
     openapi, grpc = {}, {}
-    for surface in sequence(bundle["surfaces"], nonempty=False):
-        kind = surface.get("kind")
-        if kind == "OpenApi":
-            fields(surface, ("kind", "feature", "package", "example", "operation"))
-            package, example, operation = (text(surface[key]) for key in ("package", "example", "operation"))
-            require(CARGO_NAME.fullmatch(package) and CARGO_NAME.fullmatch(example), "invalid OpenAPI package or example")
-            require(re.fullmatch(r"(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE) /\S*", operation),
-                    f"invalid OpenAPI operation: {operation}")
-            key = package, example
-            expected = openapi.setdefault(key, {})
-            require(operation not in expected, f"duplicate OpenAPI operation owner: {key} {operation}")
-            expected[operation] = surface["feature"]
-            own(surface["feature"], f"{package}: {operation}")
-        elif kind == "Grpc":
-            fields(surface, ("kind", "feature", "path", "service", "operation"))
-            path, service, operation = (text(surface[key]) for key in ("path", "service", "operation"))
-            require(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in (service, operation)), "invalid gRPC service or operation")
-            key = path, service, operation
-            require(key not in grpc, f"duplicate gRPC operation owner: {key}")
-            grpc[key] = surface["feature"]
-            own(surface["feature"], f"{service}.{operation}")
-        else:
-            require(False, f"unsupported surface kind: {kind}")
+    for component in bundle["components"]:
+        for operation in component["operations"]:
+            surface = operation["surface"]
+            if surface["kind"] == "OpenApi":
+                key = surface["package"], surface["example"]
+                openapi.setdefault(key, {})[surface["operation"]] = operation["contract"]
+            elif surface["kind"] == "Grpc":
+                grpc[surface["path"], surface["service"], surface["operation"]] = operation["contract"]
 
     exporters, example_packages, example_identities = set(), set(), set()
     for entry in sequence(bundle["examples"], nonempty=False):
@@ -281,25 +499,14 @@ def check_surfaces(traces, root):
     require(actual_grpc == set(grpc),
             f"gRPC operation set mismatch: uncataloged {sorted(actual_grpc - grpc.keys())}; absent {sorted(grpc.keys() - actual_grpc)}")
 
-    entry_names = []
-    for entry in sequence(bundle["entrypoints"], nonempty=False):
-        fields(entry, ("feature", "name", "source"))
-        name = text(entry["name"])
-        source_location(entry["source"], root)
-        own(entry["feature"], name)
-        entry_names.append(name)
-    unique(entry_names, "entrypoint names")
-    require(features == owned_features, f"orphan feature without surface or entrypoint: {sorted(features - owned_features)}")
-
-
-def mapped_tests(traces):
+def mapped_tests(bundle, kind="all"):
+    allowed = {"boundary", "internal", "infrastructure"} if kind == "all" else {kind}
     tests = {}
-    for _, graph, _ in traces:
-        for test in graph["tests"]:
+    for test in bundle["tests"]:
+        if test["classification"] in allowed:
             key = (*target_key(test), test["name"])
             if key not in tests:
-                tests[key] = (test, [])
-            tests[key][1].append(f"{graph['feature']['id']}/{test['id']}")
+                tests[key] = (test, [test["id"]])
     return tests.values()
 
 
@@ -382,6 +589,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "run", "viewer"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--kind", choices=("boundary", "internal", "infrastructure", "all"), default="all", help="test classification to run (all excludes helpers)")
     parser.add_argument("--output", type=Path, help="viewer HTML destination (viewer only)")
     args = parser.parse_args(argv)
     if args.output is not None and args.command != "viewer":
@@ -390,19 +598,19 @@ def main(argv=None):
     try:
         traces = load_traces(root)
         check_surfaces(traces, root)
-        tests = list(mapped_tests(traces))
-        check_inventory(tests, root, traces.directory_bundle)
+        check_inventory([(test, [test["id"]]) for test in traces["tests"]], root, traces)
+        tests = list(mapped_tests(traces, args.kind))
         if args.command == "viewer":
             from traceability_viewer import write_viewer
 
             destination = args.output if args.output is not None else root / "target/traceability-viewer.html"
             write_viewer(root, traces, destination)
-            print(f"Viewer snapshot for {len(traces)} features: {destination.resolve()}")
+            print(f"Viewer snapshot for {len(traces['features'])} features: {destination.resolve()}")
             return 0
         if args.command == "run":
             run_tests(tests, root)
         else:
-            print(f"Traceability surfaces, structure, and Cargo identities match: {len(traces)} features")
+            print(f"Traceability surfaces, structure, and Cargo identities match: {len(traces['features'])} features")
         return 0
     except (InvalidTrace, OSError, ValueError) as error:
         print(f"traceability: {error}", file=sys.stderr)

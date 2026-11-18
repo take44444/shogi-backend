@@ -81,9 +81,12 @@ pub trait AccountRepository: Send + Sync {
 }
 
 #[cfg(test)]
-#[path = "trace/account-profile/display-name/tests.rs"]
+#[path = "tests/account-profile/display-name/tests.rs"]
 mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]
 mod trace_support;
+
+#[cfg(test)]
+mod trace_metadata;

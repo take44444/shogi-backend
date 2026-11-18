@@ -440,9 +440,12 @@ fn decode(value: String) -> Result<String, Error> {
 }
 
 #[cfg(test)]
-#[path = "trace/public-record-search/support.rs"]
+#[path = "tests/public-record-search/support.rs"]
 mod tests;
 
 #[cfg(test)]
 #[path = "../../../scripts/traceability_model.rs"]
 mod trace_support;
+
+#[cfg(test)]
+mod trace_metadata;

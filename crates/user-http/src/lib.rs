@@ -430,12 +430,9 @@ async fn logout(State(app): State<App>, headers: HeaderMap) -> Result<Response, 
     );
     Ok(response)
 }
-#[cfg(test)]
-#[path = "trace/account-google-login/support/browser.rs"]
-mod tests;
 
 #[cfg(test)]
-#[path = "trace/public-api-documents/support.rs"]
+#[path = "tests/public-api-documents/support.rs"]
 mod openapi_tests;
 
 #[cfg(test)]

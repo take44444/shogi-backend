@@ -191,5 +191,5 @@ fn verify_response(
 }
 
 #[cfg(test)]
-#[path = "trace/account-google-login/support/google.rs"]
+#[path = "tests/account-google-login/support/google.rs"]
 mod tests;

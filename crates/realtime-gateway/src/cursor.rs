@@ -153,5 +153,5 @@ pub(crate) fn result_json(result: Option<shogi_domain::GameResult>) -> Value {
 }
 
 #[cfg(test)]
-#[path = "trace/realtime-game-feed/cursor/tests.rs"]
+#[path = "tests/realtime-game-feed/cursor/tests.rs"]
 mod tests;

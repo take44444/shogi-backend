@@ -38,7 +38,7 @@ a { color: #285ca0; overflow-wrap: anywhere; }
 #graph-sizer { position: relative; }
 #graph { position: relative; transform-origin: top left; }
 #graph svg { position: absolute; inset: 0; pointer-events: none; }
-.graph-node { position: absolute; width: 240px; height: 112px; text-align: left; padding: .7rem .8rem; border-radius: 10px; background: white; box-shadow: 0 2px 4px #26334708; }
+.graph-node { position: absolute; width: 240px; height: 124px; text-align: left; padding: .7rem .8rem; border-radius: 10px; background: white; box-shadow: 0 2px 4px #26334708; }
 .graph-node .node-kind { display: block; text-transform: uppercase; letter-spacing: .06em; font-size: .62rem; margin-bottom: .4rem; color: #637b99; }
 .graph-node .node-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 .76rem/1.5 ui-monospace, monospace; }
 .graph-node .node-caption { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .7rem; line-height: 1.5; margin-top: .3rem; color: #62758b; }
@@ -82,3 +82,5 @@ dialog p { font-size: .8rem; color: #55667b; }
 }
 @media (max-width: 1150px) { .workspace { grid-template-columns: 185px minmax(0, 1fr); } .inspector { grid-column: 1 / -1; max-height: none; } }
 @media (max-width: 700px) { .page-header { padding: 1rem; display: block; } .snapshot { margin-top: 1rem; } .workspace { grid-template-columns: minmax(0, 1fr); padding: .6rem; gap: .6rem; } .features { max-height: 250px; } .inspector { grid-column: auto; } #graph-viewport { max-height: 55vh; min-height: 320px; } }
+
+.empty-graph { padding: 2rem; font-size: .85rem; color: #64758a; }

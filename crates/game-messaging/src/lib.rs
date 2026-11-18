@@ -361,11 +361,11 @@ impl NotificationPublisher for ValkeyEventPublisher {
 }
 
 #[cfg(test)]
-#[path = "trace/durable-event-dispatch/support/wire.rs"]
+#[path = "tests/durable-event-dispatch/support/wire.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "trace/durable-event-dispatch/support/transport.rs"]
+#[path = "tests/durable-event-dispatch/support/transport.rs"]
 mod transport_tests;
 
 #[cfg(test)]

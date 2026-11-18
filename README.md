@@ -2,7 +2,7 @@
 
 対局の gRPC API、公開棋譜とレートの HTTP API、Google ログイン、ブラウザー向けリアルタイムゲートウェイを提供する。
 
-機能の保証、実装位置、対応するテストは[HTML viewer の手順](docs/how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
+機能の保証、コンポーネント間の契約、実装位置、対応するテストは[HTML viewer の手順](docs/how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
 採用理由と将来の設計案は[ドキュメント一覧](docs/README.md)を参照すること。
 
 以下のコマンドは Rust、Cargo、Docker、Docker Compose がある環境で、リポジトリのルートから実行する。
@@ -15,7 +15,7 @@ Compose の PostgreSQL は[初期設定 SQL](scripts/init-postgres.sql)でロー
 別の PostgreSQL を使う場合、書き込みロールにはデータベースの `CREATE` 権限と、対象スキーマ内でオブジェクトを作成する権限を付与する。
 比較用スキーマを作るため、初回以降の起動でも `CREATE` が必要になる。
 旧版のデータベースを保持し、対応していないスキーマには別の空のデータベースを用意すること。
-互換性と初期化処理は[起動機能の定義](crates/game-persistence/src/trace/startup-schema-isolation/feature.rs)から確認できる。
+互換性と初期化処理は[永続化コンポーネントの内部制約](crates/game-persistence/src/trace/component.rs)から確認できる。
 
 ```sh
 docker compose up -d --wait postgres
@@ -115,7 +115,7 @@ DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' VALKEY_URL='redis://1
 
 依存サービスの障害で配信プロセスが終了した場合は、依存サービスの復旧後に同じコマンドで再起動する。
 
-配信の保証と実装は[イベント配信の定義](crates/game-application/src/trace/durable-event-dispatch/feature.rs)、
+配信の保証と実装は[アプリケーションの配信責務](crates/game-application/src/trace/component.rs)、
 通知形式は[メッセージのエンコーダー](crates/game-messaging/src/lib.rs)、採用理由は[イベント配信の ADR](docs/adr/0003-game-event-delivery.md)を参照すること。
 
 使い捨ての Compose プロジェクトで、停止と再起動を含む配信全体の検証を実行する。
@@ -174,7 +174,7 @@ python3 scripts/test-deployment.py
 ホスト側ポートは `POSTGRES_PORT` と `VALKEY_PORT` で変更できる。
 
 パッケージ単位のテストと Rust ドキュメントの検証は次のように実行する。
-機能定義の更新とテストは[トレーサビリティの手順](docs/how-to/check-traceability.md)を参照すること。
+機能・境界契約・テスト分類の更新は[トレーサビリティの手順](docs/how-to/check-traceability.md)を参照すること。
 
 ```sh
 cargo test --locked -p shogi-domain

@@ -1,0 +1,101 @@
+use super::*;
+
+crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-grpc/rpc-make-move", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "NotFound、手番違い・非合法手のFailedPrecondition、古い連番に対するAbortedのメタデータ、リクエストの訂正、終局後の拒否を検証し、状態が変化しないことも確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }] };
+#[tokio::test]
+async fn statuses_sequence_metadata_and_rejected_request_correction() {
+    let server = TestServer::start().await;
+    let mut client = server.client().await;
+    assert_eq!(
+        client
+            .get_snapshot(proto::GetSnapshotRequest {
+                game_id: "absent".into()
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        Code::NotFound
+    );
+    assert_eq!(
+        client
+            .make_move(command("absent", "m", 0, proto::Player::Black, "7g7f"))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::NotFound
+    );
+    assert_eq!(
+        client
+            .resign(resign("absent", "r", 0, proto::Player::White))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::NotFound
+    );
+    let initial = create(&mut client, "errors").await;
+    assert_eq!(
+        client
+            .seed_game(SeedGame {
+                game_id: "errors".into(),
+                black_user_id: "black".into(),
+                white_user_id: "white".into()
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        Code::AlreadyExists
+    );
+    for request in [
+        command("errors", "retry", 0, proto::Player::White, "3c3d"),
+        command("errors", "retry", 0, proto::Player::Black, "7g7e"),
+    ] {
+        assert_eq!(
+            client.make_move(request).await.unwrap_err().code(),
+            Code::FailedPrecondition
+        );
+        assert_eq!(snapshot(&mut client, "errors").await, initial);
+    }
+    let stale = client
+        .make_move(command("errors", "retry", 5, proto::Player::Black, "7g7f"))
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code(), Code::Aborted);
+    assert_eq!(stale.metadata().get("actual-seq").unwrap(), "0");
+    assert!(stale.message().contains("expected 5, actual 0"));
+    let accepted = client
+        .make_move(command("errors", "retry", 0, proto::Player::Black, "7g7f"))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(accepted.seq, 1);
+    let stale = client
+        .resign(resign("errors", "end", 0, proto::Player::White))
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code(), Code::Aborted);
+    assert_eq!(stale.metadata().get("actual-seq").unwrap(), "1");
+    client
+        .resign(resign("errors", "end", 1, proto::Player::White))
+        .await
+        .unwrap();
+    let finished = snapshot(&mut client, "errors").await;
+    assert_eq!(
+        client
+            .make_move(command("errors", "after", 2, proto::Player::White, "3c3d"))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+    assert_eq!(
+        client
+            .resign(resign("errors", "after", 2, proto::Player::Black))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+    assert_eq!(snapshot(&mut client, "errors").await, finished);
+    drop(client);
+    server.shutdown().await;
+}
+}

@@ -57,3 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     matcher.await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod trace_metadata;
+
+#[cfg(test)]
+#[path = "../../../scripts/traceability_model.rs"]
+mod trace_support;

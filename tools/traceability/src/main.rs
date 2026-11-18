@@ -45,8 +45,7 @@ struct Context {
     unsupported_cfg: bool,
 }
 struct Declaration {
-    feature: String,
-    contract: Option<String>,
+    kind: String,
     value: Value,
     context: Context,
 }
@@ -108,24 +107,49 @@ fn literal(expr: &Expr) -> Result<Value> {
             }
             let kind = v.path.segments.last().unwrap().ident.to_string();
             let expected: &[&str] = match kind.as_str() {
-                "Feature" => &[
-                    "title",
-                    "source",
-                    "flow",
-                    "guarantees",
-                    "limitations",
+                "Component" => &[
+                    "description",
+                    "notes",
+                    "external",
+                    "operations",
                     "entrypoints",
-                    "surfaces",
                 ],
+                "External" => &["id", "title"],
+                "Operation" => &["contract", "audience", "surface", "reason"],
+                "Feature" => &["id", "title", "source", "flow", "guarantees", "limitations"],
                 "EntryPoint" => &["name", "source"],
-                "Guarantee" => &["id", "statement", "contracts"],
-                "Contract" => &["statement", "source", "gap"],
+                "Guarantee" => &["id", "statement", "roots"],
+                "Contract" => &[
+                    "id",
+                    "consumer",
+                    "provider",
+                    "interface",
+                    "statement",
+                    "assumptions",
+                    "limitations",
+                    "source",
+                    "call",
+                    "implementation",
+                    "binding",
+                    "requires",
+                    "gap",
+                ],
+                "Dependency" => &["contract", "reason"],
                 "Source" => &["path", "needle"],
-                "Case" => &["scope", "reason", "relationship", "also"],
-                "Evidence" => &["feature", "contract", "scope", "relationship", "reason"],
+                "BoundaryCase" => &["evidence"],
+                "Evidence" => &[
+                    "contract",
+                    "scope",
+                    "relationship",
+                    "reason",
+                    "observation",
+                    "real",
+                    "fake",
+                ],
                 "Example" => &["kind", "reason"],
                 "OpenApi" => &["package", "example", "operation"],
                 "Grpc" => &["path", "service", "operation"],
+                "WebSocket" => &["path", "command", "source"],
                 _ => return Err(format!("unsupported semantic type {kind}")),
             };
             let mut result = Map::new();
@@ -143,7 +167,7 @@ fn literal(expr: &Expr) -> Result<Value> {
             {
                 return Err(format!("{kind} requires exactly {expected:?}"));
             }
-            if matches!(kind.as_str(), "OpenApi" | "Grpc") {
+            if matches!(kind.as_str(), "OpenApi" | "Grpc" | "WebSocket") {
                 result.insert("kind".into(), json!(kind));
             }
             Ok(Value::Object(result))
@@ -157,6 +181,17 @@ fn literal(expr: &Expr) -> Result<Value> {
                 "Unreviewed" => Ok(json!("unreviewed")),
                 "OpenApi" => Ok(json!("OpenApi")),
                 "Program" => Ok(json!("Program")),
+                "Frontend"
+                | "Internal"
+                | "Operator"
+                | "RustApi"
+                | "Port"
+                | "Http"
+                | "Grpc"
+                | "WebSocket"
+                | "External"
+                | "ProviderBoundary"
+                | "CompleteInteraction" => Ok(json!(name)),
                 _ => Err(format!("unsupported semantic variant {name}")),
             }
         }
@@ -223,24 +258,48 @@ impl Parse for HelperInput {
         })
     }
 }
-fn owner(file: &Path, package_root: &Path) -> Option<(String, Option<String>)> {
-    let relative = file.strip_prefix(package_root).ok()?;
-    let components = relative
-        .components()
-        .map(|component| component.as_os_str().to_str())
-        .collect::<Option<Vec<_>>>()?;
-    if components.len() < 4 || !matches!(components[0], "src" | "tests") || components[1] != "trace"
-    {
-        return None;
+fn classified_directory(file: &Path, package_root: &Path) -> bool {
+    file.strip_prefix(package_root).is_ok_and(|relative| {
+        [
+            "src/trace",
+            "src/tests",
+            "tests/contracts",
+            "tests/internal",
+        ]
+        .iter()
+        .any(|path| relative.starts_with(path))
+            || (relative.starts_with("src")
+                && relative.file_name().is_some_and(|name| name == "tests.rs"))
+    })
+}
+fn declaration_path(context: &Context, kind: &str, value: &Value) -> Result<()> {
+    if !matches!(context.target.kind.as_str(), "lib" | "bin") {
+        return Err("metadata declarations require a lib or bin target".into());
     }
-    Some((
-        components[2].into(),
-        if components.len() >= 5 {
-            Some(components[3].into())
-        } else {
-            None
-        },
-    ))
+    let expected = match kind {
+        "component" => PathBuf::from("src/trace/component.rs"),
+        "feature" | "contract" => {
+            let id = nonempty(&value["id"])?;
+            if id.contains(['/', '\\']) || id == "." || id == ".." {
+                return Err("declaration ID must be a local file name".into());
+            }
+            PathBuf::from("src/trace")
+                .join(if kind == "feature" {
+                    "features"
+                } else {
+                    "contracts"
+                })
+                .join(format!("{id}.rs"))
+        }
+        _ => unreachable!(),
+    };
+    if context.file.strip_prefix(&context.target.package_root).ok() != Some(expected.as_path()) {
+        return Err(format!(
+            "{kind} declaration must live in {}",
+            expected.display()
+        ));
+    }
+    Ok(())
 }
 fn cfg_supported(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().all(|a| {
@@ -322,7 +381,7 @@ impl Collector {
             let mut context = context.clone();
             context.unsupported_cfg |= !cfg_supported(&function.attrs);
             if context.unsupported_cfg
-                && owner(&context.file, &context.target.package_root).is_none()
+                && !classified_directory(&context.file, &context.target.package_root)
             {
                 return Ok(());
             }
@@ -361,7 +420,7 @@ impl Collector {
                     child.modules.push(module.ident.to_string());
                     child.unsupported_cfg |= !cfg_supported(&module.attrs);
                     if child.unsupported_cfg {
-                        if owner(&context.file, &context.target.package_root).is_some() {
+                        if classified_directory(&context.file, &context.target.package_root) {
                             return Err(fail(
                                 context,
                                 module.span(),
@@ -431,8 +490,8 @@ impl Collector {
                 Item::Macro(item) => {
                     let name = item.mac.path.segments.last().unwrap().ident.to_string();
                     match name.as_str() {
-                        "feature" | "contract" if self.scan => (),
-                        "feature" | "contract" => {
+                        "component" | "feature" | "contract" if self.scan => (),
+                        "component" | "feature" | "contract" => {
                             if context.unsupported_cfg || !cfg_supported(&item.attrs) {
                                 return Err(fail(
                                     context,
@@ -440,33 +499,19 @@ impl Collector {
                                     "unsupported cfg on trace declaration",
                                 ));
                             }
-                            let (feature, contract) = owner(&context.file, &context.target.package_root).ok_or_else(|| fail(context, item.span(), "declaration must live under src/trace/<feature> or tests/trace/<feature>"))?;
-                            let expected = if name == "feature" {
-                                "feature.rs"
-                            } else {
-                                "contract.rs"
-                            };
-                            if context.file.file_name().unwrap() != expected
-                                || (name == "contract") != contract.is_some()
-                            {
-                                return Err(fail(
-                                    context,
-                                    item.span(),
-                                    "declaration path does not match ownership",
-                                ));
-                            }
                             let expr = syn::parse2::<Expr>(item.mac.tokens.clone())
                                 .map_err(|e| fail(context, e.span(), e))?;
                             let value =
                                 literal(&expr).map_err(|e| fail(context, expr.span(), e))?;
+                            declaration_path(context, &name, &value)
+                                .map_err(|e| fail(context, item.span(), e))?;
                             self.declarations.push(Declaration {
-                                feature,
-                                contract,
+                                kind: name,
                                 value,
                                 context: context.clone(),
                             });
                         }
-                        "case" => {
+                        "boundary_case" | "case" if self.scan || name == "boundary_case" => {
                             let input = syn::parse2::<CaseInput>(item.mac.tokens.clone())
                                 .map_err(|e| fail(context, e.span(), e))?;
                             if !item.attrs.is_empty() {
@@ -530,7 +575,8 @@ impl Collector {
                         }
                         "include" => {
                             if context.unsupported_cfg || !cfg_supported(&item.attrs) {
-                                if owner(&context.file, &context.target.package_root).is_some() {
+                                if classified_directory(&context.file, &context.target.package_root)
+                                {
                                     return Err(fail(
                                         context,
                                         item.span(),
@@ -591,6 +637,181 @@ fn rust_files(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
             rust_files(&path, files)?;
         } else if path.extension().is_some_and(|e| e == "rs") {
             files.insert(path.canonicalize().map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(())
+}
+// Internal source tests remain part of the inventory even when a module link is lost.
+fn source_test_files(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if path.is_symlink() {
+            return Err(format!(
+                "source test inventory cannot traverse symlinks: {}",
+                path.display()
+            ));
+        }
+        if path.is_dir() {
+            source_test_files(&path, files)?;
+        } else if path.file_name().is_some_and(|name| name == "tests.rs") {
+            files.insert(path.canonicalize().map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(())
+}
+fn websocket_commands(item: &syn::ItemEnum) -> Result<BTreeSet<String>> {
+    let mut tag = None;
+    let mut rename = None;
+    if !cfg_supported(&item.attrs) || item.attrs.iter().any(|a| a.path().is_ident("cfg")) {
+        return Err("unsupported cfg on WebSocket command enum".into());
+    }
+    for attr in item.attrs.iter().filter(|a| a.path().is_ident("serde")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("tag") || meta.path.is_ident("rename_all") {
+                let value = meta.value()?.parse::<syn::LitStr>()?.value();
+                let slot = if meta.path.is_ident("tag") {
+                    &mut tag
+                } else {
+                    &mut rename
+                };
+                if slot.replace(value).is_some() {
+                    return Err(meta.error("duplicate WebSocket serde rule"));
+                }
+                Ok(())
+            } else if meta.path.is_ident("deny_unknown_fields") {
+                Ok(())
+            } else {
+                Err(meta.error("unsupported WebSocket serde rule"))
+            }
+        })
+        .map_err(|e| format!("unsupported WebSocket serde rule: {e}"))?;
+    }
+    if tag.as_deref() != Some("type") || rename.as_deref() != Some("snake_case") {
+        return Err("WebSocket command enum requires serde(tag = \"type\", rename_all = \"snake_case\"); unsupported serde rule".into());
+    }
+    let mut commands = BTreeSet::new();
+    for variant in &item.variants {
+        if variant.attrs.iter().any(|attr| {
+            matches!(
+                attr.path().get_ident().map(|i| i.to_string()).as_deref(),
+                Some("serde" | "cfg" | "cfg_attr")
+            )
+        }) {
+            return Err("unsupported WebSocket command variant serde/cfg rule".into());
+        }
+        let name = variant.ident.to_string();
+        if !name.is_ascii() || name.starts_with("r#") {
+            return Err("unsupported WebSocket command variant identifier".into());
+        }
+        // Match serde's snake_case conversion for enum variants, including acronyms.
+        let mut command = String::new();
+        for (index, character) in name.chars().enumerate() {
+            if character.is_ascii_uppercase() && index != 0 {
+                command.push('_');
+            }
+            command.push(character.to_ascii_lowercase());
+        }
+        if !commands.insert(command) {
+            return Err("duplicate WebSocket wire command".into());
+        }
+    }
+    Ok(commands)
+}
+fn websocket_inventory(root: &Path, components: &BTreeMap<String, Value>) -> Result<()> {
+    // Each anchored enum is reconciled separately for each endpoint and component.
+    for component in components.values() {
+        let mut enums =
+            BTreeMap::<(String, PathBuf, usize), (BTreeSet<String>, BTreeSet<String>)>::new();
+        for operation in component["operations"]
+            .as_array()
+            .ok_or("operations missing")?
+        {
+            let surface = &operation["surface"];
+            if surface["kind"] != "WebSocket" {
+                continue;
+            }
+            let endpoint = nonempty(&surface["path"])?;
+            let command = nonempty(&surface["command"])?;
+            let source = nonempty(&surface["source"]["path"])?;
+            let needle = nonempty(&surface["source"]["needle"])?;
+            let path = root
+                .join(source)
+                .canonicalize()
+                .map_err(|e| format!("{source}: {e}"))?;
+            if !path.starts_with(root) {
+                return Err("WebSocket source outside repository".into());
+            }
+            let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let mut matches = content.match_indices(needle);
+            let offset = matches
+                .next()
+                .ok_or_else(|| format!("{source}: WebSocket source anchor not found"))?
+                .0;
+            if matches.next().is_some() {
+                return Err(format!("{source}: WebSocket source anchor is ambiguous"));
+            }
+            let ast = syn::parse_file(&content).map_err(|e| format!("{source}: {e}"))?;
+            if command == "upgrade" {
+                struct Routes {
+                    anchor: usize,
+                    end: usize,
+                    paths: Vec<String>,
+                }
+                impl<'ast> syn::visit::Visit<'ast> for Routes {
+                    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+                        if node.method == "route"
+                            && node.method.span().byte_range().start.saturating_sub(1)
+                                <= self.anchor
+                            && self.end <= node.span().byte_range().end
+                            && node.args.len() == 2
+                            && let (Expr::Lit(path), Expr::Call(handler)) =
+                                (&node.args[0], &node.args[1])
+                            && let (Lit::Str(path), Expr::Path(get)) = (&path.lit, &*handler.func)
+                            && get.path.is_ident("get")
+                            && handler.args.len() == 1
+                            && matches!(&handler.args[0], Expr::Path(upgrade) if upgrade.path.is_ident("upgrade"))
+                        {
+                            self.paths.push(path.value());
+                        }
+                        syn::visit::visit_expr_method_call(self, node);
+                    }
+                }
+                let mut routes = Routes {
+                    anchor: offset,
+                    end: offset + needle.len(),
+                    paths: Vec::new(),
+                };
+                syn::visit::Visit::visit_file(&mut routes, &ast);
+                if routes.paths != [endpoint] {
+                    return Err(format!(
+                        "{source}: WebSocket upgrade must anchor the matching .route(path, get(upgrade)); declared path {endpoint}"
+                    ));
+                }
+            } else {
+                let item = ast.items.iter().find_map(|item| match item {
+                    Item::Enum(item) if item.span().byte_range().contains(&offset) && offset + needle.len() <= item.span().byte_range().end => Some(item),
+                    _ => None,
+                }).ok_or_else(|| format!("{source}: WebSocket command source must anchor a top-level serde command enum"))?;
+                let expected = websocket_commands(item).map_err(|e| format!("{source}: {e}"))?;
+                let (_, declared) = enums
+                    .entry((endpoint.into(), path, item.span().byte_range().start))
+                    .or_insert_with(|| (expected, BTreeSet::new()));
+                if !declared.insert(command.to_owned()) {
+                    return Err(format!(
+                        "{source}: duplicate WebSocket command {command} for {endpoint}"
+                    ));
+                }
+            }
+        }
+        for ((endpoint, source, _), (expected, declared)) in enums {
+            if expected != declared {
+                return Err(format!(
+                    "{}: WebSocket command inventory mismatch for {endpoint}: missing {:?}; extra {:?}",
+                    source.display(),
+                    expected.difference(&declared).collect::<Vec<_>>(),
+                    declared.difference(&expected).collect::<Vec<_>>()
+                ));
+            }
         }
     }
     Ok(())
@@ -755,40 +976,86 @@ fn collect(root: &Path) -> Result<Value> {
     let mut files = BTreeSet::new();
     let mut packages = Vec::new();
     let mut examples = Vec::new();
-    let mut feature_roots = BTreeMap::<String, Vec<PathBuf>>::new();
+    let mut components = BTreeMap::new();
     for package in metadata["packages"].as_array().ok_or("packages missing")? {
         if !members.contains(&package["id"].as_str().ok_or("package id missing")?) {
             continue;
         }
         let manifest = PathBuf::from(nonempty(&package["manifest_path"])?);
-        packages.push(json!({"name":package["name"],"path":manifest.parent().unwrap().strip_prefix(root).map_err(|_|"workspace package outside repository")?}));
+        let package_root = manifest.parent().unwrap();
+        let path = package_root
+            .strip_prefix(root)
+            .map_err(|_| "workspace package outside repository")?;
+        let name = nonempty(&package["name"])?;
+        packages.push(json!({"name":name,"path":path}));
+        components.insert(name.to_owned(), json!({"id":name,"package":name,"path":path,"description":name,"notes":[],"external":[],"operations":[],"entrypoints":[],"record":null}));
         for target in package["targets"].as_array().ok_or("targets missing")? {
             if strings(&target["kind"])?.contains(&"example") {
                 if target["required-features"]
                     .as_array()
-                    .is_some_and(|features| !features.is_empty())
+                    .is_some_and(|v| !v.is_empty())
                 {
                     return Err(format!(
                         "{} {}: required-features examples are unsupported by the default-host/default-Cargo-feature inventory policy",
-                        package["name"], target["name"]
+                        name, target["name"]
                     ));
                 }
                 examples.push(example_declaration(root, package, target)?);
             }
         }
-        for convention in ["src/trace", "tests/trace"] {
-            let trace = manifest.parent().unwrap().join(convention);
-            if !trace.is_dir() {
-                continue;
+        let trace = package_root.join("src/trace");
+        if trace.exists() {
+            if trace.is_symlink() || !trace.is_dir() {
+                return Err(format!("metadata directory expected: {}", trace.display()));
             }
-            for entry in fs::read_dir(trace).map_err(|e| e.to_string())? {
+            for entry in fs::read_dir(&trace).map_err(|e| e.to_string())? {
                 let path = entry.map_err(|e| e.to_string())?.path();
-                if !path.is_dir() || path.is_symlink() {
-                    return Err(format!("feature directory expected: {}", path.display()));
+                let valid = if path.is_dir() {
+                    matches!(
+                        path.file_name().and_then(|n| n.to_str()),
+                        Some("features" | "contracts")
+                    )
+                } else {
+                    path.file_name().is_some_and(|n| n == "component.rs")
+                };
+                if !valid || path.is_symlink() {
+                    return Err(format!("unsupported metadata path: {}", path.display()));
                 }
-                let id = path.file_name().unwrap().to_string_lossy().into_owned();
-                feature_roots.entry(id).or_default().push(path.clone());
-                rust_files(&path, &mut files)?;
+                if path.is_dir() {
+                    for child in fs::read_dir(&path).map_err(|e| e.to_string())? {
+                        let child = child.map_err(|e| e.to_string())?.path();
+                        if !child.is_file()
+                            || child.is_symlink()
+                            || child.extension().is_none_or(|e| e != "rs")
+                        {
+                            return Err(format!(
+                                "metadata declarations require direct Rust files: {}",
+                                child.display()
+                            ));
+                        }
+                    }
+                }
+            }
+            rust_files(&trace, &mut files)?;
+        }
+        let legacy = package_root.join("tests/trace");
+        if legacy.exists() {
+            return Err(format!(
+                "legacy trace directory is unsupported: {}",
+                legacy.display()
+            ));
+        }
+        let source = package_root.join("src");
+        if source.exists() {
+            source_test_files(&source, &mut files)?;
+        }
+        for convention in ["src/tests", "tests/contracts", "tests/internal"] {
+            let directory = package_root.join(convention);
+            if directory.exists() {
+                if directory.is_symlink() || !directory.is_dir() {
+                    return Err(format!("test directory expected: {}", directory.display()));
+                }
+                rust_files(&directory, &mut files)?;
             }
         }
     }
@@ -813,7 +1080,9 @@ fn collect(root: &Path) -> Result<Value> {
         return Err(format!("unreachable trace Rust file: {}", orphan.display()));
     }
     for context in &collector.contexts {
-        if context.unsupported_cfg && owner(&context.file, &context.target.package_root).is_some() {
+        if context.unsupported_cfg
+            && classified_directory(&context.file, &context.target.package_root)
+        {
             return Err(format!(
                 "{}: unsupported cfg inside trace directory",
                 context.file.display()
@@ -821,55 +1090,77 @@ fn collect(root: &Path) -> Result<Value> {
         }
     }
     for (context, name) in &collector.macros {
-        if owner(&context.file, &context.target.package_root).is_some() {
+        if matches!(name.as_str(), "case" | "outside")
+            || classified_directory(&context.file, &context.target.package_root)
+        {
             return Err(format!(
-                "{}: unsupported item macro {name} inside trace directory",
+                "{}: unsupported item macro {name} inside classified scope",
                 context.file.display()
             ));
         }
     }
-    let mut features = BTreeMap::new();
-    let mut contracts = BTreeMap::<String, BTreeMap<String, Value>>::new();
-    for declaration in &collector.declarations {
-        if let Some(contract) = &declaration.contract {
-            let mut value = declaration.value.clone();
-            value["id"] = json!(contract);
-            value["evidence"] = json!([]);
-            if value["gap"].is_null() {
-                value.as_object_mut().unwrap().remove("gap");
-            }
-            if contracts
-                .entry(declaration.feature.clone())
-                .or_default()
-                .insert(contract.clone(), value)
-                .is_some()
-            {
-                return Err(format!(
-                    "duplicate contract {}/{contract}",
-                    declaration.feature
-                ));
-            }
-        } else if features
-            .insert(declaration.feature.clone(), declaration.value.clone())
-            .is_some()
+    for file in &files {
+        let metadata_file = components.values().any(|component| {
+            let package_root = root.join(component["path"].as_str().unwrap());
+            file.strip_prefix(package_root)
+                .is_ok_and(|relative| relative.starts_with("src/trace"))
+        });
+        if metadata_file
+            && collector
+                .declarations
+                .iter()
+                .filter(|d| &d.context.file == file)
+                .count()
+                != 1
         {
-            return Err(format!("duplicate feature {}", declaration.feature));
-        }
-    }
-    for feature in feature_roots.keys() {
-        if !features.contains_key(feature) {
             return Err(format!(
-                "feature directory {feature} requires exactly one reachable feature.rs declaration"
+                "{}: metadata file requires exactly one declaration",
+                file.display()
             ));
         }
     }
+    let mut features = BTreeMap::new();
+    let mut contracts = BTreeMap::new();
+    let mut declared_components = BTreeSet::new();
+    for declaration in &collector.declarations {
+        let owner = &declaration.context.target.package;
+        let record = declaration.context.file.strip_prefix(root).unwrap();
+        let mut value = declaration.value.clone();
+        value["record"] = json!(record);
+        if declaration.kind == "component" {
+            if !declared_components.insert(owner.clone()) {
+                return Err(format!("duplicate component {owner}"));
+            }
+            let component = components.get_mut(owner).unwrap();
+            for (key, value) in value.as_object().unwrap() {
+                component[key] = value.clone();
+            }
+            continue;
+        }
+        value["owner"] = json!(owner);
+        let local = nonempty(&value["id"])?;
+        let id = if declaration.kind == "contract" {
+            format!("{owner}/{local}")
+        } else {
+            local.to_owned()
+        };
+        value["id"] = json!(id);
+        let map = if declaration.kind == "contract" {
+            &mut contracts
+        } else {
+            &mut features
+        };
+        if map.insert(id.clone(), value).is_some() {
+            return Err(format!("duplicate {} {id}", declaration.kind));
+        }
+    }
+    websocket_inventory(root, &components)?;
     let mut inventories = targets
         .iter()
         .cloned()
         .map(|target| (target, BTreeSet::new()))
         .collect::<BTreeMap<_, _>>();
-    let mut tests_by_feature = BTreeMap::<String, BTreeMap<String, Value>>::new();
-    let mut classifications = Vec::new();
+    let mut tests = Vec::new();
     collector
         .tests
         .sort_by_key(|test| (test.context.target.clone(), test.name()));
@@ -882,8 +1173,6 @@ fn collect(root: &Path) -> Result<Value> {
                 test.name()
             ));
         }
-        let source = test_source(test, root)?;
-        let identity = json!({"package":test.context.target.package,"target":test.context.target.value(),"name":test.name()});
         if !inventories
             .get_mut(&test.context.target)
             .unwrap()
@@ -891,48 +1180,52 @@ fn collect(root: &Path) -> Result<Value> {
         {
             return Err(format!("duplicate parsed test {}", test.name()));
         }
-        let owned = owner(&test.context.file, &test.context.target.package_root);
-        let class = test
-            .classification
-            .as_ref()
-            .map(|(kind, _)| kind.as_str())
-            .unwrap_or("plain");
-        if matches!(class, "helper" | "infrastructure") {
-            let semantics = &test.classification.as_ref().unwrap().1;
-            nonempty(&semantics["reason"])?;
-            if class == "infrastructure"
-                && !matches!(
-                    nonempty(&semantics["category"])?,
-                    "sql-policy" | "test-support"
-                )
-            {
+        let relative = test
+            .context
+            .file
+            .strip_prefix(&test.context.target.package_root)
+            .map_err(|_| format!("{}: test source belongs to another package", test.name()))?;
+        let (class, semantics) = match &test.classification {
+            Some((kind, semantics)) if kind == "boundary_case" => {
+                if test.context.target.kind != "test" || !relative.starts_with("tests/contracts") {
+                    return Err(format!(
+                        "{}: boundary_case requires tests/contracts/ in an integration target",
+                        test.name()
+                    ));
+                }
+                ("boundary", semantics.clone())
+            }
+            Some((kind, semantics)) if matches!(kind.as_str(), "helper" | "infrastructure") => {
+                nonempty(&semantics["reason"])?;
+                if kind == "infrastructure"
+                    && !matches!(
+                        nonempty(&semantics["category"])?,
+                        "sql-policy" | "test-support"
+                    )
+                {
+                    return Err(format!(
+                        "{}: unsupported infrastructure category",
+                        test.name()
+                    ));
+                }
+                (kind.as_str(), semantics.clone())
+            }
+            None if relative.starts_with("src/trace") => {
                 return Err(format!(
-                    "{}: unsupported infrastructure category",
+                    "{}: metadata directory cannot contain tests",
                     test.name()
                 ));
             }
-            classifications.push(json!({"identity":identity,"source":source,"classification":class,"semantics":semantics}));
-            continue;
-        }
-        let Some((feature, Some(contract))) = owned else {
-            return Err(format!(
-                "{}: unclassified test; move it into a declared contract directory or classify it explicitly",
-                test.name()
-            ));
+            None if relative.starts_with("src") || relative.starts_with("tests/internal") => {
+                ("internal", json!({}))
+            }
+            _ => {
+                return Err(format!(
+                    "{}: unclassified test; boundary tests require explicit boundary_case! under tests/contracts/; internal integration tests require tests/internal/",
+                    test.name()
+                ));
+            }
         };
-        if !features.contains_key(&feature)
-            || !contracts
-                .get(&feature)
-                .is_some_and(|cs| cs.contains_key(&contract))
-        {
-            return Err(format!(
-                "{}: unknown owning contract {feature}/{contract}",
-                test.name()
-            ));
-        }
-        let semantics = test.classification.as_ref().map(|(_,v)|v.clone()).unwrap_or_else(||json!({"scope":"契約ディレクトリへの所属のみを示す。実行時の依存関係と検証内容は未レビュー。","reason":"配置先からこのテストの契約への所属を宣言している。実装を実行することと検証の十分さはレビューが必要。","relationship":"unreviewed","also":[]}));
-        nonempty(&semantics["scope"])?;
-        nonempty(&semantics["reason"])?;
         let base_id = test_id(test);
         let mut id = base_id.clone();
         let mut suffix = 1;
@@ -940,98 +1233,11 @@ fn collect(root: &Path) -> Result<Value> {
             suffix += 1;
             id = format!("{base_id}-{suffix}");
         }
-        let mut edges = vec![(
-            feature.clone(),
-            contract,
-            semantics["scope"].clone(),
-            semantics["relationship"].clone(),
-            semantics["reason"].clone(),
-        )];
-        for edge in semantics["also"].as_array().ok_or("also array required")? {
-            edges.push((
-                nonempty(&edge["feature"])?.into(),
-                nonempty(&edge["contract"])?.into(),
-                edge["scope"].clone(),
-                edge["relationship"].clone(),
-                edge["reason"].clone(),
-            ));
-        }
-        let mut scopes = BTreeMap::new();
-        let mut destinations = BTreeSet::new();
-        for (feature, contract, scope, relationship, reason) in edges {
-            nonempty(&scope)?;
-            nonempty(&reason)?;
-            if !matches!(
-                relationship.as_str(),
-                Some("asserts" | "exercises" | "unreviewed")
-            ) {
-                return Err("invalid relationship".into());
-            }
-            if !destinations.insert((feature.clone(), contract.clone())) {
-                return Err(format!(
-                    "duplicate evidence edge {feature}/{contract} for {}",
-                    test.name()
-                ));
-            }
-            if scopes
-                .insert(feature.clone(), scope.clone())
-                .is_some_and(|prior| prior != scope)
-            {
-                return Err(format!(
-                    "conflicting feature scopes for {feature}: {}",
-                    test.name()
-                ));
-            }
-            let destination = contracts
-                .get_mut(&feature)
-                .and_then(|cs| cs.get_mut(&contract))
-                .ok_or_else(|| {
-                    format!("unknown cross-feature/contract reference {feature}/{contract}")
-                })?;
-            destination["evidence"]
-                .as_array_mut()
-                .unwrap()
-                .push(json!({"test":id,"relationship":relationship,"reason":reason}));
-            tests_by_feature.entry(feature).or_default().entry(id.clone()).or_insert_with(||json!({"id":id,"package":test.context.target.package,"target":test.context.target.value(),"name":test.name(),"source":source,"scope":scope}));
-        }
-        classifications.push(json!({"identity":identity,"source":source,"classification":"evidence","feature":feature}));
+        tests.push(json!({"id":id,"package":test.context.target.package,"target":test.context.target.value(),"name":test.name(),"source":test_source(test, root)?,"classification":class,"semantics":semantics}));
     }
-    let mut entrypoints = Vec::new();
-    let mut surfaces = Vec::new();
-    let mut graphs = Vec::new();
-    for (id, value) in features {
-        for entry in value["entrypoints"]
-            .as_array()
-            .ok_or("entrypoints array required")?
-        {
-            let mut entry = entry.clone();
-            entry["feature"] = json!(id);
-            entrypoints.push(entry);
-        }
-        for surface in value["surfaces"]
-            .as_array()
-            .ok_or("surfaces array required")?
-        {
-            let mut surface = surface.clone();
-            surface["feature"] = json!(id);
-            surfaces.push(surface);
-        }
-        let record = collector
-            .declarations
-            .iter()
-            .find(|d| d.feature == id && d.contract.is_none())
-            .unwrap()
-            .context
-            .file
-            .strip_prefix(root)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        graphs.push(json!({"record":record,"graph":{"version":1,"feature":{"id":id,"title":value["title"],"source":value["source"],"flow":value["flow"]},"guarantees":value["guarantees"],"contracts":contracts.remove(&id).unwrap_or_default().into_values().collect::<Vec<_>>(),"tests":tests_by_feature.remove(&id).unwrap_or_default().into_values().collect::<Vec<_>>(),"limitations":value["limitations"]}}));
-    }
-    let inventories=inventories.into_iter().map(|(target,tests)|json!({"package":target.package,"target":target.value(),"tests":tests})).collect::<Vec<_>>();
+    let inventories = inventories.into_iter().map(|(target,tests)| json!({"package":target.package,"target":target.value(),"tests":tests})).collect::<Vec<_>>();
     Ok(
-        json!({"graphs":graphs,"inventories":inventories,"classifications":classifications,"entrypoints":entrypoints,"surfaces":surfaces,"excluded_targets":excluded_targets,"packages":packages,"examples":examples}),
+        json!({"version":2,"components":components.into_values().collect::<Vec<_>>(),"features":features.into_values().collect::<Vec<_>>(),"contracts":contracts.into_values().collect::<Vec<_>>(),"tests":tests,"inventories":inventories,"packages":packages,"examples":examples,"excluded_targets":excluded_targets}),
     )
 }
 fn source_range(span: Span) -> (usize, usize) {

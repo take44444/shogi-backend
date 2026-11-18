@@ -27,7 +27,8 @@ def github_base(origin):
     return f"https://github.com/{match[1]}/{match[2]}"
 
 
-def capture(root, traces):
+def capture(root, bundle):
+    root = root.resolve()
     revision_bytes = git(root, "rev-parse", "--verify", "HEAD")
     revision = revision_bytes.decode().strip() if revision_bytes else None
     base = github_base(git(root, "remote", "get-url", "origin"))
@@ -58,25 +59,36 @@ def capture(root, traces):
         files[path] = {"content": content, "github_url": remote, "status": status}
         return files[path]
 
-    features = []
-    for record, graph, lines in traces:
-        source(record.as_posix())
-        locations = {}
-        for node in [graph["feature"], *graph["contracts"], *graph["tests"]]:
-            reference = node["source"]
-            path, needle = reference["path"], reference["needle"]
-            content = source(path)["content"]
-            line = lines[node["id"]]
-            if "line" in reference:
-                captured_lines = content.splitlines()
-                valid = 0 < line <= len(captured_lines) and captured_lines[line - 1].strip() == needle
-            else:
-                valid = content.count(needle) == 1 and content[:content.index(needle)].count("\n") + 1 == line
-            if not valid:
-                raise ValueError(f"source anchor changed during capture: {path}:{line}")
-            locations[node["id"]] = {"path": path, "line": line}
-        features.append({"record": record.as_posix(), "graph": graph, "locations": locations})
-    return {"version": 1, "repository": {"revision": revision, "github_base": base}, "features": features, "files": files}
+    locations = {}
+
+    def references(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("path"), str) and isinstance(value.get("needle"), str):
+                path, needle = value["path"], value["needle"]
+                content = source(path)["content"]
+                line = value.get("line")
+                if line is not None:
+                    captured_lines = content.splitlines()
+                    valid = isinstance(line, int) and 0 < line <= len(captured_lines) and captured_lines[line - 1].strip() == needle
+                else:
+                    valid = bool(needle) and content.count(needle) == 1
+                    if valid:
+                        line = content[:content.index(needle)].count("\n") + 1
+                if not valid:
+                    raise ValueError(f"source anchor changed during capture: {path}:{line or '?'}")
+                locations.setdefault(path, {})[needle] = line
+            for key, child in value.items():
+                if key == "record" and child is not None:
+                    source(child)
+                else:
+                    references(child)
+        elif isinstance(value, list):
+            for child in value:
+                references(child)
+
+    references(bundle)
+    return {"version": 2, "repository": {"revision": revision, "github_base": base},
+            "bundle": bundle, "locations": locations, "files": files}
 
 
 def protect_destination(root, destination, payload):
@@ -98,9 +110,9 @@ def protect_destination(root, destination, payload):
     return destination
 
 
-def write_viewer(root, traces, destination):
+def write_viewer(root, bundle, destination):
     root = root.resolve()
-    payload = capture(root, traces)
+    payload = capture(root, bundle)
     destination = protect_destination(root, Path(destination), payload)
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     data = data.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")

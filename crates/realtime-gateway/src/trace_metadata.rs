@@ -1,30 +1,26 @@
-#[path = "trace/realtime-game-feed/bootstrap-contract/contract.rs"]
-mod trace_contract_realtime_game_feed_bootstrap_contract;
-#[path = "trace/realtime-game-feed/cursor/contract.rs"]
-mod trace_contract_realtime_game_feed_cursor;
-#[path = "trace/realtime-game-feed/event-frame/contract.rs"]
-mod trace_contract_realtime_game_feed_event_frame;
-#[path = "trace/realtime-game-feed/snapshot-frame/contract.rs"]
-mod trace_contract_realtime_game_feed_snapshot_frame;
-#[path = "trace/realtime-game-feed/subscription-pump/contract.rs"]
-mod trace_contract_realtime_game_feed_subscription_pump;
-#[path = "trace/realtime-session-commands-limits/browser-headers/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_browser_headers;
-#[path = "trace/realtime-session-commands-limits/command-input/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_command_input;
-#[path = "trace/realtime-session-commands-limits/command-response/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_command_response;
-#[path = "trace/realtime-session-commands-limits/live-checks/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_live_checks;
-#[path = "trace/realtime-session-commands-limits/outgoing/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_outgoing;
-#[path = "trace/realtime-session-commands-limits/session-auth/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_session_auth;
-#[path = "trace/realtime-session-commands-limits/shutdown-contract/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_shutdown_contract;
-#[path = "trace/realtime-session-commands-limits/upgrade-permits/contract.rs"]
-mod trace_contract_realtime_session_commands_limits_upgrade_permits;
-#[path = "trace/realtime-game-feed/feature.rs"]
-mod trace_feature_realtime_game_feed;
-#[path = "trace/realtime-session-commands-limits/feature.rs"]
-mod trace_feature_realtime_session_commands_limits;
+#[path = "trace/component.rs"]
+mod trace_trace_component;
+#[path = "trace/contracts/frontend-delete-matchmaking-tickets-ticket-id.rs"]
+mod trace_trace_contracts_frontend_delete_matchmaking_tickets_ticket_id;
+#[path = "trace/contracts/frontend-get-matchmaking-me.rs"]
+mod trace_trace_contracts_frontend_get_matchmaking_me;
+#[path = "trace/contracts/frontend-post-matchmaking-tickets-ticket-id-heartbeat.rs"]
+mod trace_trace_contracts_frontend_post_matchmaking_tickets_ticket_id_heartbeat;
+#[path = "trace/contracts/frontend-post-matchmaking-tickets-ticket-id-ready.rs"]
+mod trace_trace_contracts_frontend_post_matchmaking_tickets_ticket_id_ready;
+#[path = "trace/contracts/frontend-put-matchmaking-tickets-ticket-id.rs"]
+mod trace_trace_contracts_frontend_put_matchmaking_tickets_ticket_id;
+#[path = "trace/contracts/frontend-ws-move.rs"]
+mod trace_trace_contracts_frontend_ws_move;
+#[path = "trace/contracts/frontend-ws-resign.rs"]
+mod trace_trace_contracts_frontend_ws_resign;
+#[path = "trace/contracts/frontend-ws-upgrade.rs"]
+mod trace_trace_contracts_frontend_ws_upgrade;
+#[path = "trace/features/game-play.rs"]
+mod trace_trace_features_game_play;
+#[path = "trace/features/matchmaking-tickets.rs"]
+mod trace_trace_features_matchmaking_tickets;
+#[path = "trace/features/realtime-game-feed.rs"]
+mod trace_trace_features_realtime_game_feed;
+#[path = "trace/features/realtime-session-commands-limits.rs"]
+mod trace_trace_features_realtime_session_commands_limits;
