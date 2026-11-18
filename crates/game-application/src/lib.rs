@@ -212,9 +212,3 @@ impl GameService {
         response.await.map_err(|_| ApplicationError::Unavailable)?
     }
 }
-
-#[cfg(test)]
-mod trace_metadata;
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

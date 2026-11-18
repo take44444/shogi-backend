@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "user-http/gateway-session", relationship: crate::trace_support::Relationship::Asserts, scope: "実 user HTTP・PostgreSQL・gRPC・Valkey と WebSocket ハンドシェイク。未知 token の本人確認を含む。", reason: "存在しないが形式の正しい token は実 user HTTP に問い合わせて 401 となり、欠落・不正・重複 Cookie もハンドシェイクで拒否する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["user-http"], fake: &[] }, crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "Originの欠落・不正なオリジン・重複、クロスサイトのメタデータ、プロトコルの欠落・不一致を403で拒否する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn handshake_requires_exact_origin_unique_session_and_supported_subprotocol() {
     let services = Services::start().await;
@@ -57,9 +56,7 @@ async fn handshake_requires_exact_origin_unique_session_and_supported_subprotoco
     }
     services.stop().await;
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "user-http/gateway-session", relationship: crate::trace_support::Relationship::Exercises, scope: "実サービス群と WebSocket。HTTP logout と SQL による期限切れを起こし、次のコマンド・通知の拒否を確認する。", reason: "有効な user HTTP セッションで WebSocket 接続する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["user-http"], fake: &[] }, crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 実際のアカウントのログアウトと、セッションの強制的な期限切れを使う。", reason: "着手の送信前にログアウトすると接続が閉じ、永続化された連番は0のままとなる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn logout_closes_before_command_and_expiry_closes_before_notification() {
     let mut services = Services::start().await;
@@ -111,5 +108,4 @@ async fn logout_closes_before_command_and_expiry_closes_before_notification() {
         StatusCode::UNAUTHORIZED
     );
     services.stop().await;
-}
 }

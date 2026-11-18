@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-grpc/rpc-make-move", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "不正なID、連番の欠落、不正なUSIはInvalidArgumentとなり、スナップショットは変化しない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-resign", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "不正な投了フィールドを、状態を変更せずに拒否する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }] };
 #[tokio::test]
 async fn malformed_wire_values_are_invalid_arguments_without_changes() {
     let server = TestServer::start().await;
@@ -65,5 +64,4 @@ async fn malformed_wire_values_are_invalid_arguments_without_changes() {
     assert_eq!(client.make_move(valid).await.unwrap().into_inner().seq, 1);
     drop(client);
     server.shutdown().await;
-}
 }

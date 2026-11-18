@@ -16,7 +16,6 @@ impl Drop for Process {
     }
 }
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-tick", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のgame-serverプロセス、PostgreSQL、生成されたgRPCクライアントを使う。DBの時刻を操作してマッチング条件を満たすようにする。", reason: "実際のgame-server実行ファイルを起動する。追加の参加要求がなくても、待機中のチケットがMatchedとなり、両者の準備完了後にPlayingとなり、両ユーザーを含む連番0のスナップショットを取得できることを確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
 #[tokio::test]
 async fn writer_periodic_matching_progresses_without_another_join() {
     let database = TestDatabase::new().await;
@@ -131,7 +130,11 @@ async fn writer_periodic_matching_progresses_without_another_join() {
             .code(),
         tonic::Code::NotFound
     );
-    let first = client.ready_matchmaking(command).await.unwrap().into_inner();
+    let first = client
+        .ready_matchmaking(command)
+        .await
+        .unwrap()
+        .into_inner();
     assert_eq!(first.state, "matched");
     assert_eq!(first.ready, Some(true));
     let second = client
@@ -240,5 +243,4 @@ async fn writer_periodic_matching_progresses_without_another_join() {
         );
     }
     raw.close().await.unwrap();
-}
 }

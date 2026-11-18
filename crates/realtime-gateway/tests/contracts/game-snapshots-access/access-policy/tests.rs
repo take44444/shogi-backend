@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-view", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "非公開対局の参加者以外と存在しない対局へのアクセス確認RPCはNotFoundとなる。参加者のアクセスは成功し、公開範囲の変更後は既存の観戦者の接続を閉じる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Exercises, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "閲覧者用の読み取り処理で、非公開対局と参加者のアクセス確認の経路を通す。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-get-snapshot-for-viewer", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "生成されたTCPのRPCを実際のゲートウェイ用テストサービスに通し、非公開・不存在のエラーと参加者の成功を検証する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }, crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "偽のuser_idはinvalid_inputとなり、連番は0のままとなる。観戦者の着手・投了はnot_participantとなる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_participant() {
     let mut services = Services::start().await;
@@ -85,5 +84,4 @@ async fn private_games_are_hidden_and_spectators_cannot_mutate_or_spoof_a_partic
     services.publish().await;
     closed(&mut viewer).await;
     services.stop().await;
-}
 }

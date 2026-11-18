@@ -28,10 +28,3 @@ impl UserId {
 #[cfg(test)]
 #[path = "tests/account-profile/user-id/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;

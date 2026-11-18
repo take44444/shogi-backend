@@ -1,6 +1,10 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-snapshot", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(
+    game_application::GameService::snapshot,
+    game_application::GameService::make_move,
+    game_application::GameService::resign
+)]
 #[tokio::test]
 async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_finish() {
     let database = TestDatabase::new().await;
@@ -51,9 +55,8 @@ async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_
         Err(Error::RequestConflict)
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-snapshot", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。直接 SQL を使い、履歴とメタデータを七種類破損させる。", reason: "王手・USI・所有者・リクエスト・バージョン・終局メタデータの変更と受理記録の削除は、復元時にいずれも Corrupt となる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::snapshot)]
 #[tokio::test]
 async fn corrupt_history_and_metadata_fail_closed() {
     for sql in [
@@ -85,5 +88,4 @@ async fn corrupt_history_and_metadata_fail_closed() {
         );
         assert_eq!(restored.snapshot(&id()).await, Err(Error::Corrupt), "{sql}");
     }
-}
 }

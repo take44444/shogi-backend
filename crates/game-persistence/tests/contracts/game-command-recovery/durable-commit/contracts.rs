@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際の SQL とコミットの失敗を注入する。", reason: "実際の文実行やコミットにエラーを注入しても、メタデータと受理記録の両方が変更されない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::make_move)]
 #[tokio::test]
 async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt() {
     for commit_failure in [false, true] {
@@ -29,9 +29,11 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
         assert_eq!(service.make_move(&id(), command).await.unwrap().seq, 1);
     }
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmStore::commit_change,
+    game_application::StagedGameChange::new
+)]
 #[tokio::test]
 async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     let database = TestDatabase::new().await;
@@ -82,5 +84,4 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     );
     assert_eq!(store.version(&id()).await.unwrap(), 1);
     assert_eq!(store.load_game(&id()).await.unwrap().journal.len(), 1);
-}
 }

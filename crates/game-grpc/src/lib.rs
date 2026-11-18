@@ -39,10 +39,3 @@ pub mod proto {
 }
 
 pub use service::GameRpc;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;

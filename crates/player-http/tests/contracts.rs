@@ -13,5 +13,3 @@ mod rating_tests;
 mod record_route_support;
 #[path = "contracts/public-record-detail/support.rs"]
 mod tests;
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

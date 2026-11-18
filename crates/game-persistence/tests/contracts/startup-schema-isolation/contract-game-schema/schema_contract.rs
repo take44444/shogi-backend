@@ -35,7 +35,7 @@ async fn snapshot(db: &DatabaseConnection) -> Vec<String> {
     .collect()
 }
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() {
     for change in [
@@ -81,9 +81,8 @@ async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() 
         raw.close().await.unwrap();
     }
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged() {
     let database = TestDatabase::new().await;
@@ -112,9 +111,8 @@ async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted
     assert_eq!(snapshot(&raw).await, before);
     raw.close().await.unwrap();
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn version_five_is_rejected_without_migration_or_deletion() {
     let database = TestDatabase::new().await;
@@ -130,9 +128,8 @@ async fn version_five_is_rejected_without_migration_or_deletion() {
     assert_eq!(snapshot(&raw).await, before);
     raw.close().await.unwrap();
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn version_six_is_rejected_unchanged() {
     let database = TestDatabase::new().await;
@@ -147,9 +144,11 @@ async fn version_six_is_rejected_unchanged() {
     );
     assert_eq!(snapshot(&raw).await, before);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmStore::connect,
+    game_record_persistence::PostgresGameRecords::connect
+)]
 #[tokio::test]
 async fn version_seven_is_rejected_by_writer_and_reader_unchanged() {
     let database = TestDatabase::new().await;
@@ -167,5 +166,4 @@ async fn version_seven_is_rejected_by_writer_and_reader_unchanged() {
         Err(game_record_application::Error::Corrupt)
     ));
     assert_eq!(snapshot(&raw).await, before);
-}
 }

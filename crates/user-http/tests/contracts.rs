@@ -20,5 +20,3 @@ fn hash(value: &str) -> String {
 }
 #[path = "contracts/account-google-login/support/browser.rs"]
 mod tests;
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

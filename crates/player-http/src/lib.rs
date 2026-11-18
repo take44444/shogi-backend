@@ -371,10 +371,3 @@ mod contract_tests;
 #[cfg(test)]
 #[path = "tests/public-record-detail/router_support.rs"]
 mod record_route_support;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;

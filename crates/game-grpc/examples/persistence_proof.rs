@@ -1,11 +1,3 @@
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-trace_support::example!(trace_support::Example {
-    kind: trace_support::ExampleKind::Program,
-    reason: "gRPCサーバーの再起動をまたいで永続化の処理を実行し、指定ディレクトリに検証用ファイルを出力する。",
-});
-
 mod support;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 use prost::Message;

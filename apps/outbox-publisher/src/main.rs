@@ -30,9 +30,3 @@ async fn run(queue: &mut PostgresOutbox, valkey: &str) -> Result<(), Error> {
         };
     }
 }
-
-#[cfg(test)]
-mod trace_metadata;
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

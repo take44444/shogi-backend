@@ -1,6 +1,9 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の RatingWorker と PostgreSQL で、破損、隔離、明示的な復旧、修復を検証する。", reason: "RatingWorker による復旧は、破損した現在状態を修復しない。後の tick を成功させるには、状態を修復する必要がある。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_application::rating::RatingWorker::tick,
+    game_application::rating::RatingWorker::retry_quarantined
+)]
 #[tokio::test]
 async fn corrupt_current_state_quarantines_and_retry_requires_repair() {
     let f = Fixture::new().await;
@@ -39,9 +42,11 @@ async fn corrupt_current_state_quarantines_and_retry_requires_repair() {
         TickOutcome::Applied
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、一時的な失敗後の待機時間と試行回数の上限を検証する。", reason: "一時的な失敗は待機時間の終了前に再取得できず、設定した試行上限に達すると隔離される。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmRatingJobs::claim,
+    game_persistence::SeaOrmRatingJobs::fail
+)]
 #[tokio::test]
 async fn transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit() {
     let f = Fixture::new().await;
@@ -96,5 +101,4 @@ async fn transient_failure_obeys_backoff_and_quarantines_at_the_attempt_limit() 
     );
     assert_eq!(f.count("rating_slots").await, 2);
     assert_eq!(f.count("rating_applications").await, 0);
-}
 }

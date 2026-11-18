@@ -1,6 +1,9 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-record-application/record-search-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、識別子の順序とカーソルの往復を検証する。", reason: "符号化の境界事例を含む保存済み識別子でも、同値時のバイナリー順序とカーソルの往復を保持する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_record_persistence::PostgresGameRecords::search,
+    game_record_persistence::PostgresGameRecords::detail
+)]
 #[tokio::test]
 async fn identifier_encoding_preserves_binary_ties_and_cursor_round_trips() {
     let f = Fixture::new().await;
@@ -38,5 +41,4 @@ async fn identifier_encoding_preserves_binary_ties_and_cursor_round_trips() {
         }
     }
     assert_eq!(actual, names);
-}
 }

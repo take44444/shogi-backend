@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::infrastructure!("sql-policy", "実際の読み取りロールの権限を確認する基盤検査。";
 #[tokio::test]
 async fn actual_reader_role_can_read_only_the_public_rating_table() {
     let f = Fixture::new().await;
@@ -50,4 +49,3 @@ async fn actual_reader_role_can_read_only_the_public_rating_table() {
             .contains("permission denied")
     );
 }
-);

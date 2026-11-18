@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-get-matchmaking-me", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "未認証での現在状態の取得は401、別の所有者は404、Origin・Hostの不一致は403となる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "ブラウザーがGET /matchmaking/meで現在のペアと準備期限を取得する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-join-matchmaking", relationship: crate::trace_support::Relationship::Exercises, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "ブラウザーからの呼び出しで5種類すべてのRPCを通し、現在状態、参加要求、ハートビート、準備完了、キャンセルについて検証した結果を返す。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }] };
 #[tokio::test]
 async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_foreign_access() {
     use game_application::{matchmaking::MatchmakingRepository, rating::Pool};
@@ -459,9 +458,7 @@ async fn authenticated_matchmaking_recovers_requests_and_rejects_cross_site_or_f
     );
     services.stop().await;
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-get-matchmaking-me", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "変更操作のOrigin欠落、Cookieの重複、未知のプール、偽のuser_idを拒否する。拒否した参加要求ではチケットを残さない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn matchmaking_checks_cookie_origin_and_input_before_admission() {
     let services = Services::start().await;
@@ -570,9 +567,7 @@ async fn matchmaking_checks_cookie_origin_and_input_before_admission() {
     assert_eq!(current, json!({"state":"idle","ticket":null}));
     services.stop().await;
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-post-matchmaking-tickets-ticket-id-ready", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTPゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。DBの準備期限を過去に設定する。", reason: "期限切れのペアは両者ともvoidedを返す。準備完了とキャンセルの再試行は200となり、対局は作成されない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn readiness_timeout_returns_a_durable_voided_pair_over_http() {
     use game_application::{matchmaking::MatchmakingRepository, rating::Pool};
@@ -676,5 +671,4 @@ async fn readiness_timeout_returns_a_durable_voided_pair_over_http() {
     );
     raw.close().await.unwrap();
     services.stop().await;
-}
 }

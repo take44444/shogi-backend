@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のストアとサービスをそれぞれ独立したインスタンスで実行する。", reason: "独立した実際のストアとサービスのインスタンスで、CAS の競合と同じ内容の同時再試行を直列化する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のストアとサービスをそれぞれ独立したインスタンスで実行する。", reason: "独立したサービスとストアのインスタンスで、CAS と状態更新が正しく動く。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::make_move)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
     let database = TestDatabase::new().await;
@@ -40,9 +40,8 @@ async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
         Err(Error::Unavailable)
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。FaultStore が実際の PostgreSQL を包み、返す結果と読み込み失敗を制御する。", reason: "コミット後にエラーが返る場合は受理記録と照合する。コミット前の失敗では、永続状態の読み込みが回復するまでローカル状態の使用を止める。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。FaultStore が実際の PostgreSQL を包み、返す結果と読み込み失敗を制御する。", reason: "実際の PostgreSQL を包む障害注入アダプターで、コミット後のエラーからの受理記録の復旧、コミット前の失敗、読み込み不能時の状態使用停止、その後の復旧を検証する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::make_move)]
 #[tokio::test]
 async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery() {
     for mode in [1, 2, 3, 4] {
@@ -89,5 +88,4 @@ async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery()
         }
         assert_eq!(store.load_game(&id()).await.unwrap().journal.len(), 1);
     }
-}
 }

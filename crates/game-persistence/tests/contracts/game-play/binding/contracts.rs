@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
 #[tokio::test]
 async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable() {
     {
@@ -36,9 +35,8 @@ async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable()
         );
     }
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::load_game)]
 #[tokio::test]
 async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
     let database = TestDatabase::new().await;
@@ -83,5 +81,4 @@ async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
     );
     assert_eq!(record.journal[0].request.request_id, command.request_id);
     assert_eq!(restored.snapshot(&literal).await.unwrap().seq, 0);
-}
 }

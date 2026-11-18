@@ -1,6 +1,9 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-record-application/record-detail-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、公開棋譜のフィルターと非公開詳細の検索を検証する。", reason: "リポジトリで直接取得し、非公開の終了済み対局が見つからないことを検証する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-record-application/record-search-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL の読み取り・書き込み用のテスト構成で、フィルター、公開範囲、キーベースのページングの変化を検証する。", reason: "リポジトリを直接検証し、個別フィルター、組み合わせた条件、同時刻の ID を c/b の順に並べてから古い a を返すこと、まだ見ていない新しい行の除外、新たに非公開となった行の省略を確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_record_persistence::PostgresGameRecords::search,
+    game_record_persistence::PostgresGameRecords::detail
+)]
 #[tokio::test]
 async fn public_completed_metadata_only_filters_and_stable_keysets() {
     let f = Fixture::new().await;
@@ -180,9 +183,8 @@ async fn public_completed_metadata_only_filters_and_stable_keysets() {
         ["a"]
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-record-application/record-detail-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、履歴とメタデータの破損、および上限を超える履歴の拒否を検証する。", reason: "八種類の破損変更と上限を超える履歴を拒否し、部分的な詳細は返さない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(game_record_persistence::PostgresGameRecords::detail)]
 #[tokio::test]
 async fn corrupt_and_oversized_details_fail_without_partial_history() {
     for statement in [
@@ -219,9 +221,8 @@ async fn corrupt_and_oversized_details_fail_without_partial_history() {
         Err(Error::HistoryTooLong)
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-record-application/record-detail-store", relationship: crate::trace_support::Relationship::Asserts, scope: "読み取り文の間で実際の PostgreSQL を並行変更し、スナップショットの整合性を検証する。", reason: "履歴の読み込みが待機している間に別の接続がメタデータと履歴を変更しても、返す詳細は変更前の整合したスナップショットを保持する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(game_record_persistence::PostgresGameRecords::detail)]
 #[tokio::test]
 async fn detail_keeps_one_database_view_when_history_changes_between_reads() {
     let f = Fixture::new().await;
@@ -257,9 +258,8 @@ async fn detail_keeps_one_database_view_when_history_changes_between_reads() {
     assert_eq!(after.metadata.final_seq().get(), 1);
     assert_eq!(after.history.len(), 1);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-record-application/record-detail-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL の履歴の構造上の境界を検証する。意図的に合法性の再現は行わない。", reason: "盤面上の合法性を再現せず、構造上の操作を 4096 件までは受け入れ、4097 件は拒否する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(game_record_persistence::PostgresGameRecords::detail)]
 #[tokio::test]
 async fn public_history_accepts_4096_structural_operations_without_replaying_legality() {
     let f = Fixture::new().await;
@@ -277,5 +277,4 @@ async fn public_history_accepts_4096_structural_operations_without_replaying_leg
         .await
         .unwrap();
     assert_eq!(reader.detail(&id).await, Err(Error::HistoryTooLong));
-}
 }

@@ -367,9 +367,3 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/durable-event-dispatch/support/transport.rs"]
 mod transport_tests;
-
-#[cfg(test)]
-mod trace_metadata;
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

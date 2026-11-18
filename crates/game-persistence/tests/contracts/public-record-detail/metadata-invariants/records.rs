@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::resign)]
 #[tokio::test]
 async fn writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_time() {
     let f = Fixture::new().await;
@@ -57,9 +57,8 @@ async fn writer_metadata_is_atomic_move_count_excludes_resign_and_retry_keeps_ti
     assert_eq!(row.try_get::<i64>("", "final_move_ply").unwrap(), 0);
     assert_eq!(row.try_get::<Option<i64>>("", "finished_at").unwrap(), None);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn current_schema_rejects_missing_metadata_and_inconsistent_finish_time() {
     let f = Fixture::new().await;
@@ -81,9 +80,8 @@ async fn current_schema_rejects_missing_metadata_and_inconsistent_finish_time() 
         );
     }
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::resign)]
 #[tokio::test]
 async fn finish_time_is_writer_utc_and_retries_preserve_it() {
     fn micros() -> i64 {
@@ -120,5 +118,4 @@ async fn finish_time_is_writer_utc_and_retries_preserve_it() {
     assert_eq!(result.metadata.final_move_ply().get(), 0);
     f.games.resign(&key, command).await.unwrap();
     assert_eq!(reader.detail(&id).await.unwrap(), result);
-}
 }

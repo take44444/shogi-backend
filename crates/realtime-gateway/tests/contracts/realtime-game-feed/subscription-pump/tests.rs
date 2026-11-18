@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-messaging/gateway-subscription", relationship: crate::trace_support::Relationship::Asserts, scope: "実 Valkey と公開 ValkeySubscription API。ゲートウェイは起動しない。", reason: "上限付き購読キューの溢れで、後続の next も終端エラーを返すことを確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-messaging", "valkey"], fake: &[] }] };
+#[traceability::targets(game_messaging::ValkeySubscription::next)]
 #[tokio::test]
 async fn bounded_valkey_subscription_overflow_is_terminal() {
     let url =
@@ -26,5 +26,4 @@ async fn bounded_valkey_subscription_overflow_is_terminal() {
     }
     assert!(timeout(WAIT, subscription.next()).await.unwrap().is_err());
     assert!(timeout(WAIT, subscription.next()).await.unwrap().is_err());
-}
 }

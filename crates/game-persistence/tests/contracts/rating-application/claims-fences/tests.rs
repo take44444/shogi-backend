@@ -41,21 +41,26 @@ fn claim_on_independent_runtime(f: &Fixture, policy: WorkerPolicy) -> Option<Gam
     .unwrap()
 }
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、復旧後の古い取得権への失敗通知と、返却直後の別 runtime による取得を検証する。", reason: "失敗通知が LostClaim を返した時点で、復旧したジョブを別のワーカーが取得できる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::fail)]
 #[tokio::test]
 async fn stale_failure_releases_recovered_job_before_returning() {
     let f = Fixture::new().await;
     let policy = policy(30000, 3);
     let old = recover_job(&f, &policy).await;
     assert_eq!(
-        f.jobs.fail(&old, JobFailure::Transient, &policy).await.unwrap(),
+        f.jobs
+            .fail(&old, JobFailure::Transient, &policy)
+            .await
+            .unwrap(),
         TickOutcome::LostClaim
     );
-    assert_eq!(claim_on_independent_runtime(&f, policy), Some(game("recovered")));
-}
+    assert_eq!(
+        claim_on_independent_runtime(&f, policy),
+        Some(game("recovered"))
+    );
 }
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、復旧後の古い取得権での適用と、返却直後の別 runtime による取得を検証する。", reason: "適用が LostClaim を返した時点で、復旧したジョブを別のワーカーが取得できる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::apply)]
 #[tokio::test]
 async fn stale_application_releases_recovered_job_before_returning() {
     let f = Fixture::new().await;
@@ -65,11 +70,13 @@ async fn stale_application_releases_recovered_job_before_returning() {
         f.jobs.apply(&old, &change(&old)).await.unwrap(),
         ApplyOutcome::LostClaim
     );
-    assert_eq!(claim_on_independent_runtime(&f, policy), Some(game("recovered")));
-}
+    assert_eq!(
+        claim_on_independent_runtime(&f, policy),
+        Some(game("recovered"))
+    );
 }
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、隔離されていないジョブの復旧結果と、返却直後の別 runtime による取得を検証する。", reason: "復旧が NotQuarantined を返した時点で、実行可能なジョブを別のワーカーが取得できる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::retry_quarantined)]
 #[tokio::test]
 async fn repeated_recovery_releases_recovered_job_before_returning() {
     let f = Fixture::new().await;
@@ -79,11 +86,18 @@ async fn repeated_recovery_releases_recovered_job_before_returning() {
         f.jobs.retry_quarantined(&game("recovered")).await.unwrap(),
         RecoveryOutcome::NotQuarantined
     );
-    assert_eq!(claim_on_independent_runtime(&f, policy), Some(game("recovered")));
-}
+    assert_eq!(
+        claim_on_independent_runtime(&f, policy),
+        Some(game("recovered"))
+    );
 }
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、取得権、期限切れと古い取得権による操作の拒否、試行回数の枠、復旧を検証する。ワーカーのエラー処理経路は対象としない。", reason: "取得世代が増加し、期限切れまたは古い取得権での適用と失敗通知が LostClaim となること、取得回数の枠を使い切っても参加枠を保持すること、復旧結果を確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmRatingJobs::claim,
+    game_persistence::SeaOrmRatingJobs::apply,
+    game_persistence::SeaOrmRatingJobs::fail,
+    game_persistence::SeaOrmRatingJobs::retry_quarantined
+)]
 #[tokio::test]
 async fn expired_claims_consume_budget_quarantine_and_recover_without_releasing_slots() {
     let f = Fixture::new().await;
@@ -160,9 +174,8 @@ async fn expired_claims_consume_budget_quarantine_and_recover_without_releasing_
     );
     assert_eq!(f.count("rating_slots").await, 0);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、ロック待ち中にリースが失効する場合を検証する。CLI は使わない。", reason: "状態のロック待ち中にリースが切れると LostClaim となり、台帳を作らず二つの予約枠を保持し、先手の未評価状態を変更しない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::apply)]
 #[tokio::test]
 async fn lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations() {
     let f = Fixture::new().await;
@@ -205,9 +218,8 @@ async fn lease_expiring_while_waiting_for_state_lock_rolls_back_all_mutations() 
         RatingState::Unrated
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、行ロックを保持した状態と同時取得を検証する。", reason: "ロック中のジョブを読み飛ばし、残るジョブを同時に取得しようとした二つの処理のうち、一つだけが所有権を得る。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::claim)]
 #[tokio::test]
 async fn concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job() {
     let f = Fixture::new().await;
@@ -242,5 +254,4 @@ async fn concurrent_workers_acquire_disjoint_jobs_and_skip_a_locked_job() {
         claims.into_iter().flatten().next().unwrap().game_id(),
         &game("locked")
     );
-}
 }

@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 入力・頻度の上限を変更し、永続化されたスナップショットを検証する。", reason: "入力バイト数の上限128と頻度の上限1で、過剰な入力を送るソケットを終了する。永続化された連番は0のままとなる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn oversized_frames_and_input_rate_close_without_committing_commands() {
     let mut services = Services::with_limits(Limits {
@@ -39,5 +38,4 @@ async fn oversized_frames_and_input_rate_close_without_committing_commands() {
     .expect("rate limit closes connection");
     assert_eq!(services.snapshot().await.seq, 0);
     services.stop().await;
-}
 }

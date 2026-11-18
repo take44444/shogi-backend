@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。実際のコミットと通常のリポジトリ読み込みを並行実行する。", reason: "書き込みと読み取りの並行ループで、バージョンと履歴長、最終結果と最後の受理記録を比較し、独立したスナップショット復元が成功する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::load_game)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn joined_history_load_remains_coherent_during_concurrent_commits() {
     let database = TestDatabase::new().await;
@@ -45,5 +45,4 @@ async fn joined_history_load_remains_coherent_during_concurrent_commits() {
         service.snapshot(&id()).await.unwrap();
     }
     writing.await.unwrap();
-}
 }

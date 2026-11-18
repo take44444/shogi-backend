@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "終局後の着手・投了の完全に同じ再試行は元の受理結果を返す。連番・ユーザー・着手・操作種別を変更すると競合になり、追加で進行しない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
 #[tokio::test]
 async fn exact_replay_returns_original_receipt_after_finish_and_conflicts_are_rejected() {
     let server = TestServer::start().await;
@@ -46,9 +45,7 @@ async fn exact_replay_returns_original_receipt_after_finish_and_conflicts_are_re
     drop(client);
     server.shutdown().await;
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "サーバーを2回再起動しても、進行中・終局済みの状態で元の受理記録を保持する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/grpc-snapshot", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。 保存層とTCPの待ち受けを2回開き直す。", reason: "復旧した進行中・終局済みのスナップショットが、それぞれ以前の値と一致する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
 #[tokio::test]
 async fn generated_tcp_client_restores_database_across_two_server_restarts() {
     let database = pg_test_support::TestDatabase::new().await;
@@ -94,5 +91,4 @@ async fn generated_tcp_client_restores_database_across_two_server_restarts() {
     assert_eq!(client.resign(end).await.unwrap().into_inner(), terminal);
     drop(client);
     server.shutdown().await;
-}
 }

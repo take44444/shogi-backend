@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "user-http/frontend-get-auth-google-start", relationship: crate::trace_support::Relationship::Asserts, scope: "公開ルーター、実アカウント保存、テスト用 IdentityProvider。実 Google には接続しない。", reason: "HTTP 応答と Cookie、保存結果またはログアウト後の拒否を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["user-http", "user-persistence"], fake: &["google"] }] };
 #[tokio::test]
 async fn production_cookies_have_host_prefix_and_secure_attributes() {
     let database = pg_test_support::TestDatabase::new().await;
@@ -23,5 +22,4 @@ async fn production_cookies_have_host_prefix_and_secure_attributes() {
         assert!(c.contains(required));
     }
     assert!(!c.contains("Domain="));
-}
 }

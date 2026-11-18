@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 実際の購読者がコミットを受信する間、SnapshotHoldで初期応答を保留する。", reason: "連番0のスナップショットを確定した状態で保留し、実際の購読者を確認する。連番1をコミット・配信した後、スナップショット0、イベント1の順に受信する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot() {
     let (captured, snapshot_ready) = oneshot::channel();
@@ -50,9 +49,7 @@ async fn committed_move_during_initial_snapshot_arrives_after_the_frozen_snapsho
     assert_eq!(event["usi"], "7g7f");
     services.stop().await;
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。", reason: "実際の3本のWebSocketが、初期スナップショット、コミット済みの着手2件、投了を受信する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn participants_and_spectator_receive_committed_moves_and_resignation() {
     let mut services = Services::start().await;
@@ -102,9 +99,7 @@ async fn participants_and_spectator_receive_committed_moves_and_resignation() {
     assert_eq!(services.snapshot().await.seq, 3);
     services.stop().await;
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 永続化された受理の後に接続を切り、元の識別情報で再試行する。", reason: "再接続時のスナップショットは連番1で、再試行は元の受理済み連番1を返し、永続化されたイベントは1件となる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn lost_acceptance_replays_original_receipt_after_reconnect_without_a_second_move() {
     let mut services = Services::start().await;
@@ -134,5 +129,4 @@ async fn lost_acceptance_replays_original_receipt_after_reconnect_without_a_seco
         "retry does not enqueue another event"
     );
     services.stop().await;
-}
 }

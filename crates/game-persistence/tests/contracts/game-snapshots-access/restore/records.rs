@@ -1,6 +1,10 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-record-application/record-detail-store", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmStore::connect,
+    game_record_persistence::PostgresGameRecords::search,
+    game_record_persistence::PostgresGameRecords::detail
+)]
 #[tokio::test]
 async fn reopening_preserves_current_records_history_and_outbox() {
     let database = pg_test_support::TestDatabase::new().await;
@@ -83,5 +87,4 @@ async fn reopening_preserves_current_records_history_and_outbox() {
     );
     reader.close().await;
     store.close().await.unwrap();
-}
 }

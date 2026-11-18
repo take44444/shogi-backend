@@ -434,10 +434,3 @@ async fn logout(State(app): State<App>, headers: HeaderMap) -> Result<Response, 
 #[cfg(test)]
 #[path = "tests/public-api-documents/support.rs"]
 mod openapi_tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;

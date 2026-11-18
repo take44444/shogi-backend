@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "user-http/frontend-get-auth-google-callback", relationship: crate::trace_support::Relationship::Asserts, scope: "公開ルーター、実アカウント保存、テスト用 IdentityProvider。実 Google には接続しない。", reason: "HTTP 応答と Cookie、保存結果またはログアウト後の拒否を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["user-http", "user-persistence"], fake: &["google"] }] };
 #[tokio::test]
 async fn login_is_browser_bound_and_consumed_before_any_exchange() {
     let database = pg_test_support::TestDatabase::new().await;
@@ -57,9 +56,7 @@ async fn login_is_browser_bound_and_consumed_before_any_exchange() {
     );
     assert_eq!(provider.exchanges.load(Ordering::SeqCst), 2);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "user-http/frontend-get-auth-google-callback", relationship: crate::trace_support::Relationship::Asserts, scope: "公開ルーター、実アカウント保存、テスト用 IdentityProvider。実 Google には接続しない。", reason: "HTTP 応答と Cookie、保存結果またはログアウト後の拒否を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["user-http", "user-persistence"], fake: &["google"] }] };
 #[tokio::test]
 async fn browser_flow_over_real_tcp_http_routes() {
     let database = pg_test_support::TestDatabase::new().await;
@@ -144,9 +141,7 @@ async fn browser_flow_over_real_tcp_http_routes() {
     );
     serving.abort();
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "user-http/frontend-get-auth-google-callback", relationship: crate::trace_support::Relationship::Asserts, scope: "公開ルーター、実アカウント保存、テスト用 IdentityProvider。実 Google には接続しない。", reason: "HTTP 応答と Cookie、保存結果またはログアウト後の拒否を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["user-http", "user-persistence"], fake: &["google"] }] };
 #[tokio::test]
 async fn persisted_browser_credentials_are_hashes_not_cookie_values() {
     use sea_orm::{
@@ -198,5 +193,4 @@ async fn persisted_browser_credentials_are_hashes_not_cookie_values() {
     let saved: String = session.try_get("", "token_hash").unwrap();
     assert_ne!(saved, token);
     assert_eq!(saved, hash(token));
-}
 }

@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "shogi-domain/application-play", relationship: crate::trace_support::Relationship::Exercises, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "TCP経由の合法な手順で、駒取り・成り・取り返し・駒打ちの受理結果を検証する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["shogi-domain"], fake: &[] }, crate::trace_support::Evidence { contract: "shogi-domain/application-resign", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "TCP経由の投了について、勝者・終局理由と、盤面・持ち駒・手番の保持、合法手が空になることを確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["shogi-domain"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-make-move", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "生成されたTCPクライアントで、駒取り・成り・取り返し・駒打ちが受理され、連番と結果が一致することを確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-resign", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "TCP経由の投了が、期待した受理結果と終局結果を返す。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-get-snapshot", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "TCP経由で、初期連番、盤上の40枚の駒、14種類の持ち駒数0、先手の手番、30個の合法手と、選択した駒取り・成り・駒打ちの値を検証する。投了では局面を保持し、終局結果と空の合法手を返す。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }] };
 #[tokio::test]
 async fn generated_client_plays_capture_promotion_recapture_drop_and_resignation() {
     let server = TestServer::start().await;
@@ -86,5 +85,4 @@ async fn generated_client_plays_capture_promotion_recapture_drop_and_resignation
     assert!(finished.legal_moves.is_empty());
     drop(client);
     server.shutdown().await;
-}
 }

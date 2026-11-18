@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "Matched中は対局を取得できず、両者の準備完了後だけPlayingになる。Matched・Playing状態のキャンセルは同じチケットを返す。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-grpc/rpc-join-matchmaking", relationship: crate::trace_support::Relationship::Asserts, scope: "生成されたgRPCクライアントをTCP経由で使い、GameRpc、アプリケーション、実際のPostgreSQLを通る。テスト専用の対局作成処理は事前準備として使う。", reason: "未知・未指定のプールと0以下のハートビートはInvalidArgumentとなる。完全に同じ再試行はcreated=falseで変更のないチケットを返し、別の所有者にはNotFoundを返す。対局中・キャンセルの応答は対局の識別情報を保持する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-grpc"], fake: &[] }] };
 #[tokio::test]
 async fn matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_results() {
     let server = TestServer::start().await;
@@ -294,5 +293,4 @@ async fn matchmaking_rpc_validates_requests_and_recovers_durable_owner_scoped_re
         ticket
     );
     server.shutdown().await;
-}
 }

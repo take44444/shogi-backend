@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/game-store", relationship: crate::trace_support::Relationship::Asserts, scope: "トリガーで失敗を注入し、実際の PostgreSQL の受理記録・Outbox・レーティングジョブの原子性を検証する。", reason: "レーティングジョブのトリガーが失敗すると、メタデータ・履歴・Outbox をロールバックする。再試行ではジョブが一件となり、非レーティング対局の終局ではジョブを作らない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::resign)]
 #[tokio::test]
 async fn terminal_receipt_outbox_and_rating_job_commit_or_rollback_together() {
     let f = Fixture::new().await;
@@ -43,5 +43,4 @@ async fn terminal_receipt_outbox_and_rating_job_commit_or_rollback_together() {
             .await
             .is_none()
     );
-}
 }

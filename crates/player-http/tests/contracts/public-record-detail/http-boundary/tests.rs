@@ -1,7 +1,6 @@
 use super::*;
 use crate::record_route_support::unused_ratings;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "player-http/frontend-get-game-records-id", relationship: crate::trace_support::Relationship::Asserts, scope: "公開 API で構築した実ルーター。repository の実装は準備コードで実 DB または fake を選択する。", reason: "公開ルーターの応答本文・ステータス・ヘッダーを検証する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["player-http"], fake: &[] }, crate::trace_support::Evidence { contract: "player-http/frontend-get-game-records", relationship: crate::trace_support::Relationship::Asserts, scope: "公開 API で構築した実ルーター。repository の実装は準備コードで実 DB または fake を選択する。", reason: "不正な検索条件を保存層へ渡す前に拒否する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["player-http"], fake: &[] }] };
 #[tokio::test]
 async fn query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage() {
     let repository = Arc::new(Failing(game_record_application::Error::Corrupt));
@@ -37,5 +36,4 @@ async fn query_boundary_rejects_bad_filters_bounds_and_cursors_before_storage() 
         get(app, "/game-records?from=0&to=100").await.0,
         StatusCode::INTERNAL_SERVER_ERROR
     );
-}
 }

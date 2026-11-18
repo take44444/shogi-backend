@@ -1,11 +1,3 @@
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-trace_support::example!(trace_support::Example {
-    kind: trace_support::ExampleKind::Program,
-    reason: "稼働中のgRPCサービスを通して対局を進め、着手と投了の応答を確認する。",
-});
-
 mod support;
 use game_grpc::proto::{self, game_service_client::GameServiceClient};
 

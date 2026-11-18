@@ -1,6 +1,9 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-tick", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。", reason: "同時実行した tick と両者の ready によって、対局一件、rated_game 一件、参加枠二件だけが作られ、一人の現在参加状態が Playing になる。このテストでは参加者や先後の割り当てを比較しない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。参加受け入れと組合せ処理を並行実行する。", reason: "異なるプールへの同時参加で、参加受け入れがちょうど一件だけ作られる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmStore::join,
+    game_persistence::SeaOrmStore::tick
+)]
 #[tokio::test]
 async fn cross_pool_joins_and_multiple_matchers_have_one_durable_winner() {
     let f = Fixture::new().await;
@@ -49,9 +52,11 @@ async fn cross_pool_joins_and_multiple_matchers_have_one_durable_winner() {
         TicketState::Refused(RefusalReason::AlreadyPlaying)
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-tick", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。", reason: "参加枠の作成失敗を注入して二人目が ready すると、対局・レーティング対象対局・参加枠の行は 0 件となり、両者は matched を続ける。成功した再試行では、元の Unrated 状態を固定する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。SQL の失敗を注入し、終局後のレーティング予約枠を確認する。", reason: "対局終了後、同じプールへの参加は rating_pending となり、別のプールは引き続き利用できる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmStore::ready,
+    game_application::GameService::resign
+)]
 #[tokio::test]
 async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tickets() {
     let f = Fixture::new().await;
@@ -70,10 +75,7 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
     for (user, id) in [("one", one), ("two", two)] {
         let ticket = active(&f.store, &uid(user)).await;
         assert_eq!(ticket.id, id);
-        assert!(matches!(
-            ticket.state,
-            TicketState::Matched { .. }
-        ));
+        assert!(matches!(ticket.state, TicketState::Matched { .. }));
     }
     f.raw
         .execute_unprepared("DROP TRIGGER reject_slot ON rating_slots")
@@ -100,10 +102,7 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
     for (user, id) in [("one", one), ("two", two)] {
         let ticket = active(&f.store, &uid(user)).await;
         assert_eq!(ticket.id, id);
-        assert!(matches!(
-            ticket.state,
-            TicketState::Playing { .. }
-        ));
+        assert!(matches!(ticket.state, TicketState::Playing { .. }));
     }
     f.raw
         .execute_unprepared("DROP TRIGGER reject_job ON rating_jobs")
@@ -131,9 +130,8 @@ async fn pair_failure_rolls_back_and_terminal_failure_preserves_both_active_tick
     assert_eq!(current.id, next);
     assert!(matches!(current.state, TicketState::Waiting(_)));
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-tick", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。レーティングのロックを明示的に保持し、有効期限を強制的に切らす。", reason: "レーティングのロックで待機中にチケットが失効すると、tick は None を返し、対局を作らない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::tick)]
 #[tokio::test]
 async fn expiry_after_rating_lock_wait_prevents_match() {
     let f = Fixture::new().await;
@@ -151,13 +149,17 @@ async fn expiry_after_rating_lock_wait_prevents_match() {
     assert_eq!(pending.await.unwrap().unwrap(), None);
     assert_eq!(f.count("games").await, 0);
     assert_eq!(
-        f.store.join(uid("one"), one, POOL).await.unwrap().ticket.state,
+        f.store
+            .join(uid("one"), one, POOL)
+            .await
+            .unwrap()
+            .ticket
+            .state,
         TicketState::Expired
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-tick", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。キュー追加時刻を強制的に古くしてから tick を直接呼ぶ。", reason: "キュー追加時刻を過去に変更すると、先頭の不適合な参加者を待機させたまま、一人目と二人目が組み合わされる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::tick)]
 #[tokio::test]
 async fn widening_without_a_new_join_skips_an_incompatible_head() {
     let f = Fixture::new().await;
@@ -182,9 +184,8 @@ async fn widening_without_a_new_join_skips_an_incompatible_head() {
         matches!(f.store.current(&uid("head")).await.unwrap(),Participation::Active(t) if matches!(t.state,TicketState::Waiting(_)))
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-tick", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::join, game_persistence::SeaOrmStore::ready, <game_persistence::SeaOrmRatingJobs as game_application::rating::RatingJobRepository>::apply)]
 #[tokio::test]
 async fn lost_observations_recover_and_worker_retries_preserve_the_next_match() {
     use game_application::rating::{ApplyOutcome, RatingJobRepository, WorkerId, WorkerPolicy};
@@ -266,5 +267,4 @@ async fn lost_observations_recover_and_worker_retries_preserve_the_next_match() 
     assert!(
         matches!(f.store.current(&uid("one")).await.unwrap(),Participation::Active(t) if matches!(t.state,TicketState::Playing {ref game_id,..} if game_id==&next))
     );
-}
 }

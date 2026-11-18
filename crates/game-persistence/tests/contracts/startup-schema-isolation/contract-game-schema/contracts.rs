@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn schema_bootstrap_is_serialized_and_future_versions_are_rejected() {
     let database = TestDatabase::new().await;
@@ -22,9 +22,8 @@ async fn schema_bootstrap_is_serialized_and_future_versions_are_rejected() {
         Err(Error::Corrupt)
     ));
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn an_existing_empty_schema_ledger_is_rejected_without_modification() {
     for existing_tables in [false, true] {
@@ -63,9 +62,8 @@ async fn an_existing_empty_schema_ledger_is_rejected_without_modification() {
         assert_eq!(row.try_get::<i64>("", "count").unwrap(), 0);
     }
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn a_missing_schema_ledger_is_not_recreated_for_existing_game_tables() {
     let database = TestDatabase::new().await;
@@ -94,9 +92,8 @@ async fn a_missing_schema_ledger_is_not_recreated_for_existing_game_tables() {
         .unwrap();
     assert_eq!(row.try_get::<i64>("", "count").unwrap(), 0);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn fresh_game_database_has_no_account_tables() {
     let database = TestDatabase::new().await;
@@ -112,9 +109,8 @@ async fn fresh_game_database_has_no_account_tables() {
         0
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn failed_bootstrap_rolls_back_the_entire_schema() {
     let database = TestDatabase::new().await;
@@ -145,9 +141,8 @@ async fn failed_bootstrap_rolls_back_the_entire_schema() {
         8
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn incompatible_or_incomplete_existing_schema_is_not_modified() {
     for sql in [
@@ -184,9 +179,8 @@ async fn incompatible_or_incomplete_existing_schema_is_not_modified() {
         );
     }
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-persistence/writer-database", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と実保存アダプターの公開 API または DB 接続を使用する。", reason: "対応しないスキーマを変更しないこと、または保存時の不整合拒否と読み取り結果を直接検査する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["postgres"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::connect)]
 #[tokio::test]
 async fn unrelated_tables_require_a_current_application_schema() {
     let database = TestDatabase::new().await;
@@ -237,5 +231,4 @@ async fn unrelated_tables_require_a_current_application_schema() {
         .await,
         1
     );
-}
 }

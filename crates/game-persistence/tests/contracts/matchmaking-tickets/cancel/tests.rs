@@ -1,6 +1,9 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。取消と組合せ処理を八回並行させて競合を検証する。", reason: "各競合では、対局を作らず取消をコミットするか、一つの予定対局に対応する二枚の Matched チケットをコミットし、対局はまだ作らない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(
+    game_persistence::SeaOrmStore::cancel,
+    game_persistence::SeaOrmStore::tick
+)]
 #[tokio::test]
 async fn cancellation_racing_a_match_has_one_committed_outcome() {
     let f = Fixture::new().await;
@@ -18,10 +21,7 @@ async fn cancellation_racing_a_match_has_one_committed_outcome() {
         match cancelled.state {
             TicketState::Cancelled => {
                 assert!(matched.is_none());
-                assert!(matches!(
-                    other_ticket.state,
-                    TicketState::Waiting(_)
-                ));
+                assert!(matches!(other_ticket.state, TicketState::Waiting(_)));
                 f.store.cancel(&uid(&other), other_id).await.unwrap();
             }
             TicketState::Matched { game_id, .. } => {
@@ -34,5 +34,4 @@ async fn cancellation_racing_a_match_has_one_committed_outcome() {
             unexpected => panic!("unexpected race result: {unexpected:?}"),
         }
     }
-}
 }

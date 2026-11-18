@@ -1,6 +1,5 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "realtime-gateway/frontend-ws-upgrade", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のHTTP・WebSocketゲートウェイ、ユーザー用HTTPサービス、対局用gRPCサービス、PostgreSQL、Valkeyを使う。外部OIDCプロバイダーはテスト用の代替実装を使う。 不正な通知や連番が欠落した通知を、制御した内容で直接配信する。", reason: "実際に配信した不正なスキーマと連番が欠落したイベントによって、WebSocketが終了する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["realtime-gateway"], fake: &[] }] };
 #[tokio::test]
 async fn malformed_or_gapped_broker_notifications_require_a_new_connection() {
     let services = Services::start().await;
@@ -41,5 +40,4 @@ async fn malformed_or_gapped_broker_notifications_require_a_new_connection() {
     assert!(subscribers >= 1);
     closed(&mut socket).await;
     services.stop().await;
-}
 }

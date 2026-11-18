@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(game_application::GameService::make_move)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_identical_retries_all_receive_original_acceptance() {
     let (_database, service) = setup().await;
@@ -28,9 +28,11 @@ async fn concurrent_identical_retries_all_receive_original_acceptance() {
     }
     assert_eq!(service.snapshot(&game).await.unwrap().seq, 1);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。", reason: "検証対象のすべての拒否で、スナップショット全体を保持し、リクエスト ID を再利用できる。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(
+    game_application::GameService::make_move,
+    game_application::GameService::resign
+)]
 #[tokio::test]
 async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
     let (_database, service) = setup().await;
@@ -80,9 +82,11 @@ async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
     );
     assert_eq!(service.snapshot(&game).await.unwrap(), finished);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(
+    game_application::GameService::make_move,
+    game_application::GameService::resign
+)]
 #[tokio::test]
 async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
     let (_database, service) = setup().await;
@@ -130,9 +134,11 @@ async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
     );
     assert_eq!(service.snapshot(&game).await.unwrap(), finished);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/grpc-command", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL、SeaOrmStore、アプリケーション操作を使う。ブラウザーや RPC 通信は通らない。", reason: "別の対局やサービスで同じリクエスト識別子を使っても、それぞれ独立している。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-application"], fake: &[] }] };
+#[traceability::targets(
+    game_application::GameService::make_move,
+    game_application::GameService::resign
+)]
 #[tokio::test]
 async fn games_and_independent_services_have_separate_id_namespaces() {
     let (_database, service) = setup().await;
@@ -182,5 +188,4 @@ async fn games_and_independent_services_have_separate_id_namespaces() {
             .await,
         Err(Error::NotFound)
     );
-}
 }

@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::join)]
 #[tokio::test]
 async fn participation_is_global_and_refused_retries_remain_refused() {
     let f = Fixture::new().await;
@@ -28,9 +28,8 @@ async fn participation_is_global_and_refused_retries_remain_refused() {
         refused
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/matchmaking-store", relationship: crate::trace_support::Relationship::Unreviewed, scope: "製品の公開 API を呼ぶ結合テスト。個々の assertion と契約の対応は未レビュー。", reason: "宣言した実提供元の境界を利用する。契約の各条件を直接検証するかは未レビュー。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmStore::join)]
 #[tokio::test]
 async fn admission_waits_for_application_and_freezes_the_new_committed_states() {
     let f = Fixture::new().await;
@@ -85,5 +84,4 @@ async fn admission_waits_for_application_and_freezes_the_new_committed_states() 
     assert_eq!(black.completed(), 1);
     assert_eq!(white.completed(), 1);
     assert_eq!(f.count("rating_slots").await, 2);
-}
 }

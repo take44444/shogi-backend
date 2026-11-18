@@ -1,6 +1,6 @@
 use super::*;
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、完了済み処理の再試行と、後の対局の予約枠の保持を検証する。", reason: "完了済み処理の再試行は台帳を追加せず、後の対局の参加枠も解放しない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-record-application/rating-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と PostgresGameRecords。ワーカー適用後の読み取り。HTTP は通らない。", reason: "実 DB から black の確定済み 1516・1、未適用プールの Unrated、unknown の ten_minute_30 の Unrated を確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::apply)]
 #[tokio::test]
 async fn completed_replay_is_read_only_and_never_releases_the_next_games_slots() {
     let f = Fixture::new().await;
@@ -56,9 +56,8 @@ async fn completed_replay_is_read_only_and_never_releases_the_next_games_slots()
         Err(ApplicationError::RatingPoolBusy)
     );
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際のワーカー、PostgreSQL、読み取りアダプターを使い、プールの独立性を検証する。", reason: "実際のワーカーの二回の tick により、二つのプールの先手レーティングがそれぞれ独立に 1516 と 1484 となる。各プールの完了対局数は一件、台帳は二件となり、残る参加枠はない。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }, crate::trace_support::Evidence { contract: "game-record-application/rating-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実 PostgreSQL と PostgresGameRecords。両プールのワーカー適用後の読み取り。HTTP は通らない。", reason: "実 DB から同じユーザーの両プールに異なる確定値 1516 と 1484、対局数 1 を確認する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-record-persistence"], fake: &[] }] };
+#[traceability::targets(game_application::rating::RatingWorker::tick)]
 #[tokio::test]
 async fn both_pools_update_independently_from_their_frozen_start_states() {
     let f = Fixture::new().await;
@@ -94,9 +93,8 @@ async fn both_pools_update_independently_from_their_frozen_start_states() {
     assert_eq!(f.count("rating_applications").await, 2);
     assert_eq!(f.count("rating_slots").await, 0);
 }
-}
 
-crate::trace_support::boundary_case! { crate::trace_support::BoundaryCase { evidence: &[crate::trace_support::Evidence { contract: "game-application/rating-job-store", relationship: crate::trace_support::Relationship::Asserts, scope: "実際の PostgreSQL で、台帳挿入の強制失敗後に適用全体を原子的にロールバックする。", reason: "適用台帳への挿入を強制的に失敗させると、両者のレーティングと予約枠がロールバックされ、修復後には成功する。", observation: crate::trace_support::Observation::ProviderBoundary, real: &["game-persistence"], fake: &[] }] };
+#[traceability::targets(game_persistence::SeaOrmRatingJobs::apply)]
 #[tokio::test]
 async fn failed_ledger_insert_rolls_back_both_ratings_and_reservations() {
     let f = Fixture::new().await;
@@ -130,5 +128,4 @@ async fn failed_ledger_insert_rolls_back_both_ratings_and_reservations() {
         f.jobs.apply(&claim, &change(&claim)).await.unwrap(),
         ApplyOutcome::Applied
     );
-}
 }

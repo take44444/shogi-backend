@@ -522,10 +522,3 @@ impl AccountRepository for PostgresAccounts {
 #[cfg(test)]
 #[path = "tests/account-google-login/support.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;
