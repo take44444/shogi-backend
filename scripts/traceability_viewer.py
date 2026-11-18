@@ -37,6 +37,12 @@ def capture(root, bundle):
     def source(path):
         if path in files:
             return files[path]
+        if path.startswith("@generated/"):
+            if path not in bundle.get("generated_sources", {}):
+                raise ValueError(f"missing generated source during capture: {path}")
+            files[path] = {"content": bundle["generated_sources"][path], "github_url": None,
+                           "status": "Generated Rust source captured from the compiler; no repository or GitHub location."}
+            return files[path]
         relative = PurePosixPath(path)
         if relative.is_absolute() or ".." in relative.parts or str(relative) != path:
             raise ValueError(f"source path must be repository-relative: {path}")
@@ -59,41 +65,21 @@ def capture(root, bundle):
         files[path] = {"content": content, "github_url": remote, "status": status}
         return files[path]
 
-    locations = {}
-
-    def references(value):
-        if isinstance(value, dict):
-            if isinstance(value.get("path"), str) and isinstance(value.get("needle"), str):
-                path, needle = value["path"], value["needle"]
-                content = source(path)["content"]
-                line = value.get("line")
-                if line is not None:
-                    captured_lines = content.splitlines()
-                    valid = isinstance(line, int) and 0 < line <= len(captured_lines) and captured_lines[line - 1].strip() == needle
-                else:
-                    valid = bool(needle) and content.count(needle) == 1
-                    if valid:
-                        line = content[:content.index(needle)].count("\n") + 1
-                if not valid:
-                    raise ValueError(f"source anchor changed during capture: {path}:{line or '?'}")
-                locations.setdefault(path, {})[needle] = line
-            for key, child in value.items():
-                if key == "record" and child is not None:
-                    source(child)
-                else:
-                    references(child)
-        elif isinstance(value, list):
-            for child in value:
-                references(child)
-
-    references(bundle)
-    return {"version": 2, "repository": {"revision": revision, "github_base": base},
-            "bundle": bundle, "locations": locations, "files": files}
+    for category in ("apis", "calls", "references", "tests", "unresolved"):
+        for record in bundle.get(category, []):
+            path, line = record["path"], record["line"]
+            lines = source(path)["content"].splitlines()
+            if type(line) is not int or not 0 < line <= len(lines):
+                raise ValueError(f"invalid compiler source location during capture: {path}:{line}")
+    for unit in bundle["units"]:
+        source(unit["source"])
+    return {"version": 3, "repository": {"revision": revision, "github_base": base},
+            "bundle": bundle, "files": files}
 
 
 def protect_destination(root, destination, payload):
     destination = destination.resolve()
-    inputs = {(root / path).resolve() for path in payload["files"]}
+    inputs = {(root / path).resolve() for path in payload["files"] if not path.startswith("@generated/")}
     tool_files = {Path(__file__).resolve(), Path(__file__).with_name("traceability.py").resolve()}
     tool_files.update(path.resolve() for path in ASSETS.rglob("*"))
     tracked = git(root, "ls-files", "-z")
@@ -104,7 +90,9 @@ def protect_destination(root, destination, payload):
         directory = git(root, "rev-parse", option)
         if directory:
             metadata.add((root / os.fsdecode(directory).strip()).resolve())
-    if (destination in inputs or destination in tool_files or destination.is_relative_to(ASSETS.resolve())
+    source_extensions = {".rs", ".py", ".js", ".css", ".toml", ".md", ".yaml", ".yml", ".proto"}
+    if (destination in inputs or destination in tool_files or destination.suffix.lower() in source_extensions
+            or destination.is_relative_to(ASSETS.resolve()) or destination.is_relative_to((root / "@generated").resolve())
             or any(destination.is_relative_to(directory) for directory in metadata)):
         raise ValueError(f"refusing to overwrite source, tracked file, or viewer tool: {destination}")
     return destination
