@@ -438,10 +438,10 @@ fn owner_package(tcx: TyCtxt<'_>, definition: DefId) -> Option<&'static crate::m
         index: CRATE_DEF_INDEX,
     };
     let root_span = tcx.def_span(root);
-    if !root_span.is_dummy() {
-        if let Some(path) = source_path(tcx, root_span) {
-            return workspace.package_at(&path);
-        }
+    if !root_span.is_dummy()
+        && let Some(path) = source_path(tcx, root_span)
+    {
+        return workspace.package_at(&path);
     }
     let name = tcx.crate_name(definition.krate);
     let mut packages = workspace.packages.iter().filter(|package| {
@@ -499,29 +499,29 @@ fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
         .map(|name| name.to_string())
         .collect::<Vec<_>>()
         .join("::");
-    if let Some(item) = tcx.opt_associated_item(definition) {
-        if let Some(implementation) = item.impl_container(tcx) {
-            let receiver = canonical_type(
-                tcx,
-                tcx.type_of(implementation)
+    if let Some(item) = tcx.opt_associated_item(definition)
+        && let Some(implementation) = item.impl_container(tcx)
+    {
+        let receiver = canonical_type(
+            tcx,
+            tcx.type_of(implementation)
+                .instantiate_identity()
+                .skip_norm_wip(),
+        );
+        return match item.container {
+            ty::AssocContainer::TraitImpl(_) => {
+                let trait_ref = tcx
+                    .impl_trait_ref(implementation)
                     .instantiate_identity()
-                    .skip_norm_wip(),
-            );
-            return match item.container {
-                ty::AssocContainer::TraitImpl(_) => {
-                    let trait_ref = tcx
-                        .impl_trait_ref(implementation)
-                        .instantiate_identity()
-                        .skip_norm_wip();
-                    format!(
-                        "<{receiver} as {}>::{}",
-                        canonical_name(tcx, trait_ref.def_id),
-                        item.name()
-                    )
-                }
-                _ => format!("{receiver}::{}", item.name()),
-            };
-        }
+                    .skip_norm_wip();
+                format!(
+                    "<{receiver} as {}>::{}",
+                    canonical_name(tcx, trait_ref.def_id),
+                    item.name()
+                )
+            }
+            _ => format!("{receiver}::{}", item.name()),
+        };
     }
     let name = format!("{}::{path}", tcx.crate_name(definition.krate));
     if matches!(
@@ -741,16 +741,15 @@ impl<'tcx> BodyCalls<'_, 'tcx> {
                 if [LangItem::FnOnce, LangItem::FnMut, LangItem::Fn]
                     .iter()
                     .any(|item| self.tcx.is_lang_item(self.tcx.parent(callee), *item))
+                    && let Some(receiver) = args.first()
                 {
-                    if let Some(receiver) = args.first() {
-                        let mut receiver = receiver.node.ty(self.body, self.tcx);
-                        while let ty::Ref(_, ty, _) = *receiver.kind() {
-                            receiver = ty;
-                        }
-                        if let ty::Closure(closure, _) = *receiver.kind() {
-                            self.resolved(closure, span, "closure");
-                            return;
-                        }
+                    let mut receiver = receiver.node.ty(self.body, self.tcx);
+                    while let ty::Ref(_, ty, _) = *receiver.kind() {
+                        receiver = ty;
+                    }
+                    if let ty::Closure(closure, _) = *receiver.kind() {
+                        self.resolved(closure, span, "closure");
+                        return;
                     }
                 }
                 self.resolved(callee, span, dispatch);
@@ -786,10 +785,10 @@ impl<'tcx> MirVisitor<'tcx> for BodyCalls<'_, 'tcx> {
             } => self.call(func, args, *fn_span, false),
             mir::TerminatorKind::Drop { place, .. } => {
                 self.capture.coverage.implicit_drops += 1;
-                if let ty::Adt(adt, _) = place.ty(self.body, self.tcx).ty.kind() {
-                    if let Some(destructor) = adt.destructor(self.tcx) {
-                        self.resolved(destructor.did, terminator.source_info.span, "implicit");
-                    }
+                if let ty::Adt(adt, _) = place.ty(self.body, self.tcx).ty.kind()
+                    && let Some(destructor) = adt.destructor(self.tcx)
+                {
+                    self.resolved(destructor.did, terminator.source_info.span, "implicit");
                 }
             }
             mir::TerminatorKind::Assert { .. } => self.capture.coverage.assertions += 1,
@@ -805,14 +804,14 @@ impl<'tcx> MirVisitor<'tcx> for BodyCalls<'_, 'tcx> {
         self.super_terminator(terminator, location);
     }
     fn visit_rvalue(&mut self, rvalue: &mir::Rvalue<'tcx>, location: mir::Location) {
-        if let mir::Rvalue::Aggregate(kind, _) = rvalue {
-            if let mir::AggregateKind::Adt(definition, variant, ..) = **kind {
-                let adt = self.tcx.adt_def(definition);
-                let variant = adt.variant(variant);
-                let callee = variant.ctor_def_id().unwrap_or(variant.def_id);
-                let span = self.body.source_info(location).span;
-                self.resolved(callee, span, "constructor");
-            }
+        if let mir::Rvalue::Aggregate(kind, _) = rvalue
+            && let mir::AggregateKind::Adt(definition, variant, ..) = **kind
+        {
+            let adt = self.tcx.adt_def(definition);
+            let variant = adt.variant(variant);
+            let callee = variant.ctor_def_id().unwrap_or(variant.def_id);
+            let span = self.body.source_info(location).span;
+            self.resolved(callee, span, "constructor");
         }
         self.super_rvalue(rvalue, location);
     }
@@ -829,47 +828,49 @@ struct References<'a, 'tcx> {
 }
 impl<'tcx> Visitor<'tcx> for References<'_, 'tcx> {
     fn visit_expr(&mut self, expression: &'tcx hir::Expr<'tcx>) {
-        if matches!(expression.kind, hir::ExprKind::Path(_)) {
-            if let Some(ty) = self.typeck.expr_ty_opt(expression) {
-                if let ty::FnDef(definition, substitutions) = *ty.kind() {
-                    if self.marker {
-                        let resolved = ty::Instance::try_resolve(
-                            self.tcx,
-                            ty::TypingEnv::post_analysis(self.tcx, self.caller),
-                            definition,
-                            substitutions.skip_binder(),
-                        )
-                        .ok()
-                        .flatten()
-                        .map(|instance| instance.def_id())
-                        .unwrap_or(definition);
-                        if let Some(api) = api(self.tcx, resolved) {
-                            self.targets.insert(api.id.clone());
-                            self.capture.apis.insert(api.id.clone(), api);
-                        } else {
-                            let location =
-                                source_location(self.tcx, expression.span.source_callsite());
-                            self.invalid_targets.push(format!(
-                                "{}:{}: test target has no workspace callable source origin",
-                                location.path, location.line
-                            ));
-                        }
-                    } else if !is_infrastructure(self.tcx, self.caller) {
-                        self.capture.coverage.function_references += 1;
-                        edge(
-                            self.tcx,
-                            self.caller,
-                            definition,
-                            expression.span,
-                            "function-reference",
-                            self.capture,
-                            true,
-                        );
+        if matches!(expression.kind, hir::ExprKind::Path(_))
+            && let Some(ty) = self.typeck.expr_ty_opt(expression)
+        {
+            if let ty::FnDef(definition, substitutions) = *ty.kind() {
+                if self.marker {
+                    let resolved = ty::Instance::try_resolve(
+                        self.tcx,
+                        ty::TypingEnv::post_analysis(self.tcx, self.caller),
+                        definition,
+                        substitutions.skip_binder(),
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|instance| instance.def_id())
+                    .unwrap_or(definition);
+                    if let Some(api) = api(self.tcx, resolved) {
+                        self.targets.insert(api.id.clone());
+                        self.capture.apis.insert(api.id.clone(), api);
+                    } else {
+                        let location = source_location(self.tcx, expression.span.source_callsite());
+                        self.invalid_targets.push(format!(
+                            "{}:{}: test target has no workspace callable source origin",
+                            location.path, location.line
+                        ));
                     }
-                } else if self.marker {
-                    let location = source_location(self.tcx, expression.span.source_callsite());
-                    self.invalid_targets.push(format!("{}:{}: test target must resolve to a Rust function or method item, got {ty}", location.path, location.line));
+                } else if !is_infrastructure(self.tcx, self.caller) {
+                    self.capture.coverage.function_references += 1;
+                    edge(
+                        self.tcx,
+                        self.caller,
+                        definition,
+                        expression.span,
+                        "function-reference",
+                        self.capture,
+                        true,
+                    );
                 }
+            } else if self.marker {
+                let location = source_location(self.tcx, expression.span.source_callsite());
+                self.invalid_targets.push(format!(
+                    "{}:{}: test target must resolve to a Rust function or method item, got {ty}",
+                    location.path, location.line
+                ));
             }
         }
         intravisit::walk_expr(self, expression);
