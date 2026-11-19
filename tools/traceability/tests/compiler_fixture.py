@@ -29,10 +29,11 @@ def main():
         root = Path(directory)
         files = {
             "Cargo.toml": '[workspace]\nresolver="3"\nmembers=["api", "consumer"]\n',
-            "api/Cargo.toml": '[package]\nname="boundary-api"\nversion="0.1.0"\nedition="2024"\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(REPO / "tools/traceability-attributes")) + '}\n',
+            "api/Cargo.toml": '[package]\nname="boundary-api"\nversion="0.1.0"\nedition="2024"\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(REPO / "tools/traceability-attributes")) + '}\n[[test]]\nname="reused"\npath="tests/reused.rs"\n[[test]]\nname="reused_again"\npath="tests/reused.rs"\n',
             "api/build.rs": 'fn main() { let out=std::env::var("OUT_DIR").unwrap(); std::fs::write(std::path::Path::new(&out).join("generated.rs"), "pub fn generated() -> u32 { calculate() }\\n").unwrap(); }',
             "api/src/lib.rs": '''
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+include!("shared.rs");
 pub trait Port { fn ready(&self) -> u32; }
 pub struct Store;
 impl Store {
@@ -57,6 +58,8 @@ mod tests {
     fn unannotated() { assert_eq!(super::calculate(), 5); }
 }
 ''',
+            "api/src/shared.rs": "pub fn shared() -> u32 { 1 }\n",
+            "api/tests/reused.rs": 'include!("../src/shared.rs");\n',
             "consumer/Cargo.toml": '[package]\nname="boundary-consumer"\nversion="0.1.0"\nedition="2024"\n[dependencies]\nrenamed={package="boundary-api",path="../api"}\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(REPO / "tools/traceability-attributes")) + '}\n',
             "consumer/src/lib.rs": '''
 use renamed::{Port, Store as Alias};
@@ -65,6 +68,8 @@ pub fn generic<T:Port>(port:&T) -> u32 { port.ready() }
 pub fn dynamic(port:&dyn Port) -> u32 { port.ready() }
 pub fn concrete(port:&Alias) -> u32 { port.ready() }
 pub fn through_closure() -> u32 { let f=||renamed::calculate(); f() }
+macro_rules! duplicate { ($closure:expr) => { ($closure, $closure) }; }
+pub fn same_span_closures() -> u32 { let (f,g)=duplicate!(||renamed::calculate()); f()+g() }
 pub async fn through_async() -> u32 { renamed::calculate() }
 pub fn indirect(f:fn()->u32) -> u32 { f() }
 ''',
@@ -87,7 +92,7 @@ fn a_second_root() { assert_eq!(1, 1); }
         env.update(TRACEABILITY_ROOT=str(root), TRACEABILITY_METADATA=str(metadata_path), TRACEABILITY_SHARDS=str(root / "shards"), RUSTC_WORKSPACE_WRAPPER=str(driver))
         build = run(cargo_args + ["test", "--no-run", "--workspace", "--offline", "--message-format=json"], cwd=root, env=env)
         shards = [json.loads(path.read_text()) for path in (root / "shards").glob("*.json")]
-        assert len(shards) == 6, [(shard["unit"], path) for shard in shards for path in []]
+        assert len(shards) == 8, [shard["unit"] for shard in shards]
         apis = {}
         for shard in shards:
             for api in shard["apis"]:
@@ -113,6 +118,11 @@ fn a_second_root() { assert_eq!(1, 1); }
         dynamic_targets = [apis[target] for target in tests["declared_boundary"]["targets"]]
         assert {api["kind"] for api in dynamic_targets} == {"trait-method", "inherent-method"}, dynamic_targets
         library_units = [shard for shard in shards if shard["unit"]["package"] == "boundary-api" and shard["unit"]["target_kind"] == "lib"]
+        shared = [api for api in apis.values() if api["path"] == "api/src/shared.rs"]
+        assert len(shared) == 3 and len({api["id"] for api in shared}) == 3, shared
+        assert {api["name"].split("::")[0] for api in shared} == {"boundary_api", "reused", "reused_again"}, shared
+        anonymous = [api for api in apis.values() if api["kind"] == "closure" and "same_span_closures" in api["name"]]
+        assert len(anonymous) == 2 and len({api["id"] for api in anonymous}) == 2, anonymous
         generated = {key: value for shard in shards for key, value in shard["generated_sources"].items()}
         assert generated == {"@generated/boundary-api/generated.rs": "pub fn generated() -> u32 { calculate() }\n"}, generated
         assert any(api["path"] == "@generated/boundary-api/generated.rs" for api in apis.values())
@@ -144,7 +154,7 @@ fn a_second_root() { assert_eq!(1, 1); }
             (root / "consumer/tests/boundaries.rs").write_text(source)
             result = subprocess.run(cargo_args + ["test", "--no-run", "-p", "boundary-consumer", "--test", "boundaries", "--offline"], cwd=root, env=env, text=True, capture_output=True)
             assert result.returncode != 0 and diagnostic in result.stderr, (source, result.stdout, result.stderr)
-        print(json.dumps({"negative_cases": len(invalid_cases), "units": len(shards), "tests": len(tests), "boundary_calls": len(boundary), "unresolved_function_pointers": len(unresolved), "observations": ["aliases", "macro provenance", "generic trait", "dyn trait", "concrete trait normalization", "closure", "async", "explicit targets only", "exact implementation target", "canonical library IDs"]}, indent=2))
+        print(json.dumps({"negative_cases": len(invalid_cases), "units": len(shards), "tests": len(tests), "boundary_calls": len(boundary), "unresolved_function_pointers": len(unresolved), "observations": ["aliases", "macro provenance", "generic trait", "dyn trait", "concrete trait normalization", "closure", "async", "explicit targets only", "exact implementation target", "canonical library IDs", "shared include across targets", "same source for named targets", "same-span closure identities"]}, indent=2))
 
 
 if __name__ == "__main__":

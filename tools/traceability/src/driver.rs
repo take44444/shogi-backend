@@ -25,6 +25,7 @@ use std::{
 
 const TARGET_MARKER: &str = "__traceability_targets_";
 type MirProvider = for<'tcx> fn(TyCtxt<'tcx>, LocalDefId) -> &'tcx Steal<mir::Body<'tcx>>;
+static UNIT_TARGET: OnceLock<String> = OnceLock::new();
 static MIR_PROVIDER: OnceLock<MirProvider> = OnceLock::new();
 static WORKSPACE: OnceLock<Workspace> = OnceLock::new();
 static GENERATED_SOURCES: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
@@ -98,16 +99,27 @@ pub fn run() -> Result<(), String> {
         .iter()
         .find(|item| item.name == package)
         .ok_or("compiler package is not a workspace member")?;
-    let target = package_metadata
-        .targets
-        .iter()
-        .find(|target| target.source == source)
-        .ok_or_else(|| format!("no Cargo target matches {}", source.display()))?;
     let crate_name = arguments
         .windows(2)
         .find(|pair| pair[0] == "--crate-name")
         .map(|pair| pair[1].clone())
         .ok_or("compiler arguments have no crate name")?;
+    let mut targets = package_metadata
+        .targets
+        .iter()
+        .filter(|target| target.source == source && target.name.replace('-', "_") == crate_name);
+    let target = targets.next().ok_or_else(|| {
+        format!(
+            "no Cargo target matches {crate_name} at {}",
+            source.display()
+        )
+    })?;
+    if targets.next().is_some() {
+        return Err(format!(
+            "multiple Cargo targets match {crate_name} at {}",
+            source.display()
+        ));
+    }
     let unit = Unit {
         package,
         crate_name,
@@ -116,6 +128,12 @@ pub fn run() -> Result<(), String> {
         is_test: arguments.iter().any(|argument| argument == "--test"),
         source: workspace.relative(&source),
     };
+    UNIT_TARGET
+        .set(format!(
+            "{}:{}:{}",
+            unit.target_kind, unit.target_name, unit.source
+        ))
+        .map_err(|_| "compiler supports one compilation per process")?;
     WORKSPACE
         .set(workspace)
         .map_err(|_| "compiler supports one compilation per process")?;
@@ -343,11 +361,12 @@ fn source_path(tcx: TyCtxt<'_>, span: Span) -> Option<PathBuf> {
     let location = tcx.sess.source_map().lookup_char_pos(span.lo());
     match &location.file.name {
         FileName::Real(name) => name.local_path().map(|path| {
-            if path.is_absolute() {
+            let path = if path.is_absolute() {
                 path.to_owned()
             } else {
                 env::current_dir().unwrap().join(path)
-            }
+            };
+            path.canonicalize().unwrap_or(path)
         }),
         _ => None,
     }
@@ -433,6 +452,43 @@ fn owner_package(tcx: TyCtxt<'_>, definition: DefId) -> Option<&'static crate::m
     });
     let package = packages.next()?;
     packages.next().is_none().then_some(package)
+}
+fn target_identity(tcx: TyCtxt<'_>, definition: DefId) -> Option<String> {
+    if definition.is_local() {
+        return UNIT_TARGET.get().cloned();
+    }
+    let package = owner_package(tcx, definition)?;
+    let workspace = WORKSPACE.get().unwrap();
+    let root = DefId {
+        krate: definition.krate,
+        index: CRATE_DEF_INDEX,
+    };
+    let span = tcx.def_span(root);
+    if !span.is_dummy()
+        && let Some(path) = source_path(tcx, span)
+        && let Some(target) = package.targets.iter().find(|target| target.source == path)
+    {
+        return Some(format!(
+            "{}:{}:{}",
+            target.kind,
+            target.name,
+            workspace.relative(&target.source)
+        ));
+    }
+    let name = tcx.crate_name(definition.krate);
+    let mut targets = package
+        .targets
+        .iter()
+        .filter(|target| target.name.replace('-', "_") == name.as_str());
+    let target = targets.next()?;
+    targets.next().is_none().then(|| {
+        format!(
+            "{}:{}:{}",
+            target.kind,
+            target.name,
+            workspace.relative(&target.source)
+        )
+    })
 }
 fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
     let path = tcx
@@ -534,8 +590,23 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
     }
     .to_owned();
     let origin = &path;
+    let target = target_identity(tcx, definition)?;
+    let anonymous = tcx
+        .def_path(definition)
+        .data
+        .iter()
+        .filter(|part| {
+            matches!(
+                part.data,
+                hir::definitions::DefPathData::Closure
+                    | hir::definitions::DefPathData::SyntheticCoroutineBody
+            )
+        })
+        .map(|part| format!("{:?}#{}", part.data, part.disambiguator))
+        .collect::<Vec<_>>()
+        .join("/");
     let id = format!(
-        "{}::{named_path}@{origin}:{}:{}:{kind}",
+        "{}[{target}]::{named_path}@{origin}:{}:{}:{kind}:{anonymous}",
         package.name, location.line, location.col.0
     );
     Some(Api {
