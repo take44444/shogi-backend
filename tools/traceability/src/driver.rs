@@ -244,7 +244,14 @@ impl Callbacks for Collector {
             }
         }
         for &definition in tcx.mir_keys(()) {
-            tcx.ensure_done().mir_built(definition);
+            if tcx.is_constructor(definition.to_def_id()) {
+                // Constructor MIR is synthesized without a type-checkable source body.
+                if let Some(api) = api(tcx, definition.to_def_id()) {
+                    reference_capture.apis.insert(api.id.clone(), api);
+                }
+            } else {
+                tcx.ensure_done().mir_built(definition);
+            }
         }
         let mut capture = CAPTURE.get().unwrap().lock().unwrap();
         capture.merge(reference_capture);

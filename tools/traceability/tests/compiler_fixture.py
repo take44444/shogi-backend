@@ -36,7 +36,9 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 include!("shared.rs");
 pub trait Port { fn ready(&self) -> u32; }
 pub struct Store;
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Payload(pub u32);
+pub struct UnusedPayload(pub u32);
 pub enum Event { Item(u32) }
 impl Store {
     pub fn new() -> Self { Self }
@@ -111,6 +113,10 @@ fn a_second_root() { assert_eq!(1, 1); }
         assert all(apis[call["callee"]]["kind"] == "trait-method" for call in boundary if apis[call["callee"]]["name"].endswith("::ready"))
         constructors = {apis[call["callee"]]["name"] for call in boundary if "construct" in apis[call["caller"]]["name"] and apis[call["callee"]]["kind"] == "constructor"}
         assert constructors == {"boundary_api::Payload", "boundary_api::Event::Item"}, constructors
+        assert any(api["kind"] == "constructor" and api["name"] == "boundary_api::UnusedPayload" for api in apis.values())
+        derived = {api["name"].split("::")[-1] for api in apis.values() if api["kind"] == "trait-implementation-method" and "boundary_api::Payload as " in api["name"]}
+        assert {"clone", "fmt", "eq"} <= derived, derived
+        assert not any(call["caller"] == call["callee"] and apis[call["caller"]]["kind"] == "constructor" for call in calls)
         assert any(call.get("expansion") for call in boundary if apis[call["callee"]]["name"].endswith("::read")), boundary
         assert any("through_async" in apis[call["caller"]]["name"] and apis[call["callee"]]["name"].endswith("::calculate") for call in boundary), [(apis[call["caller"]]["name"],apis[call["callee"]]["name"]) for call in boundary]
         assert any("through_closure" in apis[call["caller"]]["name"] and apis[call["callee"]]["name"].endswith("::calculate") for call in boundary)
@@ -159,7 +165,7 @@ fn a_second_root() { assert_eq!(1, 1); }
             (root / "consumer/tests/boundaries.rs").write_text(source)
             result = subprocess.run(cargo_args + ["test", "--no-run", "-p", "boundary-consumer", "--test", "boundaries", "--offline"], cwd=root, env=env, text=True, capture_output=True)
             assert result.returncode != 0 and diagnostic in result.stderr, (source, result.stdout, result.stderr)
-        print(json.dumps({"negative_cases": len(invalid_cases), "units": len(shards), "tests": len(tests), "boundary_calls": len(boundary), "unresolved_function_pointers": len(unresolved), "observations": ["aliases", "macro provenance", "generic trait", "dyn trait", "concrete trait normalization", "closure", "async", "explicit targets only", "exact implementation target", "canonical library IDs", "shared include across targets", "same source for named targets", "same-span closure identities"]}, indent=2))
+        print(json.dumps({"negative_cases": len(invalid_cases), "units": len(shards), "tests": len(tests), "boundary_calls": len(boundary), "unresolved_function_pointers": len(unresolved), "observations": ["aliases", "macro provenance", "generic trait", "dyn trait", "concrete trait normalization", "closure", "async", "explicit targets only", "exact implementation target", "canonical library IDs", "shared include across targets", "same source for named targets", "same-span closure identities", "tuple constructors", "unused constructor API", "derived methods"]}, indent=2))
 
 
 if __name__ == "__main__":
