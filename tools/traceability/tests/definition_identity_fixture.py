@@ -124,7 +124,7 @@ mod tests {
         first, constants = collect(roots[0], cargo, env, driver)
         second, _ = collect(roots[1], cargo, env, driver)
         assert first == second, {"only_first": list(first.keys() - second.keys()), "only_relocated": list(second.keys() - first.keys())}
-        print(json.dumps({"anonymous_constants": constants, "relocated_api_count": len(first), "external_trait_versions": 2, "observations": ["same-span proc macro anonymous constants", "opaque return type", "constructor namespace", "normal/test stability", "typed target inside cfg-shifting anonymous const", "external source hashes", "external macro span origins", "distinct external crate versions", "checkout relocation"]}, indent=2))
+        print(json.dumps({"anonymous_constants": constants, "relocated_api_count": len(first), "external_trait_versions": 2, "observations": ["same-span proc macro anonymous constants", "opaque return type", "constructor namespace", "normal/test stability", "typed target inside cfg-shifting anonymous const", "unused trait declaration target", "external source hashes", "external macro span origins", "distinct external crate versions", "checkout relocation"]}, indent=2))
 
 
 if __name__ == "__main__":

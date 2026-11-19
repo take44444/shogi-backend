@@ -265,7 +265,15 @@ impl Callbacks for Collector {
     fn after_analysis<'tcx>(&mut self, _: &interface::Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
         let unit = self.unit.take().unwrap();
         let mut tests = BTreeMap::new();
+        let mut reference_capture = Capture::default();
         for definition in tcx.hir_crate_items(()).definitions() {
+            let id = definition.to_def_id();
+            if matches!(tcx.def_kind(id), DefKind::Fn | DefKind::AssocFn)
+                && !is_infrastructure(tcx, id)
+                && let Some(api) = api(tcx, id)
+            {
+                reference_capture.insert_api(id, api);
+            }
             for attribute in tcx.hir_attrs(tcx.local_def_id_to_hir_id(definition)) {
                 if let Attribute::Parsed(AttributeKind::RustcTestMarker(name)) = attribute {
                     let location = source_location(tcx, tcx.def_span(definition).source_callsite());
@@ -284,7 +292,6 @@ impl Callbacks for Collector {
                 }
             }
         }
-        let mut reference_capture = Capture::default();
         for definition in tcx.hir_body_owners() {
             let body = tcx.hir_body_owned_by(definition);
             let name = tcx
