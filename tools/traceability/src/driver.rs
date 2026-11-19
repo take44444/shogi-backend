@@ -227,15 +227,15 @@ impl Callbacks for Collector {
                         "test target marker {name} contains no workspace callable target"
                     ));
                 }
-                let parent = tcx.def_path_str(tcx.parent(definition.to_def_id()));
-                let parent = parent
-                    .strip_prefix(&format!("{}::", unit.crate_name))
-                    .unwrap_or(&parent);
-                let name = if parent.is_empty() || parent == unit.crate_name {
-                    test_name.to_owned()
-                } else {
-                    format!("{parent}::{test_name}")
-                };
+                let name = tcx
+                    .def_path(tcx.parent(definition.to_def_id()))
+                    .data
+                    .iter()
+                    .filter_map(|part| part.data.get_opt_name())
+                    .map(|name| name.to_string())
+                    .chain(std::iter::once(test_name.to_owned()))
+                    .collect::<Vec<_>>()
+                    .join("::");
                 if let Some(test) = tests.get_mut(&name) {
                     test.targets.extend(visitor.targets);
                 } else {
