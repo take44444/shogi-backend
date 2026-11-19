@@ -51,6 +51,9 @@ def collect(root, cargo, env, driver):
     production_target = next(api["id"] for api in normal["apis"] if api["name"] == "definition_api::Hidden::hidden")
     declared = next(test for test in compiled_test["tests"] if test["name"] == "tests::hidden_target")
     assert declared["targets"] == [production_target], {"production_id": production_target, "test_targets": declared["targets"]}
+    interface = next(test for test in compiled_test["tests"] if test["name"] == "tests::unused_interface_target")
+    unused = [api["id"] for api in normal["apis"] if api["name"] == "definition_api::Unused::unused"]
+    assert interface["targets"] == unused, {"declared_interface_targets": len(interface["targets"]), "production_interface_declarations": len(unused)}
     constants = [api for api in apis.values() if "AnonConst#" in api["id"] and "operation" in api["name"]]
     assert len(constants) >= 4 and len({api["id"] for api in constants}) == len(constants), constants
     assert len({(api["path"], api["line"]) for api in constants}) == 1, constants
@@ -89,6 +92,7 @@ pub fn generate(_: TokenStream) -> TokenStream {
 pub struct One;
 pub struct Two;
 pub struct Hidden;
+pub trait Unused { fn unused(&self); }
 #[cfg(test)]
 const _: () = { fn padding() {} };
 const _: () = { impl Hidden { pub fn hidden() {} } };
@@ -104,6 +108,8 @@ mod tests {
     #[test] fn works() { assert_eq!(super::Generated::operation(), [0]); }
     #[traceability::targets(super::Hidden::hidden)]
     #[test] fn hidden_target() { super::Hidden::hidden(); }
+    #[traceability::targets(<dyn super::Unused>::unused)]
+    #[test] fn unused_interface_target() {}
 }
 ''',
         }
