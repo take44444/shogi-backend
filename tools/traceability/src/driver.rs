@@ -33,6 +33,7 @@ static CAPTURE: OnceLock<Mutex<Capture>> = OnceLock::new();
 
 #[derive(Default)]
 struct Capture {
+    error: Option<String>,
     apis: BTreeMap<String, (DefId, Api)>,
     calls: Vec<Call>,
     references: Vec<Call>,
@@ -41,24 +42,35 @@ struct Capture {
 }
 impl Capture {
     fn insert_api(&mut self, definition: DefId, api: Api) {
+        if self.error.is_some() {
+            return;
+        }
         if let Some((previous_definition, previous)) = self.apis.get(&api.id) {
-            assert!(
-                *previous_definition == definition
-                    && previous.package == api.package
-                    && previous.name == api.name
-                    && previous.kind == api.kind
-                    && previous.path == api.path
-                    && previous.line == api.line,
-                "compiler API identity collision for {} between {} ({previous_definition:?}) and {} ({definition:?}); fix semantic definition identity before capture",
-                api.id,
-                previous.name,
-                api.name,
-            );
+            if !(*previous_definition == definition
+                && previous.package == api.package
+                && previous.name == api.name
+                && previous.kind == api.kind
+                && previous.path == api.path
+                && previous.line == api.line)
+            {
+                self.error = Some(format!(
+                    "compiler API identity collision for {} between DefId({}:{}) and DefId({}:{}); fix semantic definition identity before capture",
+                    api.id.chars().take(240).collect::<String>(),
+                    previous_definition.krate.as_u32(),
+                    previous_definition.index.as_u32(),
+                    definition.krate.as_u32(),
+                    definition.index.as_u32(),
+                ));
+            }
         } else {
             self.apis.insert(api.id.clone(), (definition, api));
         }
     }
     fn merge(&mut self, other: Self) {
+        if self.error.is_some() {
+            return;
+        }
+        self.error = other.error;
         for (definition, api) in other.apis.into_values() {
             self.insert_api(definition, api);
         }
@@ -290,6 +302,12 @@ impl Callbacks for Collector {
         }
         let mut capture = CAPTURE.get().unwrap().lock().unwrap();
         capture.merge(reference_capture);
+        if let Some(error) = capture.error.take() {
+            self.error = Some(error);
+        }
+        if self.error.is_some() {
+            return Compilation::Stop;
+        }
         let capture = std::mem::take(&mut *capture);
         let mut shard = Shard {
             generated_sources: std::mem::take(
@@ -426,7 +444,14 @@ fn source_location(tcx: TyCtxt<'_>, span: Span) -> Location {
                 index: CRATE_DEF_INDEX,
             };
             let Some(package) = owner_package(tcx, root) else {
-                return workspace.relative(&path);
+                // The compiler crate identity retains version and configuration context.
+                // Its source hash identifies the file without a machine-specific cache path.
+                return format!(
+                    "@compiler-source/{}/{:x}/{}",
+                    tcx.crate_name(location.file.cnum),
+                    tcx.stable_crate_id(location.file.cnum),
+                    location.file.src_hash,
+                );
             };
             let components = path.components().collect::<Vec<_>>();
             let out = components
@@ -588,20 +613,10 @@ fn canonical_generic_path(
     arguments: &[ty::GenericArg<'_>],
     identity: bool,
 ) -> String {
-    let name = canonical_name(tcx, definition);
     let name = if identity {
-        let span = tcx.def_span(definition);
-        let location = tcx.sess.source_map().lookup_char_pos(span.lo());
-        format!(
-            "{name}[{}]@{}:{}:{}",
-            target_identity(tcx, definition)
-                .unwrap_or_else(|| tcx.crate_name(definition.krate).to_string()),
-            source_location(tcx, span).path,
-            location.line,
-            location.col.0,
-        )
+        definition_identity(tcx, definition)
     } else {
-        name
+        canonical_name(tcx, definition)
     };
     if arguments.is_empty() {
         return name;
@@ -663,38 +678,53 @@ fn canonical_type(tcx: TyCtxt<'_>, ty: ty::Ty<'_>, identity: bool) -> String {
         _ => ty.to_string(),
     }
 }
+fn definition_origin(tcx: TyCtxt<'_>, definition: DefId) -> String {
+    let span = tcx.def_span(definition);
+    let location = tcx.sess.source_map().lookup_char_pos(span.lo());
+    let source = source_location(tcx, span).path;
+    format!("{source}:{}:{}", location.line, location.col.0)
+}
 fn implementation_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
-    let mut contexts = Vec::new();
-    let mut parent = tcx.opt_parent(definition);
-    while let Some(implementation) = parent {
-        if matches!(tcx.def_kind(implementation), DefKind::Impl { .. }) {
-            let receiver = canonical_type(
-                tcx,
-                tcx.type_of(implementation)
-                    .instantiate_identity()
-                    .skip_norm_wip(),
-                true,
-            );
-            let trait_ref = tcx.impl_opt_trait_ref(implementation).map(|reference| {
-                let reference = reference.instantiate_identity().skip_norm_wip();
-                canonical_generic_path(tcx, reference.def_id, &reference.args.as_slice()[1..], true)
-            });
-            let span = tcx.def_span(implementation);
-            let location = tcx.sess.source_map().lookup_char_pos(span.lo());
-            contexts.push(format!(
-                "<{receiver}{}>@{}:{}:{}",
-                trait_ref
-                    .map(|name| format!(" as {name}"))
-                    .unwrap_or_default(),
-                source_location(tcx, span).path,
-                location.line,
-                location.col.0,
-            ));
+    let receiver = canonical_type(
+        tcx,
+        tcx.type_of(definition)
+            .instantiate_identity()
+            .skip_norm_wip(),
+        true,
+    );
+    let trait_ref = tcx.impl_opt_trait_ref(definition).map(|reference| {
+        let reference = reference.instantiate_identity().skip_norm_wip();
+        canonical_generic_path(tcx, reference.def_id, &reference.args.as_slice()[1..], true)
+    });
+    format!(
+        "Impl<{receiver}{}>@{}",
+        trait_ref
+            .map(|name| format!(" as {name}"))
+            .unwrap_or_default(),
+        definition_origin(tcx, definition),
+    )
+}
+fn definition_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
+    let mut path = Vec::new();
+    let mut parent = Some(definition);
+    while let Some(current) = parent {
+        let part = tcx.def_key(current).disambiguated_data;
+        if part.data == hir::definitions::DefPathData::Impl {
+            path.push(implementation_identity(tcx, current));
+        } else {
+            path.push(format!("{:?}#{}", part.data, part.disambiguator));
         }
-        parent = tcx.opt_parent(implementation);
+        parent = tcx.opt_parent(current);
     }
-    contexts.reverse();
-    contexts.join("/")
+    path.reverse();
+    let context = target_identity(tcx, definition)
+        .unwrap_or_else(|| format!("{:x}", tcx.stable_crate_id(definition.krate)));
+    format!(
+        "{}[{context}]::{}@{}",
+        tcx.crate_name(definition.krate),
+        path.join("/"),
+        definition_origin(tcx, definition),
+    )
 }
 fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
     let span = tcx.def_span(definition);
@@ -703,17 +733,8 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
     }
     source_path(tcx, span)?;
     let package = owner_package(tcx, definition)?;
-    let location = tcx.sess.source_map().lookup_char_pos(span.lo());
     let path = source_location(tcx, span).path;
     let name = canonical_name(tcx, definition);
-    let named_path = tcx
-        .def_path(definition)
-        .data
-        .iter()
-        .filter_map(|part| part.data.get_opt_name())
-        .map(|name| name.to_string())
-        .collect::<Vec<_>>()
-        .join("::");
     let kind = match tcx.def_kind(definition) {
         DefKind::AssocFn => match tcx.associated_item(definition).container {
             ty::AssocContainer::InherentImpl => "inherent-method",
@@ -726,38 +747,14 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
         _ => "other",
     }
     .to_owned();
-    let origin = &path;
-    let target = target_identity(tcx, definition)?;
-    let anonymous = tcx
-        .def_path(definition)
-        .data
-        .iter()
-        .filter(|part| {
-            matches!(
-                part.data,
-                hir::definitions::DefPathData::Closure
-                    | hir::definitions::DefPathData::SyntheticCoroutineBody
-            )
-        })
-        .map(|part| format!("{:?}#{}", part.data, part.disambiguator))
-        .collect::<Vec<_>>()
-        .join("/");
-    let mut id = format!(
-        "{}[{target}]::{named_path}@{origin}:{}:{}:{kind}:{anonymous}",
-        package.name, location.line, location.col.0,
-    );
-    let implementation = implementation_identity(tcx, definition);
-    if !implementation.is_empty() {
-        id.push(':');
-        id.push_str(&implementation);
-    }
+    let id = definition_identity(tcx, definition);
     Some(Api {
         id,
         package: package.name.clone(),
         name,
         kind,
         path,
-        line: location.line,
+        line: tcx.sess.source_map().lookup_char_pos(span.lo()).line,
     })
 }
 fn trait_declaration(tcx: TyCtxt<'_>, definition: DefId) -> DefId {
@@ -1018,5 +1015,49 @@ impl<'tcx> Visitor<'tcx> for References<'_, 'tcx> {
             }
         }
         intravisit::walk_expr(self, expression);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustc_hir::def_id::{DefIndex, LOCAL_CRATE};
+
+    #[test]
+    fn identity_collision_preserves_first_error_without_poisoning_capture() {
+        let capture = Mutex::new(Capture::default());
+        let definition = |index| DefId {
+            krate: LOCAL_CRATE,
+            index: DefIndex::from_u32(index),
+        };
+        let api = Api {
+            id: "long-compiler-definition-path".repeat(1000),
+            package: "fixture".into(),
+            name: "fixture::generated".into(),
+            kind: "function".into(),
+            path: "src/lib.rs".into(),
+            line: 1,
+        };
+        {
+            let mut guard = capture.lock().unwrap();
+            guard.insert_api(definition(1), api.clone());
+            guard.insert_api(definition(2), api.clone());
+        }
+        assert!(!capture.is_poisoned());
+        let mut guard = capture.lock().unwrap();
+        let first_error = guard.error.clone().unwrap();
+        assert!(first_error.len() < 500, "{first_error}");
+        assert!(first_error.contains("between DefId(0:1) and DefId(0:2)"));
+        for _ in 0..1000 {
+            guard.insert_api(definition(3), api.clone());
+        }
+        let mut next = Capture::default();
+        next.insert_api(definition(4), api.clone());
+        next.insert_api(definition(5), api.clone());
+        guard.merge(next);
+        assert_eq!(guard.error.as_deref(), Some(first_error.as_str()));
+        assert_eq!(guard.apis.len(), 1);
+        assert_eq!(guard.apis[&api.id].0, definition(1));
+        assert_eq!(guard.apis[&api.id].1.line, 1);
     }
 }
