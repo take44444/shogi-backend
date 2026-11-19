@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Keep macro-generated implementation targets distinct across compiler units."""
 import json
 import os
 from pathlib import Path

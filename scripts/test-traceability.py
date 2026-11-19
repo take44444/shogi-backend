@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise compiler report validation and Cargo inventory reconciliation."""
 from copy import deepcopy
 import importlib.util
 import json

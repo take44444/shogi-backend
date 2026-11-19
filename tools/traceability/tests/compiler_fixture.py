@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise compiler identity, call extraction, and explicit test targets in two crates."""
 import json
 import os
 from pathlib import Path

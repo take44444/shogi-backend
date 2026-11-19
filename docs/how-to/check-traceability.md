@@ -85,5 +85,7 @@ scripts/test-postgres.sh python3 scripts/traceability.py run --kind targeted
 `--kind untargeted` は対象属性のないテストを選ぶ。
 省略時は一覧中の全テストを実行する。
 実行結果と静的な対象指定を区別して確認する。
+解析時に照合したテスト実行ファイルを、各 package のディレクトリで実行する。
+package 単体で再ビルドせず、workspace 内で有効になった feature を保持する。
 
 生成モデルと抽出範囲は[設計](../design/code-derived-boundaries.md)を参照する。

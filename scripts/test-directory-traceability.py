@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Run the CLI collection pipeline against real Rust compiler units twice."""
 import json
 import os
 from pathlib import Path

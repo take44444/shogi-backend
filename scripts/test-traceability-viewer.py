@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Check portable source snapshots and HTML output confinement."""
 import json
 from pathlib import Path
 import re
