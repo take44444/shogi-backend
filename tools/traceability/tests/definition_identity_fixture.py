@@ -21,7 +21,7 @@ def run(arguments, *, cwd, env):
 
 
 def collect(root, cargo, env, driver):
-    metadata = run(cargo + ["metadata", "--offline", "--no-deps", "--format-version=1"], cwd=root, env=env)
+    metadata = run(cargo + ["metadata", "--offline", "--format-version=1"], cwd=root, env=env)
     metadata_path = root / "metadata.json"
     metadata_path.write_text(metadata.stdout)
     wrapped = dict(env, TRACEABILITY_ROOT=str(root), TRACEABILITY_METADATA=str(metadata_path), TRACEABILITY_SHARDS=str(root / "shards"), RUSTC_WORKSPACE_WRAPPER=str(driver))

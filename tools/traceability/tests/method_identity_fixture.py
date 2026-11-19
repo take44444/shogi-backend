@@ -110,7 +110,7 @@ fn value_right_target() {}
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
-        metadata = run(cargo_args + ["metadata", "--offline", "--no-deps", "--format-version=1"], cwd=root, env=env)
+        metadata = run(cargo_args + ["metadata", "--offline", "--format-version=1"], cwd=root, env=env)
         metadata_path = root / "metadata.json"
         metadata_path.write_text(metadata.stdout)
         env.update(TRACEABILITY_ROOT=str(root), TRACEABILITY_METADATA=str(metadata_path), TRACEABILITY_SHARDS=str(root / "shards"), RUSTC_WORKSPACE_WRAPPER=str(driver))

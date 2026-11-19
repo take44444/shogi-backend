@@ -19,9 +19,14 @@ pub struct Target {
     pub name: String,
     pub source: PathBuf,
 }
+pub struct ExternalPackage {
+    pub root: PathBuf,
+    pub identity: String,
+}
 pub struct Workspace {
     pub root: PathBuf,
     pub packages: Vec<Package>,
+    pub external_packages: Vec<ExternalPackage>,
 }
 impl Workspace {
     pub fn load(root: PathBuf) -> Result<Self, String> {
@@ -29,7 +34,7 @@ impl Workspace {
             fs::read(path).map_err(|error| error.to_string())?
         } else {
             let result = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-                .args(["metadata", "--no-deps", "--format-version=1", "--offline"])
+                .args(["metadata", "--format-version=1", "--offline"])
                 .current_dir(&root)
                 .env_remove("RUSTC_WORKSPACE_WRAPPER")
                 .output()
@@ -44,9 +49,36 @@ impl Workspace {
         let members = metadata["workspace_members"]
             .as_array()
             .ok_or("metadata has no workspace members")?;
-        let packages = metadata["packages"]
+        let metadata_packages = metadata["packages"]
             .as_array()
-            .ok_or("metadata has no packages")?
+            .ok_or("metadata has no packages")?;
+        let external_packages = metadata_packages
+            .iter()
+            .filter(|package| !members.contains(&package["id"]))
+            .map(|package| {
+                let name = package["name"].as_str().ok_or("package has no name")?;
+                let version = package["version"]
+                    .as_str()
+                    .ok_or("package has no version")?;
+                let package_root = Path::new(
+                    package["manifest_path"]
+                        .as_str()
+                        .ok_or("package has no manifest")?,
+                )
+                .parent()
+                .ok_or("manifest has no parent")?
+                .to_owned();
+                let source = package["source"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("path:{}", relative_path(&root, &package_root)));
+                Ok(ExternalPackage {
+                    root: package_root,
+                    identity: format!("{name}@{version}({source})"),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let packages = metadata_packages
             .iter()
             .filter(|package| members.contains(&package["id"]))
             .map(|package| {
@@ -84,7 +116,11 @@ impl Workspace {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        Ok(Self { root, packages })
+        Ok(Self {
+            root,
+            packages,
+            external_packages,
+        })
     }
     pub fn package_at(&self, path: &Path) -> Option<&Package> {
         self.packages
@@ -98,6 +134,26 @@ impl Workspace {
             .to_string_lossy()
             .replace('\\', "/")
     }
+    pub fn external_package_at(&self, path: &Path) -> Option<&ExternalPackage> {
+        self.external_packages
+            .iter()
+            .filter(|package| path.starts_with(&package.root))
+            .max_by_key(|package| package.root.components().count())
+    }
+}
+
+fn relative_path(root: &Path, path: &Path) -> String {
+    let shared = root
+        .components()
+        .zip(path.components())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut relative = PathBuf::new();
+    for _ in root.components().skip(shared) {
+        relative.push("..");
+    }
+    relative.extend(path.components().skip(shared));
+    relative.to_string_lossy().replace('\\', "/")
 }
 
 #[derive(Serialize)]

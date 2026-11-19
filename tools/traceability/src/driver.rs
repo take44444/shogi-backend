@@ -490,12 +490,10 @@ fn source_location(tcx: TyCtxt<'_>, span: Span) -> Location {
                 index: CRATE_DEF_INDEX,
             };
             let Some(package) = owner_package(tcx, root) else {
-                // The compiler crate identity retains version and configuration context.
-                // Its source hash identifies the file without a machine-specific cache path.
                 return format!(
-                    "@compiler-source/{}/{:x}/{}",
+                    "@compiler-source/{}/{}/{}",
                     tcx.crate_name(location.file.cnum),
-                    tcx.stable_crate_id(location.file.cnum),
+                    external_crate_identity(tcx, location.file.cnum),
                     location.file.src_hash,
                 );
             };
@@ -602,6 +600,21 @@ fn target_identity(tcx: TyCtxt<'_>, definition: DefId) -> Option<String> {
             workspace.relative(&target.source)
         )
     })
+}
+fn external_crate_identity(tcx: TyCtxt<'_>, krate: hir::def_id::CrateNum) -> String {
+    let root = DefId {
+        krate,
+        index: CRATE_DEF_INDEX,
+    };
+    let span = tcx.def_span(root);
+    if !span.is_dummy()
+        && let Some(path) = source_path(tcx, span)
+        && let Some(package) = WORKSPACE.get().unwrap().external_package_at(&path)
+    {
+        return package.identity.clone();
+    }
+    let location = tcx.sess.source_map().lookup_char_pos(span.lo());
+    format!("rustc-{}-{}", tcx.sess.cfg_version, location.file.src_hash)
 }
 fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
     let path = tcx
@@ -737,9 +750,9 @@ fn definition_origin(tcx: TyCtxt<'_>, definition: DefId) -> String {
         source_location(tcx, span).path
     } else {
         format!(
-            "@compiler-source/{}/{:x}/{}",
+            "@compiler-source/{}/{}/{}",
             tcx.crate_name(location.file.cnum),
-            tcx.stable_crate_id(location.file.cnum),
+            external_crate_identity(tcx, location.file.cnum),
             location.file.src_hash,
         )
     };
@@ -789,7 +802,7 @@ fn definition_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
     }
     path.reverse();
     let context = target_identity(tcx, definition)
-        .unwrap_or_else(|| format!("{:x}", tcx.stable_crate_id(definition.krate)));
+        .unwrap_or_else(|| external_crate_identity(tcx, definition.krate));
     format!(
         "{}[{context}]::{}@{}",
         tcx.crate_name(definition.krate),
