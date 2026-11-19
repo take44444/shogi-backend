@@ -64,7 +64,7 @@ mod tests {
 ''',
             "api/src/shared.rs": "pub fn shared() -> u32 { 1 }\n",
             "api/tests/reused.rs": 'include!("../src/shared.rs");\n',
-            "consumer/Cargo.toml": '[package]\nname="boundary-consumer"\nversion="0.1.0"\nedition="2024"\n[dependencies]\nrenamed={package="boundary-api",path="../api"}\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(REPO / "tools/traceability-attributes")) + '}\n',
+            "consumer/Cargo.toml": '[package]\nname="boundary-consumer"\nversion="0.1.0"\nedition="2024"\n[dependencies]\nrenamed={package="boundary-api",path="../api"}\n[dev-dependencies]\ntokio={version="1",features=["macros","rt"]}\ntraceability={package="traceability-attributes",path=' + json.dumps(str(REPO / "tools/traceability-attributes")) + '}\n',
             "consumer/src/lib.rs": '''
 use renamed::{Port, Store as Alias};
 pub fn aliases() -> u32 { let s=Alias::new(); renamed::call_read!(s)+renamed::calculate()+renamed::generated() }
@@ -85,6 +85,20 @@ fn declared_boundary() { assert_eq!(renamed::calculate(), 5); }
 #[traceability::targets(renamed::Store::new)]
 #[test]
 fn a_second_root() { assert_eq!(1, 1); }
+#[path = "contracts/support.rs"]
+mod boundaries;
+''',
+            "consumer/tests/contracts/support.rs": '''
+#[traceability::targets(renamed::calculate)]
+#[tokio::test]
+async fn declared_async_boundary() { assert_eq!(renamed::Store::new().read(), 7); }
+#[path = "nested/contract.rs"]
+mod contract;
+''',
+            "consumer/tests/contracts/nested/contract.rs": '''
+#[traceability::targets(renamed::Store::read)]
+#[tokio::test]
+async fn declared_async_boundary() { assert_eq!(renamed::calculate(), 5); }
 ''',
         }
         for relative, content in files.items():
@@ -121,9 +135,16 @@ fn a_second_root() { assert_eq!(1, 1); }
         assert any("through_async" in apis[call["caller"]]["name"] and apis[call["callee"]]["name"].endswith("::calculate") for call in boundary), [(apis[call["caller"]]["name"],apis[call["callee"]]["name"]) for call in boundary]
         assert any("through_closure" in apis[call["caller"]]["name"] and apis[call["callee"]]["name"].endswith("::calculate") for call in boundary)
         tests = {test["name"]: test for shard in shards for test in shard["tests"]}
-        assert set(tests) == {"tests::intended_free_api", "tests::concrete_implementation", "tests::unannotated", "declared_boundary", "a_second_root"}, tests
+        assert set(tests) == {"tests::intended_free_api", "tests::concrete_implementation", "tests::unannotated", "declared_boundary", "a_second_root", "boundaries::declared_async_boundary", "boundaries::contract::declared_async_boundary"}, tests
         assert [apis[target]["name"] for target in tests["tests::intended_free_api"]["targets"]] == ["boundary_api::calculate"], [apis[target] for target in tests["tests::intended_free_api"]["targets"]]
         assert tests["tests::unannotated"]["targets"] == []
+        for name, target, path in [
+            ("boundaries::declared_async_boundary", "boundary_api::calculate", "consumer/tests/contracts/support.rs"),
+            ("boundaries::contract::declared_async_boundary", "boundary_api::Store::read", "consumer/tests/contracts/nested/contract.rs"),
+        ]:
+            test = tests[name]
+            assert [apis[target_id]["name"] for target_id in test["targets"]] == [target], test
+            assert test["path"] == path and test["line"] > 1, test
         concrete_targets = [apis[target] for target in tests["tests::concrete_implementation"]["targets"]]
         assert len(concrete_targets) == 1 and concrete_targets[0]["kind"] == "trait-implementation-method", concrete_targets
         dynamic_targets = [apis[target] for target in tests["declared_boundary"]["targets"]]
@@ -165,7 +186,7 @@ fn a_second_root() { assert_eq!(1, 1); }
             (root / "consumer/tests/boundaries.rs").write_text(source)
             result = subprocess.run(cargo_args + ["test", "--no-run", "-p", "boundary-consumer", "--test", "boundaries", "--offline"], cwd=root, env=env, text=True, capture_output=True)
             assert result.returncode != 0 and diagnostic in result.stderr, (source, result.stdout, result.stderr)
-        print(json.dumps({"negative_cases": len(invalid_cases), "units": len(shards), "tests": len(tests), "boundary_calls": len(boundary), "unresolved_function_pointers": len(unresolved), "observations": ["aliases", "macro provenance", "generic trait", "dyn trait", "concrete trait normalization", "closure", "async", "explicit targets only", "exact implementation target", "canonical library IDs", "shared include across targets", "same source for named targets", "same-span closure identities", "tuple constructors", "unused constructor API", "derived methods"]}, indent=2))
+        print(json.dumps({"negative_cases": len(invalid_cases), "units": len(shards), "tests": len(tests), "boundary_calls": len(boundary), "unresolved_function_pointers": len(unresolved), "observations": ["aliases", "macro provenance", "generic trait", "dyn trait", "concrete trait normalization", "closure", "async", "explicit targets only", "exact implementation target", "nested async test roots", "canonical library IDs", "shared include across targets", "same source for named targets", "same-span closure identities", "tuple constructors", "unused constructor API", "derived methods"]}, indent=2))
 
 
 if __name__ == "__main__":
