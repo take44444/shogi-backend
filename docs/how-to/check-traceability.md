@@ -47,6 +47,8 @@ trait のインターフェースを対象にするテストでは、dyn 互換�
 通信だけを検証するテストには、便宜的なローカル API を割り当てない。
 対象を指定していないテストも一覧には残る。
 対象の指定はテスト作者の意図であり、その assertion が契約を十分に検証することの証明ではない。
+指定した定義 ID が通常ビルドにも存在することを検査する。
+テスト専用の項目や、マクロ・`cfg` により通常ビルドとの対応が取れない項目を指定すると、生成に失敗する。
 
 ## 生成結果を検査する
 
@@ -87,5 +89,8 @@ scripts/test-postgres.sh python3 scripts/traceability.py run --kind targeted
 実行結果と静的な対象指定を区別して確認する。
 解析時に照合したテスト実行ファイルを、各 package のディレクトリで実行する。
 package 単体で再ビルドせず、workspace 内で有効になった feature を保持する。
+Cargo が実際に渡す package 情報、build script の環境変数、動的ライブラリの探索先も保持する。
+これらの値は実行用にだけ使い、生成する JSON や HTML には保存しない。
+実行環境の取得には一時的な Cargo runner を使うため、独自の target runner を設定した環境は対象外とする。
 
 生成モデルと抽出範囲は[設計](../design/code-derived-boundaries.md)を参照する。

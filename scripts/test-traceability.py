@@ -34,6 +34,17 @@ class CompilerReportTests(unittest.TestCase):
     def merge(self, *shards):
         return trace.merge_shards(self.root, shards or [self.shard], self.components)
 
+    def test_explicit_targets_must_join_the_production_definition(self):
+        normal = deepcopy(self.shard)
+        normal["unit"].update(is_test=False, purposes=["production"])
+        normal["tests"] = []
+        bundle = self.merge(self.shard, normal)
+        trace.check_production_targets(bundle, [self.shard, normal])
+        for changed in (self.shard, {**normal, "unit": {**normal["unit"], "purposes": ["tests"]}},
+                        {**normal, "apis": [{**api, "id": api["id"] + "-cfg"} for api in normal["apis"]]}):
+            with self.subTest(unit=changed["unit"]), self.assertRaisesRegex(trace.InvalidTrace, "no matching definition in the production build"):
+                trace.check_production_targets(bundle, [self.shard, changed])
+
     def test_merging_normal_and_test_units_deduplicates_calls_and_preserves_targets(self):
         normal = deepcopy(self.shard)
         normal["unit"]["is_test"] = False

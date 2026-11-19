@@ -260,6 +260,17 @@ def reconcile_units(bundle, artifacts):
             f"compiler unit coverage mismatch: missing shards {sorted(expected - actual)}; unexpected shards {sorted(actual - expected)}")
 
 
+def check_production_targets(bundle, shards):
+    production = {api["id"] for shard in shards
+                  if not shard["unit"]["is_test"] and "production" in shard["unit"]["purposes"]
+                  and shard["unit"]["target_kind"] in ("lib", "bin") for api in shard["apis"]}
+    for test in bundle["tests"]:
+        missing = set(test["targets"]) - production
+        require(not missing,
+                f"test target has no matching definition in the production build: {test_key(test)}; "
+                "target a production API and check cfg or macro definition identity")
+
+
 def parse_inventory(output):
     names = []
     for line in output.splitlines():
@@ -423,6 +434,7 @@ def load_traces(root):
         captures = compilation_purposes([read_json(path) for path in sorted(shards.glob("*.json"))], artifacts)
         bundle = merge_shards(root, captures, components)
         reconcile_units(bundle, artifacts)
+        check_production_targets(bundle, captures)
         test_artifacts = check_inventory(bundle, artifacts, root, runtimes)
     bundle["excluded_targets"] = excluded_targets(metadata, artifacts)
     bundle["configuration"] = {"toolchain": channel, "cargo": [shlex.join(command) for command in commands],

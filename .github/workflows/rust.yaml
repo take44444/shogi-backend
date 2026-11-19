@@ -60,9 +60,11 @@ jobs:
         run: |
           python3 scripts/test-traceability.py
           python3 scripts/test-traceability-viewer.py
+          python3 scripts/test-traceability-runtime.py
           python3 tools/traceability/tests/compiler_fixture.py
           python3 tools/traceability/tests/method_identity_fixture.py
           python3 tools/traceability/tests/definition_identity_fixture.py
+          python3 tools/traceability/tests/external_declaration_identity_fixture.py
           cargo +nightly-2026-11-18 test --locked --manifest-path tools/traceability/Cargo.toml
           python3 scripts/test-directory-traceability.py
           python3 scripts/traceability.py check
