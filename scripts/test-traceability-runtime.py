@@ -19,7 +19,7 @@ class CargoRuntimeTests(unittest.TestCase):
             root = Path(directory)
             files = {
                 "Cargo.toml": '[workspace]\nmembers=["a", "b"]\nresolver="3"\n',
-                ".cargo/config.toml": '[build]\nrustflags=["-C", "prefer-dynamic"]\n[env]\nTRACEABILITY_CONFIG_VALUE="configured"\n',
+                ".cargo/config.toml": '[build]\nrustflags=["-C", "prefer-dynamic"]\n[env]\nTRACEABILITY_CONFIG_VALUE={value="configured",force=true}\n',
                 "a/Cargo.toml": '[package]\nname="a"\nversion="1.2.3-preview"\nedition="2024"\nauthors=["Fixture Author"]\ndescription="Runtime fixture"\n[features]\nx=[]\n',
                 "a/build.rs": '''fn main() {
     let out = std::env::var("OUT_DIR").unwrap();
@@ -54,6 +54,14 @@ mod tests {
             ("TRACEABILITY_BUILD_VALUE", "emitted"),
             ("TRACEABILITY_CONFIG_VALUE", "configured"),
         ] { assert_eq!(std::env::var(name).unwrap(), expected, "{name}"); }
+        for key in ["CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH", "CARGO_PKG_NAME",
+                    "CARGO_PKG_VERSION", "CARGO_PKG_VERSION_MAJOR", "CARGO_PKG_VERSION_MINOR",
+                    "CARGO_PKG_VERSION_PATCH", "CARGO_PKG_VERSION_PRE", "CARGO_PKG_AUTHORS",
+                    "CARGO_PKG_DESCRIPTION", "CARGO_PKG_HOMEPAGE", "CARGO_PKG_REPOSITORY",
+                    "CARGO_PKG_LICENSE", "CARGO_PKG_LICENSE_FILE", "CARGO_PKG_RUST_VERSION",
+                    "CARGO_PKG_README", "OUT_DIR", "LD_LIBRARY_PATH"] {
+            println!("RUNTIME_SAFE {key}={}", std::env::var(key).unwrap_or_default());
+        }
     }
 }''',
                 "b/Cargo.toml": '[package]\nname="b"\nversion="0.1.0"\nedition="2024"\n[dependencies]\na={path="../a",features=["x"]}\n',
@@ -77,6 +85,15 @@ mod tests {
             runtimes = trace.capture_test_runtimes(cargo, command, root, os.environ.copy(), artifacts, output, captures)
             test_artifacts = trace.check_inventory(bundle, artifacts, root, runtimes)
             trace.run_tests(bundle["tests"], test_artifacts)
+            baseline = trace.execute(cargo + [arg for arg in command if arg != "--no-run"] + ["--", "--nocapture"], root)
+            runtime = test_artifacts[trace.target_key(test)]
+            direct = trace.execute([runtime["executable"], test["name"], "--exact", "--nocapture"],
+                                   runtime["directory"], env=runtime["environment"])
+            def safe_values(output):
+                return dict(line.removeprefix("RUNTIME_SAFE ").split("=", 1) for line in output.splitlines()
+                            if line.startswith("RUNTIME_SAFE "))
+            self.assertEqual(len(safe_values(baseline)), 19)
+            self.assertEqual(safe_values(baseline), safe_values(direct))
             self.assertEqual(trace.canonical(bundle), before)
             self.assertNotIn(str(root), trace.canonical(bundle))
             self.assertEqual(set(runtimes), {artifact["executable"] for artifact in artifacts if artifact["is_test"] and artifact["executable"]})

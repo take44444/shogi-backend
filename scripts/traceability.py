@@ -273,7 +273,64 @@ def parse_inventory(output):
     return set(names)
 
 
-def check_inventory(bundle, artifacts, root):
+def cargo_configuration(cargo, root, key):
+    result = subprocess.run(cargo + ["-Z", "unstable-options", "config", "get", key, "--format=json-value"],
+                            cwd=root, capture_output=True, text=True)
+    if result.returncode == 101 and result.stderr.splitlines()[-1:] == [f"error: config value `{key}` is not set"]:
+        return {}
+    require(result.returncode == 0, f"cannot inspect Cargo {key} configuration ({result.returncode})")
+    return json.loads(result.stdout, object_pairs_hook=no_duplicate_keys)
+
+
+def capture_runtime(directory, keys_path, executable, *arguments):
+    keys = read_json(keys_path)
+    runtime = {"executable": str(Path(executable).resolve()), "directory": str(Path.cwd()),
+               "environment": {key: os.environ[key] for key in keys if key in os.environ}}
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", dir=directory, encoding="utf-8", delete=False) as output:
+        output.write(canonical(runtime))
+
+
+def capture_test_runtimes(cargo, command, root, environment, artifacts, output, directory):
+    targets = cargo_configuration(cargo, root, "target")
+    require(not any("runner" in target for target in targets.values())
+            and not any(re.fullmatch(r"CARGO_TARGET_.+_RUNNER", key) for key in environment),
+            "Cargo target runners are not supported by runtime capture; remove the configured runner")
+    keys = {"CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH", "OUT_DIR",
+            "CARGO_PKG_VERSION", "CARGO_PKG_VERSION_MAJOR", "CARGO_PKG_VERSION_MINOR", "CARGO_PKG_VERSION_PATCH",
+            "CARGO_PKG_VERSION_PRE", "CARGO_PKG_NAME", "CARGO_PKG_AUTHORS", "CARGO_PKG_DESCRIPTION",
+            "CARGO_PKG_HOMEPAGE", "CARGO_PKG_REPOSITORY", "CARGO_PKG_LICENSE", "CARGO_PKG_LICENSE_FILE",
+            "CARGO_PKG_RUST_VERSION", "CARGO_PKG_README", "PATH", "LD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "LIBPATH"}
+    keys.update(cargo_configuration(cargo, root, "env"))
+    for line in output.splitlines():
+        message = json.loads(line, object_pairs_hook=no_duplicate_keys)
+        if message.get("reason") == "build-script-executed":
+            keys.update(key for key, _ in message["env"])
+    keys_path = directory.parent / "runtime-keys.json"
+    keys_path.write_text(canonical(sorted(keys)), encoding="utf-8")
+    config = directory.parent / "runtime-runner.toml"
+    runner = [sys.executable, str(Path(__file__).resolve()), "__capture_runtime", str(directory), str(keys_path)]
+    config.write_text("[target.'cfg(all())']\nrunner = " + json.dumps(runner) + "\n", encoding="utf-8")
+    # Ask Cargo for runtime values so build-script and config precedence and loader paths stay Cargo's responsibility.
+    captured = execute(cargo + [arg for arg in command if arg != "--no-run"] + ["--config", config], root, env=environment)
+    messages = [json.loads(line, object_pairs_hook=no_duplicate_keys) for line in captured.splitlines()]
+    original = [json.loads(line, object_pairs_hook=no_duplicate_keys) for line in output.splitlines()]
+    def identities(messages):
+        return {canonical({key: message[key] for key in ("package_id", "target", "profile", "features", "executable")})
+                for message in messages if message.get("reason") == "compiler-artifact"}
+    require(identities(messages) == identities(original), "Cargo runtime capture changed compiled artifact identities")
+    runtimes = {}
+    for path in sorted(directory.glob("*.json")):
+        runtime = read_json(path)
+        executable = runtime["executable"]
+        require(executable not in runtimes, f"duplicate Cargo runtime capture: {executable}")
+        runtimes[executable] = runtime
+    expected = {artifact["executable"] for artifact in artifacts if artifact["is_test"] and artifact["executable"]}
+    require(set(runtimes) == expected,
+            f"Cargo runtime capture mismatch: missing {sorted(expected - runtimes.keys())}; unexpected {sorted(runtimes.keys() - expected)}")
+    return runtimes
+
+
+def check_inventory(bundle, artifacts, root, runtimes):
     directories = {component["id"]: Path(root) / component["path"] for component in bundle["components"]}
     inventories, test_artifacts = {}, {}
     for artifact in artifacts:
@@ -281,8 +338,10 @@ def check_inventory(bundle, artifacts, root):
             continue
         key = target_key(artifact)
         require(key not in test_artifacts, f"multiple compiled test artifacts for target: {key}")
-        runtime = {"executable": artifact["executable"], "directory": directories[artifact["package"]]}
-        inventories[key] = parse_inventory(execute([runtime["executable"], "--list", "--format=terse"], runtime["directory"]))
+        runtime = runtimes[artifact["executable"]]
+        require(Path(runtime["directory"]) == directories[artifact["package"]], f"Cargo runtime directory differs from package: {key}")
+        runtime = {**runtime, "directory": Path(runtime["directory"]), "environment": {**os.environ, **runtime["environment"]}}
+        inventories[key] = parse_inventory(execute([runtime["executable"], "--list", "--format=terse"], runtime["directory"], env=runtime["environment"]))
         test_artifacts[key] = runtime
     expected = {}
     for test in bundle["tests"]:
@@ -356,10 +415,15 @@ def load_traces(root):
         outputs = [execute(cargo + command + ["--message-format=json", "--target-dir", analysis], root, env=environment)
                    for command in commands]
         artifacts = cargo_artifacts(zip(("production", "tests"), outputs), metadata)
+        runtimes_path = run / "runtimes"
+        runtimes_path.mkdir()
+        test_artifacts = cargo_artifacts([("tests", outputs[1])], metadata)
+        runtimes = capture_test_runtimes(cargo, commands[1] + ["--message-format=json", "--target-dir", analysis],
+                                         root, environment, test_artifacts, outputs[1], runtimes_path)
         captures = compilation_purposes([read_json(path) for path in sorted(shards.glob("*.json"))], artifacts)
         bundle = merge_shards(root, captures, components)
         reconcile_units(bundle, artifacts)
-        test_artifacts = check_inventory(bundle, artifacts, root)
+        test_artifacts = check_inventory(bundle, artifacts, root, runtimes)
     bundle["excluded_targets"] = excluded_targets(metadata, artifacts)
     bundle["configuration"] = {"toolchain": channel, "cargo": [shlex.join(command) for command in commands],
                                "scope": "Current host and default Cargo features; inactive cfg branches are outside this snapshot."}
@@ -376,7 +440,7 @@ def run_tests(tests, test_artifacts):
         require(key in test_artifacts, f"compiled test artifact missing for target: {key}")
         artifact = test_artifacts[key]
         args = [artifact["executable"], test["name"], "--exact", "--format", "pretty", "--color", "never"]
-        output = execute(args, artifact["directory"])
+        output = execute(args, artifact["directory"], env=artifact["environment"])
         summary = re.findall(r"^test result: (.+)$", output, flags=re.MULTILINE)
         require(len(summary) == 1 and re.fullmatch(r"ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9.]+s", summary[0]),
                 f"expected one passed exact test: {test_key(test)}\n{output}")
@@ -419,4 +483,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "__capture_runtime":
+        capture_runtime(*sys.argv[2:])
+    else:
+        sys.exit(main())

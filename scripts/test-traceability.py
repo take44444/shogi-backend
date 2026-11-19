@@ -215,19 +215,43 @@ class CompilerReportTests(unittest.TestCase):
     def test_compiled_inventory_must_match_every_compiler_test(self):
         artifact = {**self.shard["unit"], "executable": "/test-binary"}
         bundle = self.merge()
+        runtimes = {"/test-binary": {"executable": "/test-binary", "directory": str(self.root), "environment": {"CARGO_PKG_NAME": "sample"}}}
         with patch.object(trace, "execute", return_value="check: test\n") as execute:
-            artifacts = trace.check_inventory(bundle, [artifact], self.root)
-            self.assertEqual(artifacts, {trace.target_key(artifact): {"executable": "/test-binary", "directory": self.root}})
+            artifacts = trace.check_inventory(bundle, [artifact], self.root, runtimes)
+            runtime = artifacts[trace.target_key(artifact)]
+            self.assertEqual(runtime["executable"], "/test-binary")
+            self.assertEqual(runtime["directory"], self.root)
+            self.assertEqual(runtime["environment"]["CARGO_PKG_NAME"], "sample")
             self.assertEqual(execute.call_args.args[0], ["/test-binary", "--list", "--format=terse"])
+            self.assertEqual(execute.call_args.kwargs["env"]["CARGO_PKG_NAME"], "sample")
         with patch.object(trace, "execute", return_value="check: test\nmissed: test\n"):
             with self.assertRaisesRegex(trace.InvalidTrace, "compiler missing.*missed"):
-                trace.check_inventory(bundle, [artifact], self.root)
+                trace.check_inventory(bundle, [artifact], self.root, runtimes)
         with patch.object(trace, "execute", return_value=""):
             with self.assertRaisesRegex(trace.InvalidTrace, "absent from binary.*check"):
-                trace.check_inventory(bundle, [artifact], self.root)
+                trace.check_inventory(bundle, [artifact], self.root, runtimes)
         with patch.object(trace, "execute", return_value="check: test\n"):
             with self.assertRaisesRegex(trace.InvalidTrace, "multiple compiled test artifacts"):
-                trace.check_inventory(bundle, [artifact, {**artifact, "features": ["extra"]}], self.root)
+                trace.check_inventory(bundle, [artifact, {**artifact, "features": ["extra"]}], self.root, runtimes)
+
+    def test_cargo_runtime_capture_rejects_custom_runners(self):
+        for target, environment in (({"cfg(unix)": {"runner": "custom"}}, {}),
+                                    ({}, {"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "custom"})):
+            with self.subTest(targets=list(target), variables=list(environment)), patch.object(trace, "cargo_configuration", return_value=target):
+                with self.assertRaisesRegex(trace.InvalidTrace, "target runners are not supported"):
+                    trace.capture_test_runtimes([], [], self.root, environment, [], "", self.root)
+
+    def test_cargo_runtime_capture_requires_the_original_artifacts_and_each_capture(self):
+        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"},
+                   "profile": {"test": True}, "features": [], "executable": "/test-binary"}
+        artifact = {**self.shard["unit"], "executable": "/test-binary"}
+        runtimes = self.root / "runtimes"
+        runtimes.mkdir()
+        for changed in (True, False):
+            output = json.dumps({**message, "executable": "/other-binary"} if changed else message)
+            with self.subTest(changed=changed), patch.object(trace, "cargo_configuration", return_value={}), patch.object(trace, "execute", return_value=output):
+                with self.assertRaisesRegex(trace.InvalidTrace, "changed compiled artifact identities" if changed else "runtime capture mismatch"):
+                    trace.capture_test_runtimes([], [], self.root, {}, [artifact], json.dumps(message), runtimes)
 
     def test_duplicate_inventory_name_and_legacy_schema_fail(self):
         with self.assertRaisesRegex(trace.InvalidTrace, "duplicate test names"):
@@ -238,7 +262,7 @@ class CompilerReportTests(unittest.TestCase):
 
     def test_no_test_name_or_substring_can_establish_a_run_passed(self):
         test = self.shard["tests"][0]
-        artifacts = {trace.target_key(test): {"executable": "/captured-test-binary", "directory": self.root / "sample"}}
+        artifacts = {trace.target_key(test): {"executable": "/captured-test-binary", "directory": self.root / "sample", "environment": {"CARGO_PKG_NAME": "sample"}}}
         failures = ["test check ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
                     "test another_check ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
                     "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n"]
@@ -252,6 +276,7 @@ class CompilerReportTests(unittest.TestCase):
             self.assertEqual(execute.call_args.args,
                              (["/captured-test-binary", "check", "--exact", "--format", "pretty", "--color", "never"],
                               self.root / "sample"))
+            self.assertEqual(execute.call_args.kwargs["env"], {"CARGO_PKG_NAME": "sample"})
         with patch.object(trace, "execute") as execute:
             with self.assertRaisesRegex(trace.InvalidTrace, "compiled test artifact missing"):
                 trace.run_tests([test], {})
