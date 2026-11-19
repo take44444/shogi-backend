@@ -1,6 +1,6 @@
 # 未完成の機能と未検証の範囲
 
-対局ルールの制限は[着手の契約と未検証事項](../../crates/game-application/src/trace/game-play/domain-play/contract.rs)を参照する。
+対局ルールの公開 API と制限は[ドメインのドキュメント](../../crates/shogi-domain/src/lib.rs)を参照する。
 
 ## 接続・認証・対局基盤
 
