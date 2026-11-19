@@ -36,6 +36,8 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 include!("shared.rs");
 pub trait Port { fn ready(&self) -> u32; }
 pub struct Store;
+pub struct Payload(pub u32);
+pub enum Event { Item(u32) }
 impl Store {
     pub fn new() -> Self { Self }
     pub fn read(&self) -> u32 { 7 }
@@ -72,6 +74,7 @@ macro_rules! duplicate { ($closure:expr) => { ($closure, $closure) }; }
 pub fn same_span_closures() -> u32 { let (f,g)=duplicate!(||renamed::calculate()); f()+g() }
 pub async fn through_async() -> u32 { renamed::calculate() }
 pub fn indirect(f:fn()->u32) -> u32 { f() }
+pub fn construct() -> (renamed::Payload, renamed::Event) { (renamed::Payload(7), renamed::Event::Item(8)) }
 ''',
             "consumer/tests/boundaries.rs": '''
 #[traceability::targets(<dyn renamed::Port>::ready, renamed::Store::read)]
@@ -106,6 +109,8 @@ fn a_second_root() { assert_eq!(1, 1); }
         dispatches = {call["dispatch"] for call in boundary if apis[call["callee"]]["name"].endswith("::ready")}
         assert {"generic", "dyn", "trait"} <= dispatches, dispatches
         assert all(apis[call["callee"]]["kind"] == "trait-method" for call in boundary if apis[call["callee"]]["name"].endswith("::ready"))
+        constructors = {apis[call["callee"]]["name"] for call in boundary if "construct" in apis[call["caller"]]["name"] and apis[call["callee"]]["kind"] == "constructor"}
+        assert constructors == {"boundary_api::Payload", "boundary_api::Event::Item"}, constructors
         assert any(call.get("expansion") for call in boundary if apis[call["callee"]]["name"].endswith("::read")), boundary
         assert any("through_async" in apis[call["caller"]]["name"] and apis[call["callee"]]["name"].endswith("::calculate") for call in boundary), [(apis[call["caller"]]["name"],apis[call["callee"]]["name"]) for call in boundary]
         assert any("through_closure" in apis[call["caller"]]["name"] and apis[call["callee"]]["name"].endswith("::calculate") for call in boundary)
