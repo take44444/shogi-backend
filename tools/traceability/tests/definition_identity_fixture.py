@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise complete compiler definition paths and relocatable external identities."""
 import json
 import os
 from pathlib import Path
@@ -31,6 +30,12 @@ def collect(root, cargo, env, driver):
     assert len(shards) == 2, [shard["unit"] for shard in shards]
     apis = {}
     for shard in shards:
+        for category in ("apis", "calls", "references", "tests", "unresolved"):
+            for record in shard[category]:
+                source = shard["generated_sources"].get(record["path"])
+                if source is None:
+                    source = (root / record["path"]).read_text()
+                assert 0 < record["line"] <= len(source.splitlines()), record
         for api in shard["apis"]:
             assert all(str(root) not in api[field] and "/home/" not in api[field] and "/tmp/" not in api[field] for field in ("id", "name", "path")), api
             if api["id"] in apis:
@@ -104,7 +109,7 @@ mod tests {
         }
         for name, version in [("external-one", "1.0.0"), ("external-two", "2.0.0")]:
             files[f"{name}/Cargo.toml"] = f'[package]\nname="external-traits"\nversion="{version}"\nedition="2024"\n'
-            files[f"{name}/src/lib.rs"] = 'pub trait Port { fn read(&self); }\n#[macro_export]\nmacro_rules! generated_closure { () => { || 1u8 }; }\n'
+            files[f"{name}/src/lib.rs"] = '\n' * 100 + 'pub trait Port { fn read(&self); }\n#[macro_export]\nmacro_rules! generated_closure { () => { || 1u8 }; }\n'
         for relative, content in files.items():
             path = roots[0] / relative
             path.parent.mkdir(parents=True, exist_ok=True)

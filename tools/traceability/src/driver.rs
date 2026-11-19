@@ -828,7 +828,7 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
     }
     source_path(tcx, span)?;
     let package = owner_package(tcx, definition)?;
-    let path = source_location(tcx, span).path;
+    let location = source_location(tcx, span);
     let name = canonical_name(tcx, definition);
     let kind = match tcx.def_kind(definition) {
         DefKind::AssocFn => match tcx.associated_item(definition).container {
@@ -848,8 +848,8 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
         package: package.name.clone(),
         name,
         kind,
-        path,
-        line: tcx.sess.source_map().lookup_char_pos(span.lo()).line,
+        path: location.path,
+        line: location.line,
     })
 }
 fn trait_declaration(tcx: TyCtxt<'_>, definition: DefId) -> DefId {
