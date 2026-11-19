@@ -85,6 +85,12 @@ def sorted_records(records):
     return sorted(records, key=canonical)
 
 
+def merge_fact(records, fact, unit):
+    record = records.setdefault(canonical(fact), {**fact, "origins": []})
+    if unit not in record["origins"]:
+        record["origins"] = sorted_records([*record["origins"], unit])
+
+
 def merge_shards(root, shards, components):
     """Merge compiler units without inferring test intent or implementation relations."""
     shards = list(shards)
@@ -145,7 +151,7 @@ def merge_shards(root, shards, components):
                 text(call["dispatch"])
                 require(call["caller_package"] == unit["package"], "call package differs from compiler unit")
                 source_location(root, call, generated_sources)
-                records[canonical(call)] = call
+                merge_fact(records, call, unit)
         for test in shard["tests"]:
             fields(test, ("package", "target_kind", "target_name", "name", "path", "line", "targets"))
             require(target_key(test) == target_key(unit) and unit["is_test"], "test has incorrect compiler unit context")
@@ -163,7 +169,7 @@ def merge_shards(root, shards, components):
             text(item["caller"])
             text(item["reason"])
             source_location(root, item, generated_sources)
-            unresolved[canonical(item)] = item
+            merge_fact(unresolved, item, unit)
         require(isinstance(shard["coverage"], dict), "coverage must be an object")
         for name in ("bodies", "calls", "function_references", "external_calls"):
             require(name in shard["coverage"], f"missing compiler coverage counter: {name}")
@@ -316,14 +322,16 @@ def load_traces(root):
         environment = {**os.environ, "RUSTC_WORKSPACE_WRAPPER": str(wrapper), "TRACEABILITY_ROOT": str(root),
                        "TRACEABILITY_SHARDS": str(shards), "TRACEABILITY_METADATA": str(metadata_path),
                        "LD_LIBRARY_PATH": str(Path(sysroot) / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")}
-        output = execute(cargo + ["test", "--workspace", "--all-targets", "--no-run", "--locked", "--message-format=json",
-                                  "--target-dir", analysis], root, env=environment)
-        artifacts = cargo_artifacts(output, metadata)
+        commands = [["build", "--workspace", "--lib", "--bins", "--locked"],
+                    ["test", "--workspace", "--all-targets", "--no-run", "--locked"]]
+        outputs = [execute(cargo + command + ["--message-format=json", "--target-dir", analysis], root, env=environment)
+                   for command in commands]
+        artifacts = cargo_artifacts("\n".join(outputs), metadata)
         bundle = merge_shards(root, [read_json(path) for path in sorted(shards.glob("*.json"))], components)
         reconcile_units(bundle, artifacts)
         check_inventory(bundle, artifacts, root)
     bundle["excluded_targets"] = excluded_targets(metadata, artifacts)
-    bundle["configuration"] = {"toolchain": channel, "cargo": "test --workspace --all-targets --no-run --locked",
+    bundle["configuration"] = {"toolchain": channel, "cargo": [shlex.join(command) for command in commands],
                                "scope": "Current host and default Cargo features; inactive cfg branches are outside this snapshot."}
     return bundle
 

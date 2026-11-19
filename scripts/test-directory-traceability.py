@@ -23,10 +23,15 @@ class CompilerPipelineTests(unittest.TestCase):
             (root / "Cargo.toml").write_text('[workspace]\nmembers=["api", "adapter"]\nresolver="3"\n')
             for package in ("api", "adapter"):
                 (root / package / "src").mkdir(parents=True)
-            (root / "api/Cargo.toml").write_text('[package]\nname="api"\nversion="0.1.0"\nedition="2024"\n')
+            (root / "api/Cargo.toml").write_text('[package]\nname="api"\nversion="0.1.0"\nedition="2024"\n[dev-dependencies]\nadapter={path="../adapter"}\n')
             (root / "api/src/lib.rs").write_text('''pub trait Port { fn ready(&self) -> bool; }
 pub fn calculate() -> bool { true }
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn setup() { assert!(adapter::execute(&adapter::Store)); }
+}
 ''')
             (root / "api/build.rs").write_text('''fn main() {
     let path = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("generated.rs");
@@ -63,13 +68,15 @@ mod tests {
     fn untargeted() { assert!(super::execute(&super::Store)); }
 }
 ''')
+            for package in ("api", "adapter"):
+                (root / package / "src/main.rs").write_text('fn main() { let _ = api::calculate(); }\n')
             (root / "adapter/tests").mkdir()
             (root / "adapter/tests/optional.rs").write_text('compile_error!("disabled target must not compile");\n')
             trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
             first = trace.load_traces(root)
             second = trace.load_traces(root)
             self.assertEqual(first, second, "warm Cargo cache must produce the same fresh compiler snapshot")
-            self.assertEqual(len(first["tests"]), 3)
+            self.assertEqual(len(first["tests"]), 4)
             tests = {test["name"]: test for test in first["tests"]}
             self.assertEqual(tests["tests::untargeted"]["targets"], [])
             apis = {api["id"]: api for api in first["apis"]}
@@ -82,6 +89,18 @@ mod tests {
             self.assertTrue(dyn_calls)
             self.assertTrue(all(apis[call["callee"]]["kind"] == "trait-method" for call in dyn_calls))
             self.assertTrue(any(apis[call["caller"]]["package"] == "adapter" and apis[call["callee"]]["package"] == "api" for call in first["calls"]))
+            production = [call for call in first["calls"] if any(not origin["is_test"] and origin["target_kind"] in ("lib", "bin") for origin in call["origins"])]
+            directions = {(apis[call["caller"]]["package"], apis[call["callee"]]["package"]) for call in production}
+            self.assertIn(("adapter", "api"), directions)
+            self.assertNotIn(("api", "adapter"), directions)
+            setup_calls = [call for call in first["calls"] if apis[call["caller"]]["package"] == "api" and apis[call["callee"]]["package"] == "adapter"]
+            self.assertTrue(setup_calls, "the real test-only dependency must remain in raw calls")
+            self.assertTrue(all(all(origin["is_test"] for origin in call["origins"]) for call in setup_calls))
+            shared_calls = [call for call in production if call["caller"] == concrete["id"]]
+            self.assertTrue(shared_calls)
+            self.assertTrue(all({origin["is_test"] for origin in call["origins"]} == {False, True} for call in shared_calls))
+            normal_bins = {unit["package"] for unit in first["units"] if unit["target_kind"] == "bin" and not unit["is_test"]}
+            self.assertEqual(normal_bins, {"api", "adapter"}, "all application binaries need normal production compilations")
             self.assertIn("@generated/api/generated.rs", first["generated_sources"])
             self.assertTrue(any(api["path"] == "@generated/api/generated.rs" for api in first["apis"]))
             self.assertEqual(first["excluded_targets"][0]["target_name"], "optional")

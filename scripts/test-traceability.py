@@ -44,6 +44,7 @@ class CompilerReportTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["coverage"]["bodies"], 6)
         self.assertEqual(len(first["calls"]), 1)
+        self.assertEqual(first["calls"][0]["origins"], trace.sorted_records([normal["unit"], self.shard["unit"]]))
         self.assertEqual(first["tests"][0]["targets"], ["sample/api"])
         self.assertEqual(len(first["units"]), 2)
 
@@ -107,7 +108,23 @@ class CompilerReportTests(unittest.TestCase):
 
     def test_unresolved_calls_remain_visible(self):
         self.shard["unresolved"] = [{"caller": "sample/caller", "path": "src/lib.rs", "line": 2, "reason": "function pointer target unknown"}]
-        self.assertEqual(self.merge()["unresolved"], self.shard["unresolved"])
+        self.assertEqual(self.merge()["unresolved"], [{**self.shard["unresolved"][0], "origins": [self.shard["unit"]]}])
+
+    def test_call_reference_and_unresolved_origins_preserve_only_observed_units(self):
+        self.shard["references"] = deepcopy(self.shard["calls"])
+        self.shard["unresolved"] = [{"caller": "sample/caller", "path": "src/lib.rs", "line": 2, "reason": "function pointer target unknown"}]
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["tests"] = []
+        normal["calls"] = []
+        for category in ("references", "unresolved"):
+            normal[category] += deepcopy(normal[category])
+        first = self.merge(self.shard, normal)
+        self.assertEqual(first, self.merge(normal, self.shard, normal))
+        self.assertEqual(first["calls"][0]["origins"], [self.shard["unit"]])
+        for category in ("references", "unresolved"):
+            self.assertEqual(len(first[category]), 1)
+            self.assertEqual(first[category][0]["origins"], trace.sorted_records([normal["unit"], self.shard["unit"]]))
 
     def test_function_references_remain_separate_from_calls_and_validate_api_ids(self):
         self.shard["references"] = self.shard["calls"]
@@ -149,6 +166,7 @@ class CompilerReportTests(unittest.TestCase):
         metadata = {"workspace_members": ["sample-id"], "packages": [{"id": "sample-id", "name": "sample"}]}
         message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"}, "profile": {"test": True}, "executable": "/test-binary"}
         artifacts = trace.cargo_artifacts(json.dumps(message), metadata)
+        self.assertEqual(artifacts, trace.cargo_artifacts(json.dumps(message) + "\n" + json.dumps(message), metadata))
         bundle = self.merge()
         trace.reconcile_units(bundle, artifacts)
         missing = {**artifacts[0], "is_test": False}

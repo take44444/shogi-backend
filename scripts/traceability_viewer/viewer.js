@@ -3,6 +3,9 @@
   const snapshot = JSON.parse(document.getElementById('traceability-data').textContent);
   const data = snapshot.bundle;
   const apiById = new Map(data.apis.map(api => [api.id, api]));
+  const productionCall = call => call.origins.some(unit => !unit.is_test && ['lib', 'bin'].includes(unit.target_kind));
+  const productionCalls = data.calls.filter(productionCall);
+  const originLabel = fact => fact.origins.map(unit => `${unit.package} ${unit.target_kind} ${unit.target_name} (${unit.is_test ? 'test' : 'normal'})`).join(', ');
   const byId = id => document.getElementById(id);
   const node = (tag, value, className) => {
     const element = document.createElement(tag);
@@ -85,8 +88,6 @@
     byId('selection-title').textContent = apiLabel(api.id);
     const detail = byId('selection-detail');
     detail.replaceChildren(node('p', api.kind), sourceButton(api));
-    const incoming = data.calls.filter(call => call.callee === api.id);
-    const outgoing = data.calls.filter(call => call.caller === api.id);
     const tests = data.tests.filter(test => test.targets.includes(api.id));
     detail.append(apiGraph(api, tests));
     detail.append(node('h3', `Explicit test targets (${tests.length})`));
@@ -96,21 +97,24 @@
       detail.append(row);
     }
     if (!tests.length) empty(detail, 'No test declares this API as a target.');
-    for (const [label, calls, field] of [['Callers', incoming, 'caller'], ['Calls', outgoing, 'callee']]) {
-      detail.append(node('h3', `${label} (${calls.length})`));
-      for (const call of calls) {
-        const row = node('div', undefined, 'call-row');
-        row.append(action(apiLabel(call[field]), () => showApi(apiById.get(call[field]))),
-          node('span', call.dispatch, 'tag'), sourceButton(call));
-        detail.append(row);
+    for (const [scope, records] of [['Production', productionCalls], ['Other compilation contexts', data.calls.filter(call => !productionCall(call))]]) {
+      for (const [label, field, direction] of [['callers', 'caller', 'callee'], ['calls', 'callee', 'caller']]) {
+        const calls = records.filter(call => call[direction] === api.id);
+        detail.append(node('h3', `${scope} ${label} (${calls.length})`));
+        for (const call of calls) {
+          const row = node('div', undefined, 'call-row');
+          row.append(action(apiLabel(call[field]), () => showApi(apiById.get(call[field]))),
+            node('span', call.dispatch, 'tag'), sourceButton(call), node('div', originLabel(call), 'meta'));
+          detail.append(row);
+        }
+        if (!calls.length) empty(detail, 'No workspace calls recorded in this scope.');
       }
-      if (!calls.length) empty(detail, 'No workspace calls recorded.');
     }
     const references = (data.references || []).filter(reference => reference.callee === api.id);
     detail.append(node('h3', `Function references (${references.length})`));
     for (const reference of references) {
       const row = node('div', undefined, 'call-row');
-      row.append(action(apiLabel(reference.caller), () => showApi(apiById.get(reference.caller))), sourceButton(reference));
+      row.append(action(apiLabel(reference.caller), () => showApi(apiById.get(reference.caller))), sourceButton(reference), node('div', originLabel(reference), 'meta'));
       detail.append(row);
     }
   }
@@ -134,7 +138,7 @@
     defs.append(marker); svg.append(defs);
     const positions = new Map(data.components.map((component, index) => [component.id, {x: 30 + (index % columns) * 270, y: 25 + Math.floor(index / columns) * 105}]));
     const edges = new Map();
-    for (const call of data.calls) {
+    for (const call of productionCalls) {
       const caller = apiById.get(call.caller).package;
       const callee = apiById.get(call.callee).package;
       if (caller === callee) continue;
@@ -160,7 +164,7 @@
       group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
       svg.append(group);
     }
-    byId('graph-note').textContent = `${edges.size} component call directions. Same-component calls remain visible in API details. Dynamic calls point to the declared trait interface.`;
+    byId('graph-note').textContent = `${edges.size} production component call directions. Only calls observed in normal library or binary units create arrows. All compilation contexts remain visible in API details. Dynamic calls point to the declared trait interface.`;
   }
   function render() {
     const query = byId('search').value.trim().toLowerCase();
@@ -201,17 +205,18 @@
     } else empty(results, 'Enter text to search the captured Rust source.');
     renderGraph();
   }
-  byId('summary').textContent = `${data.components.length} components · ${data.apis.length} APIs · ${data.calls.length} workspace calls · ${data.tests.length} tests (${data.tests.filter(test => test.targets.length).length} targeted)`;
+  byId('summary').textContent = `${data.components.length} components · ${data.apis.length} APIs · ${productionCalls.length} production calls · ${data.calls.length} total workspace calls · ${data.tests.length} tests (${data.tests.filter(test => test.targets.length).length} targeted)`;
   byId('scope').textContent = data.configuration.scope;
   for (const component of data.components) {
     const option = node('option', component.id); option.value = component.id; byId('component').append(option);
   }
   byId('unresolved-title').textContent = `Unresolved calls (${data.unresolved.length})`;
   for (const item of data.unresolved) {
-    const row = node('div', undefined, 'call-row'); row.append(node('div', `${apiLabel(item.caller)} · ${item.reason}`), sourceButton(item)); byId('unresolved').append(row);
+    const row = node('div', undefined, 'call-row'); row.append(node('div', `${apiLabel(item.caller)} · ${item.reason}`), sourceButton(item), node('div', originLabel(item), 'meta')); byId('unresolved').append(row);
   }
   if (!data.unresolved.length) empty(byId('unresolved'), 'No unresolved workspace calls recorded.');
-  byId('configuration').append(node('p', `${data.configuration.toolchain} · cargo ${data.configuration.cargo}`), node('p', `Compiler accounting: ${JSON.stringify(data.coverage)}`));
+  byId('configuration').append(node('p', data.configuration.toolchain), node('p', `Compiler accounting: ${JSON.stringify(data.coverage)}`));
+  for (const command of data.configuration.cargo) byId('configuration').append(node('div', `cargo ${command}`, 'meta'));
   for (const unit of data.units) byId('configuration').append(node('div', `${unit.package} · ${unit.target_kind} ${unit.target_name} · ${unit.is_test ? 'test' : 'normal'} · ${unit.source}`, 'meta'));
   for (const target of data.excluded_targets) byId('configuration').append(node('div', `Excluded: ${target.package} · ${target.target_kind} ${target.target_name} · ${target.reason} · required features: ${target.required_features.join(', ') || 'none'}`, 'meta'));
   byId('search').addEventListener('input', render);
