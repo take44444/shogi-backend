@@ -120,7 +120,7 @@ mod tests {
             files = {
                 "Cargo.toml": '[workspace]\nmembers=["a", "b"]\nresolver="3"\n',
                 "a/Cargo.toml": '[package]\nname="a"\nversion="0.1.0"\nedition="2024"\n[features]\nx=[]\n[dependencies]\nb={path="../b"}\n',
-                "a/src/lib.rs": '#[cfg(feature="x")] pub fn feature_only() { b::plain(); }\npub fn plain() {}\n',
+                "a/src/lib.rs": '#[cfg(feature="x")] pub fn feature_only() { b::plain(); }\npub fn plain() {}\n#[cfg(all(test, feature="x"))] mod tests { #[test] fn workspace_feature() { assert!(std::path::Path::new("src/lib.rs").is_file()); } }\n',
                 "b/Cargo.toml": '[package]\nname="b"\nversion="0.1.0"\nedition="2024"\n[dev-dependencies]\na={path="../a",features=["x"]}\n',
                 "b/src/lib.rs": 'pub fn plain() {}\n#[cfg(test)] mod tests { #[test] fn check() { a::feature_only(); } }\n',
             }
@@ -149,7 +149,7 @@ mod tests {
                           and unit["target_kind"] in ("lib", "bin") for unit in call["origins"])]
             self.assertFalse(any(apis[call["caller"]]["package"] == "a" and apis[call["callee"]]["package"] == "b"
                                  for call in production), "a dev-activated feature must not create a production dependency")
-            self.assertEqual(len(first["tests"]), 1)
+            self.assertEqual(len(first["tests"]), 2)
             trace.run_tests(first["tests"], root, first["configuration"]["toolchain"])
 
 
