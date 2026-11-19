@@ -33,15 +33,35 @@ static CAPTURE: OnceLock<Mutex<Capture>> = OnceLock::new();
 
 #[derive(Default)]
 struct Capture {
-    apis: BTreeMap<String, Api>,
+    apis: BTreeMap<String, (DefId, Api)>,
     calls: Vec<Call>,
     references: Vec<Call>,
     unresolved: Vec<Unresolved>,
     coverage: Coverage,
 }
 impl Capture {
+    fn insert_api(&mut self, definition: DefId, api: Api) {
+        if let Some((previous_definition, previous)) = self.apis.get(&api.id) {
+            assert!(
+                *previous_definition == definition
+                    && previous.package == api.package
+                    && previous.name == api.name
+                    && previous.kind == api.kind
+                    && previous.path == api.path
+                    && previous.line == api.line,
+                "compiler API identity collision for {} between {} ({previous_definition:?}) and {} ({definition:?}); fix semantic definition identity before capture",
+                api.id,
+                previous.name,
+                api.name,
+            );
+        } else {
+            self.apis.insert(api.id.clone(), (definition, api));
+        }
+    }
     fn merge(&mut self, other: Self) {
-        self.apis.extend(other.apis);
+        for (definition, api) in other.apis.into_values() {
+            self.insert_api(definition, api);
+        }
         self.calls.extend(other.calls);
         self.references.extend(other.references);
         self.unresolved.extend(other.unresolved);
@@ -247,7 +267,7 @@ impl Callbacks for Collector {
             if tcx.is_constructor(definition.to_def_id()) {
                 // Constructor MIR is synthesized without a type-checkable source body.
                 if let Some(api) = api(tcx, definition.to_def_id()) {
-                    reference_capture.apis.insert(api.id.clone(), api);
+                    reference_capture.insert_api(definition.to_def_id(), api);
                 }
             } else {
                 tcx.ensure_done().mir_built(definition);
@@ -262,7 +282,7 @@ impl Callbacks for Collector {
             ),
             version: 3,
             unit,
-            apis: capture.apis.into_values().collect(),
+            apis: capture.apis.into_values().map(|(_, api)| api).collect(),
             calls: capture.calls,
             references: capture.references,
             tests: tests.into_values().collect(),
@@ -319,7 +339,7 @@ fn capture_mir<'tcx>(tcx: TyCtxt<'tcx>, definition: LocalDefId) -> &'tcx Steal<m
         };
         collector.capture.coverage.bodies = 1;
         if let Some(api) = api(tcx, definition.to_def_id()) {
-            collector.capture.apis.insert(api.id.clone(), api);
+            collector.capture.insert_api(definition.to_def_id(), api);
         }
         collector.visit_body(&body);
         CAPTURE
@@ -514,6 +534,7 @@ fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
             tcx.type_of(implementation)
                 .instantiate_identity()
                 .skip_norm_wip(),
+            false,
         );
         return match item.container {
             ty::AssocContainer::TraitImpl(_) => {
@@ -523,7 +544,12 @@ fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
                     .skip_norm_wip();
                 format!(
                     "<{receiver} as {}>::{}",
-                    canonical_name(tcx, trait_ref.def_id),
+                    canonical_generic_path(
+                        tcx,
+                        trait_ref.def_id,
+                        &trait_ref.args.as_slice()[1..],
+                        false
+                    ),
                     item.name()
                 )
             }
@@ -541,30 +567,119 @@ fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
         name
     }
 }
-fn canonical_type(tcx: TyCtxt<'_>, ty: ty::Ty<'_>) -> String {
+fn canonical_generic_path(
+    tcx: TyCtxt<'_>,
+    definition: DefId,
+    arguments: &[ty::GenericArg<'_>],
+    identity: bool,
+) -> String {
+    let name = canonical_name(tcx, definition);
+    let name = if identity {
+        let span = tcx.def_span(definition);
+        let location = tcx.sess.source_map().lookup_char_pos(span.lo());
+        format!(
+            "{name}[{}]@{}:{}:{}",
+            target_identity(tcx, definition)
+                .unwrap_or_else(|| tcx.crate_name(definition.krate).to_string()),
+            source_location(tcx, span).path,
+            location.line,
+            location.col.0,
+        )
+    } else {
+        name
+    };
+    if arguments.is_empty() {
+        return name;
+    }
+    let arguments = arguments
+        .iter()
+        .map(|argument| match argument.kind() {
+            ty::GenericArgKind::Type(ty) => canonical_type(tcx, ty, identity),
+            ty::GenericArgKind::Lifetime(region) => region.to_string(),
+            ty::GenericArgKind::Const(value) => canonical_const(tcx, value, identity),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{name}<{arguments}>")
+}
+fn canonical_const(tcx: TyCtxt<'_>, value: ty::Const<'_>, identity: bool) -> String {
+    match value.kind() {
+        ty::ConstKind::Alias(_, ty::AliasConst { kind, args, .. }) => match kind {
+            ty::AliasConstKind::Projection { def_id }
+            | ty::AliasConstKind::InherentSelf { def_id }
+            | ty::AliasConstKind::InherentImpl { def_id }
+            | ty::AliasConstKind::Free { def_id }
+            | ty::AliasConstKind::Anon { def_id } => {
+                canonical_generic_path(tcx, def_id, args.as_slice(), identity)
+            }
+        },
+        _ => value.to_string(),
+    }
+}
+fn canonical_type(tcx: TyCtxt<'_>, ty: ty::Ty<'_>, identity: bool) -> String {
     match *ty.kind() {
-        ty::Adt(adt, _) => canonical_name(tcx, adt.did()),
+        ty::Adt(adt, arguments) => {
+            canonical_generic_path(tcx, adt.did(), arguments.as_slice(), identity)
+        }
+        ty::Array(inner, length) => format!(
+            "[{}; {}]",
+            canonical_type(tcx, inner, identity),
+            canonical_const(tcx, length, identity),
+        ),
         ty::Ref(_, inner, mutability) => format!(
             "&{}{}",
             if mutability.is_mut() { "mut " } else { "" },
-            canonical_type(tcx, inner)
+            canonical_type(tcx, inner, identity)
         ),
         ty::RawPtr(inner, mutability) => format!(
             "*{} {}",
             if mutability.is_mut() { "mut" } else { "const" },
-            canonical_type(tcx, inner)
+            canonical_type(tcx, inner, identity)
         ),
-        ty::Slice(inner) => format!("[{}]", canonical_type(tcx, inner)),
+        ty::Slice(inner) => format!("[{}]", canonical_type(tcx, inner, identity)),
         ty::Tuple(elements) => format!(
             "({})",
             elements
                 .iter()
-                .map(|inner| canonical_type(tcx, inner))
+                .map(|inner| canonical_type(tcx, inner, identity))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
         _ => ty.to_string(),
     }
+}
+fn implementation_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
+    let mut contexts = Vec::new();
+    let mut parent = tcx.opt_parent(definition);
+    while let Some(implementation) = parent {
+        if matches!(tcx.def_kind(implementation), DefKind::Impl { .. }) {
+            let receiver = canonical_type(
+                tcx,
+                tcx.type_of(implementation)
+                    .instantiate_identity()
+                    .skip_norm_wip(),
+                true,
+            );
+            let trait_ref = tcx.impl_opt_trait_ref(implementation).map(|reference| {
+                let reference = reference.instantiate_identity().skip_norm_wip();
+                canonical_generic_path(tcx, reference.def_id, &reference.args.as_slice()[1..], true)
+            });
+            let span = tcx.def_span(implementation);
+            let location = tcx.sess.source_map().lookup_char_pos(span.lo());
+            contexts.push(format!(
+                "<{receiver}{}>@{}:{}:{}",
+                trait_ref
+                    .map(|name| format!(" as {name}"))
+                    .unwrap_or_default(),
+                source_location(tcx, span).path,
+                location.line,
+                location.col.0,
+            ));
+        }
+        parent = tcx.opt_parent(implementation);
+    }
+    contexts.reverse();
+    contexts.join("/")
 }
 fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
     let span = tcx.def_span(definition);
@@ -612,10 +727,15 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
         .map(|part| format!("{:?}#{}", part.data, part.disambiguator))
         .collect::<Vec<_>>()
         .join("/");
-    let id = format!(
+    let mut id = format!(
         "{}[{target}]::{named_path}@{origin}:{}:{}:{kind}:{anonymous}",
-        package.name, location.line, location.col.0
+        package.name, location.line, location.col.0,
     );
+    let implementation = implementation_identity(tcx, definition);
+    if !implementation.is_empty() {
+        id.push(':');
+        id.push_str(&implementation);
+    }
     Some(Api {
         id,
         package: package.name.clone(),
@@ -639,6 +759,8 @@ fn edge(
     capture: &mut Capture,
     reference: bool,
 ) -> bool {
+    let caller_definition = caller;
+    let callee_definition = callee;
     let Some(caller) = api(tcx, caller) else {
         return false;
     };
@@ -657,8 +779,8 @@ fn edge(
         dispatch: dispatch.into(),
         expansion,
     };
-    capture.apis.insert(caller.id.clone(), caller);
-    capture.apis.insert(callee.id.clone(), callee);
+    capture.insert_api(caller_definition, caller);
+    capture.insert_api(callee_definition, callee);
     if reference {
         capture.references.push(value);
     } else {
@@ -852,7 +974,7 @@ impl<'tcx> Visitor<'tcx> for References<'_, 'tcx> {
                     .unwrap_or(definition);
                     if let Some(api) = api(self.tcx, resolved) {
                         self.targets.insert(api.id.clone());
-                        self.capture.apis.insert(api.id.clone(), api);
+                        self.capture.insert_api(resolved, api);
                     } else {
                         let location = source_location(self.tcx, expression.span.source_callsite());
                         self.invalid_targets.push(format!(
