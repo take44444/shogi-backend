@@ -288,6 +288,12 @@ class CompilerReportTests(unittest.TestCase):
                              (["/captured-test-binary", "check", "--exact", "--format", "pretty", "--color", "never"],
                               self.root / "sample"))
             self.assertEqual(execute.call_args.kwargs["env"], {"CARGO_PKG_NAME": "sample"})
+        child = "running 1 test\ntest child ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n"
+        with patch.object(trace, "execute", return_value=child + output):
+            trace.run_tests([test], artifacts)
+        with patch.object(trace, "execute", return_value=child + failures[-1]):
+            with self.assertRaises(trace.InvalidTrace):
+                trace.run_tests([test], artifacts)
         with patch.object(trace, "execute") as execute:
             with self.assertRaisesRegex(trace.InvalidTrace, "compiled test artifact missing"):
                 trace.run_tests([test], {})

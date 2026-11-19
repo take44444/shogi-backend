@@ -454,7 +454,7 @@ def run_tests(tests, test_artifacts):
         args = [artifact["executable"], test["name"], "--exact", "--format", "pretty", "--color", "never"]
         output = execute(args, artifact["directory"], env=artifact["environment"])
         summary = re.findall(r"^test result: (.+)$", output, flags=re.MULTILINE)
-        require(len(summary) == 1 and re.fullmatch(r"ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9.]+s", summary[0]),
+        require(summary and re.fullmatch(r"ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9.]+s", summary[-1]),
                 f"expected one passed exact test: {test_key(test)}\n{output}")
         require(re.search(r"^test " + re.escape(test["name"]) + r" \.\.\. ok$", output, flags=re.MULTILINE),
                 f"exact test identity not confirmed: {test_key(test)}\n{output}")

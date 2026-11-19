@@ -38,6 +38,8 @@ mod tests {
     unsafe extern "C" { fn runtime_value() -> i32; }
     #[test]
     fn runtime_environment() {
+        assert!(std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["tests::subprocess_probe", "--exact"]).status().unwrap().success());
         assert_eq!(unsafe { runtime_value() }, 7);
         assert!(std::path::Path::new("src/lib.rs").is_file());
         for (name, expected) in [
@@ -63,6 +65,8 @@ mod tests {
             println!("RUNTIME_SAFE {key}={}", std::env::var(key).unwrap_or_default());
         }
     }
+    #[test]
+    fn subprocess_probe() {}
 }''',
                 "b/Cargo.toml": '[package]\nname="b"\nversion="0.1.0"\nedition="2024"\n[dependencies]\na={path="../a",features=["x"]}\n',
                 "b/src/lib.rs": 'pub fn api() { a::api() }\n',
@@ -78,7 +82,8 @@ mod tests {
             output = trace.execute(cargo + command, root)
             artifacts = trace.cargo_artifacts([("tests", output)], metadata)
             test = {"package": "a", "target_kind": "lib", "target_name": "a", "name": "tests::runtime_environment", "targets": []}
-            bundle = {"tests": [test], "components": [{"id": "a", "path": "a"}, {"id": "b", "path": "b"}]}
+            bundle = {"tests": [test, {**test, "name": "tests::subprocess_probe"}],
+                      "components": [{"id": "a", "path": "a"}, {"id": "b", "path": "b"}]}
             before = trace.canonical(bundle)
             captures = root / "captures"
             captures.mkdir()
