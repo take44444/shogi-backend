@@ -16,7 +16,7 @@ use rustc_middle::{
 };
 use rustc_span::{FileName, Span};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     env, fs,
     path::PathBuf,
     process::Command,
@@ -30,6 +30,43 @@ static MIR_PROVIDER: OnceLock<MirProvider> = OnceLock::new();
 static WORKSPACE: OnceLock<Workspace> = OnceLock::new();
 static GENERATED_SOURCES: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
 static CAPTURE: OnceLock<Mutex<Capture>> = OnceLock::new();
+static DEFINITION_SIBLINGS: OnceLock<Mutex<DefinitionSiblings>> = OnceLock::new();
+
+type SiblingKey = (
+    hir::def_id::CrateNum,
+    Option<hir::def_id::DefIndex>,
+    hir::definitions::DefPathData,
+);
+
+#[derive(Default)]
+struct DefinitionSiblings {
+    indexed: BTreeMap<hir::def_id::CrateNum, usize>,
+    groups: HashMap<SiblingKey, Vec<DefId>>,
+}
+impl DefinitionSiblings {
+    fn get(&mut self, tcx: TyCtxt<'_>, definition: DefId) -> Vec<DefId> {
+        let count = if definition.is_local() {
+            tcx.definitions_untracked().num_definitions()
+        } else {
+            tcx.num_extern_def_ids(definition.krate)
+        };
+        let first = self.indexed.get(&definition.krate).copied().unwrap_or(0);
+        for index in first..count {
+            let sibling = DefId {
+                krate: definition.krate,
+                index: hir::def_id::DefIndex::from_usize(index),
+            };
+            let key = tcx.def_key(sibling);
+            self.groups
+                .entry((definition.krate, key.parent, key.disambiguated_data.data))
+                .or_default()
+                .push(sibling);
+        }
+        self.indexed.insert(definition.krate, count);
+        let key = tcx.def_key(definition);
+        self.groups[&(definition.krate, key.parent, key.disambiguated_data.data)].clone()
+    }
+}
 
 #[derive(Default)]
 struct Capture {
@@ -434,7 +471,16 @@ fn source_path(tcx: TyCtxt<'_>, span: Span) -> Option<PathBuf> {
 fn source_location(tcx: TyCtxt<'_>, span: Span) -> Location {
     let location = tcx.sess.source_map().lookup_char_pos(span.lo());
     let workspace = WORKSPACE.get().unwrap();
-    let path = source_path(tcx, span)
+    let source = source_path(tcx, span);
+    let callsite = span.source_callsite();
+    if callsite != span
+        && source
+            .as_ref()
+            .is_some_and(|path| workspace.package_at(path).is_none())
+    {
+        return source_location(tcx, callsite);
+    }
+    let path = source
         .map(|path| {
             if workspace.package_at(&path).is_some() {
                 return workspace.relative(&path);
@@ -681,8 +727,28 @@ fn canonical_type(tcx: TyCtxt<'_>, ty: ty::Ty<'_>, identity: bool) -> String {
 fn definition_origin(tcx: TyCtxt<'_>, definition: DefId) -> String {
     let span = tcx.def_span(definition);
     let location = tcx.sess.source_map().lookup_char_pos(span.lo());
-    let source = source_location(tcx, span).path;
-    format!("{source}:{}:{}", location.line, location.col.0)
+    let root = DefId {
+        krate: location.file.cnum,
+        index: CRATE_DEF_INDEX,
+    };
+    let workspace_source = source_path(tcx, span)
+        .is_some_and(|path| WORKSPACE.get().unwrap().package_at(&path).is_some());
+    let source = if workspace_source || owner_package(tcx, root).is_some() {
+        source_location(tcx, span).path
+    } else {
+        format!(
+            "@compiler-source/{}/{:x}/{}",
+            tcx.crate_name(location.file.cnum),
+            tcx.stable_crate_id(location.file.cnum),
+            location.file.src_hash,
+        )
+    };
+    format!(
+        "{source}:{}:{}:{}",
+        location.line,
+        location.col.0,
+        span.hi().0 - span.lo().0,
+    )
 }
 fn implementation_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
     let receiver = canonical_type(
@@ -712,7 +778,12 @@ fn definition_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
         if part.data == hir::definitions::DefPathData::Impl {
             path.push(implementation_identity(tcx, current));
         } else {
-            path.push(format!("{:?}#{}", part.data, part.disambiguator));
+            path.push(format!(
+                "{:?}#{}@{}",
+                part.data,
+                origin_disambiguator(tcx, current),
+                definition_origin(tcx, current),
+            ));
         }
         parent = tcx.opt_parent(current);
     }
@@ -725,6 +796,30 @@ fn definition_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
         path.join("/"),
         definition_origin(tcx, definition),
     )
+}
+fn origin_disambiguator(tcx: TyCtxt<'_>, definition: DefId) -> usize {
+    let key = tcx.def_key(definition);
+    if key.disambiguated_data.disambiguator == 0 {
+        return 0;
+    }
+    let span = tcx.def_span(definition);
+    let siblings = DEFINITION_SIBLINGS
+        .get_or_init(|| Mutex::new(DefinitionSiblings::default()))
+        .lock()
+        .unwrap()
+        .get(tcx, definition);
+    // Cfg can remove earlier siblings. Only indistinguishable source origins need numbering.
+    siblings
+        .into_iter()
+        .filter(|&sibling| {
+            let other = tcx.def_key(sibling);
+            other.disambiguated_data.disambiguator < key.disambiguated_data.disambiguator
+        })
+        .filter(|&sibling| {
+            let other = tcx.def_span(sibling);
+            other.lo() == span.lo() && other.hi() == span.hi()
+        })
+        .count()
 }
 fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
     let span = tcx.def_span(definition);
