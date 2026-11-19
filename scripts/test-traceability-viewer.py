@@ -21,7 +21,7 @@ class ViewerTests(unittest.TestCase):
         self.api = {"id": "sample/api", "package": "sample", "name": "api", "kind": "function", "path": "src/lib.rs", "line": 1}
         self.bundle = {"version": 3, "components": [{"id": "sample", "package": "sample", "path": "."}],
                        "apis": [self.api], "calls": [], "tests": [], "unresolved": [], "coverage": {},
-                       "units": [{"package": "sample", "target_kind": "lib", "target_name": "sample", "is_test": False, "source": "src/lib.rs"}],
+                       "units": [{"package": "sample", "target_kind": "lib", "target_name": "sample", "is_test": False, "features": [], "purposes": ["production"], "source": "src/lib.rs"}],
                        "excluded_targets": [], "configuration": {"scope": "Default features on current host", "toolchain": "nightly", "cargo": ["build", "test"]}}
 
     def git(self, *args):

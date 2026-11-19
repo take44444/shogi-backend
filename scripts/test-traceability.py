@@ -25,7 +25,7 @@ class CompilerReportTests(unittest.TestCase):
         self.caller = {**self.api, "id": "sample/caller", "name": "caller", "line": 2}
         self.shard = {
             "version": 3,
-            "unit": {"package": "sample", "crate_name": "sample", "target_kind": "lib", "target_name": "sample", "is_test": True, "source": "src/lib.rs"},
+            "unit": {"package": "sample", "crate_name": "sample", "target_kind": "lib", "target_name": "sample", "is_test": True, "features": [], "purposes": ["tests"], "source": "src/lib.rs"},
             "apis": [self.api, self.caller],
             "calls": [{"caller": "sample/caller", "caller_package": "sample", "callee": "sample/api", "path": "src/lib.rs", "line": 2, "dispatch": "static"}],
             "tests": [{"package": "sample", "target_kind": "lib", "target_name": "sample", "name": "check", "path": "src/lib.rs", "line": 3, "targets": ["sample/api"]}],
@@ -164,14 +164,54 @@ class CompilerReportTests(unittest.TestCase):
 
     def test_cargo_artifacts_reconcile_normal_and_test_units(self):
         metadata = {"workspace_members": ["sample-id"], "packages": [{"id": "sample-id", "name": "sample"}]}
-        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"}, "profile": {"test": True}, "executable": "/test-binary"}
-        artifacts = trace.cargo_artifacts(json.dumps(message), metadata)
-        self.assertEqual(artifacts, trace.cargo_artifacts(json.dumps(message) + "\n" + json.dumps(message), metadata))
+        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"}, "profile": {"test": True}, "features": [], "executable": "/test-binary"}
+        artifacts = trace.cargo_artifacts([("tests", json.dumps(message))], metadata)
+        self.assertEqual(artifacts, trace.cargo_artifacts([("tests", json.dumps(message) + "\n" + json.dumps(message))], metadata))
         bundle = self.merge()
         trace.reconcile_units(bundle, artifacts)
         missing = {**artifacts[0], "is_test": False}
         with self.assertRaisesRegex(trace.InvalidTrace, "missing shards"):
             trace.reconcile_units(bundle, artifacts + [missing])
+
+    def test_features_and_cargo_phases_preserve_distinct_normal_unit_origins(self):
+        metadata = {"workspace_members": ["sample-id"], "packages": [{"id": "sample-id", "name": "sample"}]}
+        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"},
+                   "profile": {"test": False}, "features": [], "executable": None}
+        feature_message = {**message, "features": ["extra"]}
+        artifacts = trace.cargo_artifacts([("production", json.dumps(message)),
+                                           ("tests", json.dumps(message) + "\n" + json.dumps(feature_message))], metadata)
+        self.assertEqual({tuple(artifact["features"]): artifact["purposes"] for artifact in artifacts},
+                         {(): ["production", "tests"], ("extra",): ["tests"]})
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["unit"].pop("purposes")
+        normal["tests"] = []
+        feature = deepcopy(normal)
+        feature["unit"]["features"] = ["extra"]
+        normal["calls"] = []
+        shards = trace.compilation_purposes([normal, feature], artifacts)
+        bundle = self.merge(*shards)
+        trace.reconcile_units(bundle, artifacts)
+        self.assertEqual(len(bundle["units"]), 2)
+        self.assertEqual(bundle["calls"][0]["origins"][0]["purposes"], ["tests"])
+        self.assertFalse(bundle["calls"][0]["origins"][0]["is_test"])
+        self.assertEqual(bundle, self.merge(*reversed(shards)))
+
+    def test_features_and_purposes_are_required_canonical_unit_fields(self):
+        for field, value in (("features", None), ("features", ["extra", "extra"]),
+                             ("features", ["z", "a"]), ("features", [True]),
+                             ("purposes", []), ("purposes", ["unknown"]),
+                             ("purposes", ["tests", "tests"])):
+            with self.subTest(field=field, value=value):
+                shard = deepcopy(self.shard)
+                shard["unit"][field] = value
+                with self.assertRaises(trace.InvalidTrace):
+                    self.merge(shard)
+        for field in ("features", "purposes"):
+            shard = deepcopy(self.shard)
+            del shard["unit"][field]
+            with self.assertRaisesRegex(trace.InvalidTrace, "expected object fields"):
+                self.merge(shard)
 
     def test_compiled_inventory_must_match_every_compiler_test(self):
         artifact = {**self.shard["unit"], "executable": "/test-binary"}

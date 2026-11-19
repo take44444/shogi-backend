@@ -74,7 +74,7 @@ def test_key(value):
 
 
 def unit_key(value):
-    return (*target_key(value), value["is_test"])
+    return (*target_key(value), value["is_test"], tuple(value["features"]))
 
 
 def canonical(value):
@@ -121,9 +121,16 @@ def merge_shards(root, shards, components):
             continue
         seen.add(signature)
         unit = shard["unit"]
-        fields(unit, ("package", "crate_name", "target_kind", "target_name", "is_test", "source"))
+        fields(unit, ("package", "crate_name", "target_kind", "target_name", "is_test", "features", "purposes", "source"))
         require(unit["package"] in packages, f"unknown compiler unit package: {unit['package']}")
         require(type(unit["is_test"]) is bool, "unit is_test must be boolean")
+        require(isinstance(unit["features"], list) and all(isinstance(feature, str) and feature for feature in unit["features"]),
+                "unit features must be an array of nonempty names")
+        require(unit["features"] == sorted(set(unit["features"])), "unit features must be sorted and unique")
+        require(isinstance(unit["purposes"], list) and all(purpose in ("production", "tests") for purpose in unit["purposes"]),
+                "unit purposes must identify Cargo compilation phases")
+        require(unit["purposes"] == sorted(set(unit["purposes"])), "unit purposes must be sorted and unique")
+        require(unit["purposes"] or unit["target_kind"] == "custom-build", "compiler unit has no Cargo compilation purpose")
         for key in ("crate_name", "target_kind", "target_name"):
             text(unit[key])
         repository_file(root, unit["source"])
@@ -205,28 +212,45 @@ def cargo_target_kind(target):
     return "lib" if any(kind in ("lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro") for kind in kinds) else kinds[0]
 
 
-def cargo_artifacts(output, metadata):
+def cargo_artifacts(outputs, metadata):
     packages = {package["id"]: package["name"] for package in metadata["packages"]
                 if package["id"] in metadata["workspace_members"]}
     artifacts = {}
-    for line in output.splitlines():
-        if not line.strip():
-            continue
-        message = json.loads(line, object_pairs_hook=no_duplicate_keys)
-        if message.get("reason") != "compiler-artifact" or message["package_id"] not in packages:
-            continue
-        target = message["target"]
-        kind = cargo_target_kind(target)
-        if kind == "custom-build":
-            continue
-        artifact = {"package": packages[message["package_id"]], "target_kind": kind,
-                    "target_name": target["name"], "is_test": message["profile"]["test"],
-                    "executable": message.get("executable")}
-        key = unit_key(artifact)
-        require(key not in artifacts or artifacts[key] == artifact, f"conflicting Cargo artifact: {key}")
-        artifacts[key] = artifact
+    for purpose, output in outputs:
+        require(purpose in ("production", "tests"), f"unknown Cargo compilation purpose: {purpose}")
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+            message = json.loads(line, object_pairs_hook=no_duplicate_keys)
+            if message.get("reason") != "compiler-artifact" or message["package_id"] not in packages:
+                continue
+            target = message["target"]
+            kind = cargo_target_kind(target)
+            if kind == "custom-build":
+                continue
+            artifact = {"package": packages[message["package_id"]], "target_kind": kind,
+                        "target_name": target["name"], "is_test": message["profile"]["test"],
+                        "features": sorted(message["features"]), "executable": message.get("executable")}
+            key = unit_key(artifact)
+            if key in artifacts:
+                previous = {name: value for name, value in artifacts[key].items() if name != "purposes"}
+                require(previous == artifact, f"conflicting Cargo artifact: {key}")
+                artifacts[key]["purposes"] = sorted(set(artifacts[key]["purposes"]) | {purpose})
+            else:
+                artifacts[key] = {**artifact, "purposes": [purpose]}
     require(artifacts, "Cargo produced no workspace compilation artifacts")
     return sorted_records(artifacts.values())
+
+
+def compilation_purposes(shards, artifacts):
+    purposes = {unit_key(artifact): artifact["purposes"] for artifact in artifacts}
+    result = []
+    for shard in shards:
+        unit = shard["unit"]
+        key = unit_key(unit)
+        require(unit["target_kind"] == "custom-build" or key in purposes, f"compiler unit has no Cargo artifact: {key}")
+        result.append({**shard, "unit": {**unit, "purposes": purposes.get(key, [])}})
+    return result
 
 
 def reconcile_units(bundle, artifacts):
@@ -326,8 +350,9 @@ def load_traces(root):
                     ["test", "--workspace", "--all-targets", "--no-run", "--locked"]]
         outputs = [execute(cargo + command + ["--message-format=json", "--target-dir", analysis], root, env=environment)
                    for command in commands]
-        artifacts = cargo_artifacts("\n".join(outputs), metadata)
-        bundle = merge_shards(root, [read_json(path) for path in sorted(shards.glob("*.json"))], components)
+        artifacts = cargo_artifacts(zip(("production", "tests"), outputs), metadata)
+        captures = compilation_purposes([read_json(path) for path in sorted(shards.glob("*.json"))], artifacts)
+        bundle = merge_shards(root, captures, components)
         reconcile_units(bundle, artifacts)
         check_inventory(bundle, artifacts, root)
     bundle["excluded_targets"] = excluded_targets(metadata, artifacts)

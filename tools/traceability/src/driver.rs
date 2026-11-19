@@ -140,12 +140,27 @@ pub fn run() -> Result<(), String> {
             source.display()
         ));
     }
+    let mut features = BTreeSet::new();
+    for (index, argument) in arguments.iter().enumerate() {
+        let cfg = if argument == "--cfg" {
+            arguments.get(index + 1).map(String::as_str)
+        } else {
+            argument.strip_prefix("--cfg=")
+        };
+        if let Some(feature) = cfg.and_then(|cfg| cfg.strip_prefix("feature=")) {
+            features.insert(
+                serde_json::from_str::<String>(feature)
+                    .map_err(|error| format!("invalid compiler feature cfg {feature}: {error}"))?,
+            );
+        }
+    }
     let unit = Unit {
         package,
         crate_name,
         target_kind: target.kind.clone(),
         target_name: target.name.clone(),
         is_test: arguments.iter().any(|argument| argument == "--test"),
+        features: features.into_iter().collect(),
         source: workspace.relative(&source),
     };
     UNIT_TARGET

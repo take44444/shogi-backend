@@ -89,7 +89,7 @@ mod tests {
             self.assertTrue(dyn_calls)
             self.assertTrue(all(apis[call["callee"]]["kind"] == "trait-method" for call in dyn_calls))
             self.assertTrue(any(apis[call["caller"]]["package"] == "adapter" and apis[call["callee"]]["package"] == "api" for call in first["calls"]))
-            production = [call for call in first["calls"] if any(not origin["is_test"] and origin["target_kind"] in ("lib", "bin") for origin in call["origins"])]
+            production = [call for call in first["calls"] if any("production" in origin["purposes"] and not origin["is_test"] and origin["target_kind"] in ("lib", "bin") for origin in call["origins"])]
             directions = {(apis[call["caller"]]["package"], apis[call["callee"]]["package"]) for call in production}
             self.assertIn(("adapter", "api"), directions)
             self.assertNotIn(("api", "adapter"), directions)
@@ -110,6 +110,46 @@ mod tests {
             self.assertIn('id="traceability-data"', destination.read_text())
             if os.environ.get("TRACEABILITY_TEST_VIEWER"):
                 write_viewer(root, first, Path(os.environ["TRACEABILITY_TEST_VIEWER"]))
+            trace.run_tests(first["tests"], root, first["configuration"]["toolchain"])
+
+    def test_dev_dependency_features_do_not_create_production_edges(self):
+        with tempfile.TemporaryDirectory(prefix="compiler-trace-features-") as directory:
+            root = Path(directory)
+            (root / "tools").mkdir()
+            (root / "tools/traceability").symlink_to(TOOLS / "tools/traceability", target_is_directory=True)
+            files = {
+                "Cargo.toml": '[workspace]\nmembers=["a", "b"]\nresolver="3"\n',
+                "a/Cargo.toml": '[package]\nname="a"\nversion="0.1.0"\nedition="2024"\n[features]\nx=[]\n[dependencies]\nb={path="../b"}\n',
+                "a/src/lib.rs": '#[cfg(feature="x")] pub fn feature_only() { b::plain(); }\npub fn plain() {}\n',
+                "b/Cargo.toml": '[package]\nname="b"\nversion="0.1.0"\nedition="2024"\n[dev-dependencies]\na={path="../a",features=["x"]}\n',
+                "b/src/lib.rs": 'pub fn plain() {}\n#[cfg(test)] mod tests { #[test] fn check() { a::feature_only(); } }\n',
+            }
+            for path, content in files.items():
+                destination = root / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(content)
+            trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
+            first = trace.load_traces(root)
+            second = trace.load_traces(root)
+            self.assertEqual(first, second, "repeated capture must preserve feature and phase provenance")
+            normal_a = [unit for unit in first["units"] if unit["package"] == "a" and not unit["is_test"]]
+            self.assertEqual({tuple(unit["features"]): unit["purposes"] for unit in normal_a},
+                             {(): ["production"], ("x",): ["tests"]})
+            normal_b = [unit for unit in first["units"] if unit["package"] == "b" and not unit["is_test"]]
+            self.assertEqual(len(normal_b), 1)
+            self.assertEqual(normal_b[0]["purposes"], ["production", "tests"],
+                             "the normal library cached between Cargo phases must retain both purposes")
+            apis = {api["id"]: api for api in first["apis"]}
+            feature_calls = [call for call in first["calls"] if apis[call["caller"]]["name"] == "a::feature_only"]
+            self.assertTrue(feature_calls)
+            self.assertTrue(any(not unit["is_test"] for call in feature_calls for unit in call["origins"]))
+            self.assertTrue(all(unit["features"] == ["x"] and unit["purposes"] == ["tests"]
+                                for call in feature_calls for unit in call["origins"]))
+            production = [call for call in first["calls"] if any("production" in unit["purposes"] and not unit["is_test"]
+                          and unit["target_kind"] in ("lib", "bin") for unit in call["origins"])]
+            self.assertFalse(any(apis[call["caller"]]["package"] == "a" and apis[call["callee"]]["package"] == "b"
+                                 for call in production), "a dev-activated feature must not create a production dependency")
+            self.assertEqual(len(first["tests"]), 1)
             trace.run_tests(first["tests"], root, first["configuration"]["toolchain"])
 
 

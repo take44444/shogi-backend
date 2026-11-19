@@ -107,6 +107,7 @@ pub struct Unit {
     pub target_kind: String,
     pub target_name: String,
     pub is_test: bool,
+    pub features: Vec<String>,
     pub source: String,
 }
 #[derive(Clone, Serialize)]

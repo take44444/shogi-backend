@@ -3,9 +3,9 @@
   const snapshot = JSON.parse(document.getElementById('traceability-data').textContent);
   const data = snapshot.bundle;
   const apiById = new Map(data.apis.map(api => [api.id, api]));
-  const productionCall = call => call.origins.some(unit => !unit.is_test && ['lib', 'bin'].includes(unit.target_kind));
+  const productionCall = call => call.origins.some(unit => unit.purposes.includes('production') && !unit.is_test && ['lib', 'bin'].includes(unit.target_kind));
   const productionCalls = data.calls.filter(productionCall);
-  const originLabel = fact => fact.origins.map(unit => `${unit.package} ${unit.target_kind} ${unit.target_name} (${unit.is_test ? 'test' : 'normal'})`).join(', ');
+  const originLabel = fact => fact.origins.map(unit => `${unit.package} ${unit.target_kind} ${unit.target_name} (${unit.is_test ? 'test harness' : 'normal'}, features: ${unit.features.join(', ') || 'none'}, purposes: ${unit.purposes.join(', ') || 'build script'})`).join(', ');
   const byId = id => document.getElementById(id);
   const node = (tag, value, className) => {
     const element = document.createElement(tag);
@@ -164,7 +164,7 @@
       group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
       svg.append(group);
     }
-    byId('graph-note').textContent = `${edges.size} production component call directions. Only calls observed in normal library or binary units create arrows. All compilation contexts remain visible in API details. Dynamic calls point to the declared trait interface.`;
+    byId('graph-note').textContent = `${edges.size} production component call directions. Only calls observed during the production build in normal library or binary units create arrows. All compilation contexts remain visible in API details. Dynamic calls point to the declared trait interface.`;
   }
   function render() {
     const query = byId('search').value.trim().toLowerCase();
@@ -217,7 +217,7 @@
   if (!data.unresolved.length) empty(byId('unresolved'), 'No unresolved workspace calls recorded.');
   byId('configuration').append(node('p', data.configuration.toolchain), node('p', `Compiler accounting: ${JSON.stringify(data.coverage)}`));
   for (const command of data.configuration.cargo) byId('configuration').append(node('div', `cargo ${command}`, 'meta'));
-  for (const unit of data.units) byId('configuration').append(node('div', `${unit.package} · ${unit.target_kind} ${unit.target_name} · ${unit.is_test ? 'test' : 'normal'} · ${unit.source}`, 'meta'));
+  for (const unit of data.units) byId('configuration').append(node('div', `${unit.package} · ${unit.target_kind} ${unit.target_name} · ${unit.is_test ? 'test harness' : 'normal'} · features: ${unit.features.join(', ') || 'none'} · purposes: ${unit.purposes.join(', ') || 'build script'} · ${unit.source}`, 'meta'));
   for (const target of data.excluded_targets) byId('configuration').append(node('div', `Excluded: ${target.package} · ${target.target_kind} ${target.target_name} · ${target.reason} · required features: ${target.required_features.join(', ') || 'none'}`, 'meta'));
   byId('search').addEventListener('input', render);
   byId('component').addEventListener('change', render);
