@@ -73,8 +73,8 @@ mod tests {
             (root / "adapter/tests").mkdir()
             (root / "adapter/tests/optional.rs").write_text('compile_error!("disabled target must not compile");\n')
             trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
-            first = trace.load_traces(root)
-            second = trace.load_traces(root)
+            first, test_artifacts = trace.load_traces(root)
+            second, _ = trace.load_traces(root)
             self.assertEqual(first, second, "warm Cargo cache must produce the same fresh compiler snapshot")
             self.assertEqual(len(first["tests"]), 4)
             tests = {test["name"]: test for test in first["tests"]}
@@ -110,7 +110,7 @@ mod tests {
             self.assertIn('id="traceability-data"', destination.read_text())
             if os.environ.get("TRACEABILITY_TEST_VIEWER"):
                 write_viewer(root, first, Path(os.environ["TRACEABILITY_TEST_VIEWER"]))
-            trace.run_tests(first["tests"], root, first["configuration"]["toolchain"])
+            trace.run_tests(first["tests"], test_artifacts)
 
     def test_dev_dependency_features_do_not_create_production_edges(self):
         with tempfile.TemporaryDirectory(prefix="compiler-trace-features-") as directory:
@@ -129,8 +129,8 @@ mod tests {
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_text(content)
             trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
-            first = trace.load_traces(root)
-            second = trace.load_traces(root)
+            first, test_artifacts = trace.load_traces(root)
+            second, _ = trace.load_traces(root)
             self.assertEqual(first, second, "repeated capture must preserve feature and phase provenance")
             normal_a = [unit for unit in first["units"] if unit["package"] == "a" and not unit["is_test"]]
             self.assertEqual({tuple(unit["features"]): unit["purposes"] for unit in normal_a},
@@ -149,8 +149,9 @@ mod tests {
                           and unit["target_kind"] in ("lib", "bin") for unit in call["origins"])]
             self.assertFalse(any(apis[call["caller"]]["package"] == "a" and apis[call["callee"]]["package"] == "b"
                                  for call in production), "a dev-activated feature must not create a production dependency")
+            self.assertNotIn(str(root), json.dumps(first), "runtime artifact paths must stay out of the deterministic report")
             self.assertEqual(len(first["tests"]), 2)
-            trace.run_tests(first["tests"], root, first["configuration"]["toolchain"])
+            trace.run_tests(first["tests"], test_artifacts)
 
 
 if __name__ == "__main__":

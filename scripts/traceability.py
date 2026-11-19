@@ -274,12 +274,16 @@ def parse_inventory(output):
 
 
 def check_inventory(bundle, artifacts, root):
-    inventories = {}
+    directories = {component["id"]: Path(root) / component["path"] for component in bundle["components"]}
+    inventories, test_artifacts = {}, {}
     for artifact in artifacts:
         if not artifact["is_test"] or not artifact["executable"]:
             continue
         key = target_key(artifact)
-        inventories[key] = parse_inventory(execute([artifact["executable"], "--list", "--format=terse"], root))
+        require(key not in test_artifacts, f"multiple compiled test artifacts for target: {key}")
+        runtime = {"executable": artifact["executable"], "directory": directories[artifact["package"]]}
+        inventories[key] = parse_inventory(execute([runtime["executable"], "--list", "--format=terse"], runtime["directory"]))
+        test_artifacts[key] = runtime
     expected = {}
     for test in bundle["tests"]:
         expected.setdefault(target_key(test), set()).add(test["name"])
@@ -287,7 +291,7 @@ def check_inventory(bundle, artifacts, root):
         actual, compiled = expected.get(key, set()), inventories.get(key, set())
         require(actual == compiled,
                 f"compiled test inventory mismatch in {key}: compiler missing {sorted(compiled - actual)}; absent from binary {sorted(actual - compiled)}")
-    return inventories
+    return test_artifacts
 
 
 def excluded_targets(metadata, artifacts):
@@ -313,6 +317,7 @@ def toolchain(root):
 
 
 def load_traces(root):
+    """Return the deterministic report and reconciled runtime test artifacts."""
     root = Path(root).resolve()
     channel = toolchain(root)
     cargo = ["cargo", "+" + channel]
@@ -354,26 +359,24 @@ def load_traces(root):
         captures = compilation_purposes([read_json(path) for path in sorted(shards.glob("*.json"))], artifacts)
         bundle = merge_shards(root, captures, components)
         reconcile_units(bundle, artifacts)
-        check_inventory(bundle, artifacts, root)
+        test_artifacts = check_inventory(bundle, artifacts, root)
     bundle["excluded_targets"] = excluded_targets(metadata, artifacts)
     bundle["configuration"] = {"toolchain": channel, "cargo": [shlex.join(command) for command in commands],
                                "scope": "Current host and default Cargo features; inactive cfg branches are outside this snapshot."}
-    return bundle
+    return bundle, test_artifacts
 
 
 def selected_tests(bundle, kind="all"):
     return [test for test in bundle["tests"] if kind == "all" or bool(test["targets"]) == (kind == "targeted")]
 
 
-def cargo_command(test, channel):
-    target = ["--lib"] if test["target_kind"] == "lib" else ["--" + test["target_kind"], test["target_name"]]
-    return ["cargo", "+" + channel, "test", "--locked", "-p", test["package"], *target]
-
-
-def run_tests(tests, root, channel):
+def run_tests(tests, test_artifacts):
     for test in tests:
-        args = cargo_command(test, channel) + [test["name"], "--", "--exact", "--format", "pretty", "--color", "never"]
-        output = execute(args, root)
+        key = target_key(test)
+        require(key in test_artifacts, f"compiled test artifact missing for target: {key}")
+        artifact = test_artifacts[key]
+        args = [artifact["executable"], test["name"], "--exact", "--format", "pretty", "--color", "never"]
+        output = execute(args, artifact["directory"])
         summary = re.findall(r"^test result: (.+)$", output, flags=re.MULTILINE)
         require(len(summary) == 1 and re.fullmatch(r"ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9.]+s", summary[0]),
                 f"expected one passed exact test: {test_key(test)}\n{output}")
@@ -393,14 +396,14 @@ def main(argv=None):
         parser.error("--output is only available for check and viewer")
     root = args.root.resolve()
     try:
-        bundle = load_traces(root)
+        bundle, test_artifacts = load_traces(root)
         if args.command == "viewer":
             from traceability_viewer import write_viewer
             destination = args.output or root / "target/traceability-viewer.html"
             write_viewer(root, bundle, destination)
             print(f"Viewer snapshot: {destination.resolve()}")
         elif args.command == "run":
-            run_tests(selected_tests(bundle, args.kind), root, bundle["configuration"]["toolchain"])
+            run_tests(selected_tests(bundle, args.kind), test_artifacts)
         else:
             if args.output:
                 from traceability_viewer import capture, protect_destination

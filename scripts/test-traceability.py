@@ -217,7 +217,8 @@ class CompilerReportTests(unittest.TestCase):
         artifact = {**self.shard["unit"], "executable": "/test-binary"}
         bundle = self.merge()
         with patch.object(trace, "execute", return_value="check: test\n") as execute:
-            trace.check_inventory(bundle, [artifact], self.root)
+            artifacts = trace.check_inventory(bundle, [artifact], self.root)
+            self.assertEqual(artifacts, {trace.target_key(artifact): {"executable": "/test-binary", "directory": self.root}})
             self.assertEqual(execute.call_args.args[0], ["/test-binary", "--list", "--format=terse"])
         with patch.object(trace, "execute", return_value="check: test\nmissed: test\n"):
             with self.assertRaisesRegex(trace.InvalidTrace, "compiler missing.*missed"):
@@ -225,6 +226,9 @@ class CompilerReportTests(unittest.TestCase):
         with patch.object(trace, "execute", return_value=""):
             with self.assertRaisesRegex(trace.InvalidTrace, "absent from binary.*check"):
                 trace.check_inventory(bundle, [artifact], self.root)
+        with patch.object(trace, "execute", return_value="check: test\n"):
+            with self.assertRaisesRegex(trace.InvalidTrace, "multiple compiled test artifacts"):
+                trace.check_inventory(bundle, [artifact, {**artifact, "features": ["extra"]}], self.root)
 
     def test_duplicate_inventory_name_and_legacy_schema_fail(self):
         with self.assertRaisesRegex(trace.InvalidTrace, "duplicate test names"):
@@ -235,17 +239,24 @@ class CompilerReportTests(unittest.TestCase):
 
     def test_no_test_name_or_substring_can_establish_a_run_passed(self):
         test = self.shard["tests"][0]
+        artifacts = {trace.target_key(test): {"executable": "/captured-test-binary", "directory": self.root / "sample"}}
         failures = ["test check ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
                     "test another_check ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
                     "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n"]
         for output in failures:
             with self.subTest(output=output), patch.object(trace, "execute", return_value=output):
                 with self.assertRaises(trace.InvalidTrace):
-                    trace.run_tests([test], self.root, "nightly-fixture")
+                    trace.run_tests([test], artifacts)
         output = "running 1 test\ntest check ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n"
         with patch.object(trace, "execute", return_value=output) as execute:
-            trace.run_tests([test], self.root, "nightly-fixture")
-            self.assertIn("--exact", execute.call_args.args[0])
+            trace.run_tests([test], artifacts)
+            self.assertEqual(execute.call_args.args,
+                             (["/captured-test-binary", "check", "--exact", "--format", "pretty", "--color", "never"],
+                              self.root / "sample"))
+        with patch.object(trace, "execute") as execute:
+            with self.assertRaisesRegex(trace.InvalidTrace, "compiled test artifact missing"):
+                trace.run_tests([test], {})
+            execute.assert_not_called()
 
 
 if __name__ == "__main__":
