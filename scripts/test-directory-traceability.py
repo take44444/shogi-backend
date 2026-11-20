@@ -13,7 +13,7 @@ TOOLS = Path(os.environ.get("TRACEABILITY_TEST_TOOL_ROOT", REPOSITORY)).resolve(
 
 
 class CompilerPipelineTests(unittest.TestCase):
-    def assert_macro_identity_is_rejected(self, generated, target=None, *, preserve_input_span=False):
+    def check_macro_identities(self, generated, target=None, *, preserve_input_span=False, declarative=False):
         with tempfile.TemporaryDirectory(prefix="compiler-trace-ambiguous-macro-") as directory:
             root = Path(directory)
             (root / "tools").mkdir()
@@ -38,10 +38,11 @@ fn assign(tokens: TokenStream, span: Span) -> TokenStream {
 }
 '''
             invocation = 'generator::generate!(origin);' if preserve_input_span else 'generator::generate!();'
+            source = generated if declarative else invocation
             files = {
                 "Cargo.toml": '[workspace]\nmembers=["api"]\nexclude=["macros"]\nresolver="3"\n',
                 "api/Cargo.toml": '[package]\nname="api"\nversion="0.1.0"\nedition="2024"\n[dependencies]\ngenerator={path="../macros"}\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(TOOLS / "tools/traceability-attributes")) + '}\n',
-                "api/src/lib.rs": invocation + '\n#[cfg(test)] mod tests { ' + test + ' }\n',
+                "api/src/lib.rs": source + '\n#[cfg(test)] mod tests { ' + test + ' }\n',
                 "macros/Cargo.toml": '[package]\nname="generator"\nversion="0.1.0"\nedition="2024"\n[lib]\nproc-macro=true\n',
                 "macros/src/lib.rs": macro,
             }
@@ -50,11 +51,26 @@ fn assign(tokens: TokenStream, span: Span) -> TokenStream {
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
             trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
-            with self.assertRaisesRegex(trace.InvalidTrace, "ambiguous compiler API identity"):
-                trace.load_traces(root)
+            if target:
+                with self.assertRaisesRegex(trace.InvalidTrace, "ambiguous compiler API identity"):
+                    trace.load_traces(root)
+            else:
+                bundle, _ = trace.load_traces(root)
+                occurrences = [api for api in bundle["apis"] if api["identity"]["kind"] == "compilation-occurrence"]
+                self.assertTrue(occurrences)
+                apis = {api["id"]: api for api in occurrences}
+                callers = [call for call in bundle["calls"] if call["caller"] in apis]
+                for call in callers:
+                    self.assertEqual(len({trace.unit_key(origin) for origin in call["origins"]}), 1,
+                                     "ambiguous callers must not merge between compiler units")
+                normal = {api["id"] for api in occurrences if not api["identity"]["unit"]["is_test"]}
+                test = {api["id"] for api in occurrences if api["identity"]["unit"]["is_test"]}
+                self.assertTrue(normal)
+                self.assertTrue(test)
+                self.assertTrue(normal.isdisjoint(test))
 
     def test_cfg_macro_cannot_join_a_target_to_another_nominal_receiver(self):
-        self.assert_macro_identity_is_rejected('''
+        self.check_macro_identities('''
 pub trait Factory { type Product; }
 pub struct EntryA;
 pub struct EntryB;
@@ -80,7 +96,7 @@ pub fn prod_b() { <EntryB as Factory>::Product::operation(); }
 ''', '<super::EntryA as super::Factory>::Product::operation')
 
     def test_cfg_macro_equal_sibling_counts_do_not_prove_equivalence(self):
-        self.assert_macro_identity_is_rejected('''
+        self.check_macro_identities('''
 pub trait Factory { type Product; }
 pub struct Entry;
 #[cfg(test)] const _: () = { fn different() {} };
@@ -92,15 +108,15 @@ const _: () = {
 #[cfg(not(test))] const _: () = { fn different() {} };
 ''', '<super::Entry as super::Factory>::Product::operation')
 
-    def test_ambiguous_private_calls_are_rejected_without_a_target(self):
-        self.assert_macro_identity_is_rejected('''
+    def test_ambiguous_private_calls_remain_separate_without_a_target(self):
+        self.check_macro_identities('''
 #[cfg(test)] const _: () = { fn operation() {} };
 const _: () = { fn operation() {} };
 const _: () = { fn operation() {} };
 ''')
 
     def test_one_macro_sibling_per_build_does_not_prove_equivalence(self):
-        self.assert_macro_identity_is_rejected('''
+        self.check_macro_identities('''
 #[cfg(not(test))] const _: () = { fn operation() { production_only(); } };
 #[cfg(test)] const _: () = { fn operation() { test_only(); } };
 pub fn production_only() {}
@@ -108,7 +124,7 @@ pub fn test_only() {}
 ''')
 
     def test_cfg_macro_const_expression_callers_cannot_be_merged(self):
-        self.assert_macro_identity_is_rejected('''
+        self.check_macro_identities('''
 pub const fn consume_test() -> usize { 1 }
 pub const fn consume_a() -> usize { 1 }
 pub const fn consume_b() -> usize { 1 }
@@ -120,15 +136,26 @@ pub fn operation() {
 ''')
 
     def test_macro_input_spans_do_not_make_anonymous_scopes_identifiable(self):
-        self.assert_macro_identity_is_rejected('''
+        self.check_macro_identities('''
 #[cfg(not(test))] const _: () = { fn operation() { production_only(); } };
 #[cfg(test)] const _: () = { fn operation() { test_only(); } };
 pub fn production_only() {}
 pub fn test_only() {}
 ''', preserve_input_span=True)
 
+    def test_macro_definition_spans_do_not_make_anonymous_scopes_identifiable(self):
+        self.check_macro_identities('''
+macro_rules! generate {
+    ($callee:path) => { const _: () = { fn operation() { $callee(); } }; };
+}
+pub fn production_only() {}
+pub fn test_only() {}
+#[cfg(not(test))] generate!(production_only);
+#[cfg(test)] generate!(test_only);
+''', declarative=True)
+
     def test_cfg_macro_identity_split_cannot_silently_drop_a_production_test_target(self):
-        self.assert_macro_identity_is_rejected('''
+        self.check_macro_identities('''
 pub struct Hidden;
 #[cfg(test)] const _: () = { fn padding() {} };
 const _: () = { impl Hidden { pub fn hidden() {} } };

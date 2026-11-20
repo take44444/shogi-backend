@@ -73,7 +73,7 @@ def capture(root, bundle):
                 raise ValueError(f"invalid compiler source location during capture: {path}:{line}")
     for unit in bundle["units"]:
         source(unit["source"])
-    return {"version": 3, "repository": {"revision": revision, "github_base": base},
+    return {"version": 4, "repository": {"revision": revision, "github_base": base},
             "bundle": bundle, "files": files}
 
 

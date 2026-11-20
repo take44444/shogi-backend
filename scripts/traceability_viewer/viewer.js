@@ -88,6 +88,12 @@
     byId('selection-title').textContent = apiLabel(api.id);
     const detail = byId('selection-detail');
     detail.replaceChildren(node('p', api.kind), sourceButton(api));
+    if (api.identity.kind === 'compilation-occurrence') {
+      const unit = api.identity.unit;
+      detail.append(node('p', `Compilation occurrence · ${unit.package} ${unit.target_kind} ${unit.target_name} · ${unit.is_test ? 'test harness' : 'normal'} · features: ${unit.features.join(', ') || 'none'}`));
+      detail.append(node('p', api.identity.reason));
+      detail.append(node('p', 'This occurrence is kept separate between compiler units and cannot be a contract-test target.'));
+    }
     const tests = data.tests.filter(test => test.targets.includes(api.id));
     detail.append(apiGraph(api, tests));
     detail.append(node('h3', `Explicit test targets (${tests.length})`));
@@ -96,7 +102,7 @@
       row.append(node('div', `${test.package} · ${test.name}`), sourceButton(test));
       detail.append(row);
     }
-    if (!tests.length) empty(detail, 'No test declares this API as a target.');
+    if (!tests.length && api.identity.kind === 'definition') empty(detail, 'No test declares this API as a target.');
     for (const [scope, records] of [['Production', productionCalls], ['Other compilation contexts', data.calls.filter(call => !productionCall(call))]]) {
       for (const [label, field, direction] of [['callers', 'caller', 'callee'], ['calls', 'callee', 'caller']]) {
         const calls = records.filter(call => call[direction] === api.id);

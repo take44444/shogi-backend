@@ -17,8 +17,8 @@ class ViewerTests(unittest.TestCase):
         (self.root / "src").mkdir()
         self.source = self.root / "src/lib.rs"
         self.source.write_text('pub fn api() {}\n// </script><script>alert("source")</script>\n')
-        self.api = {"id": "sample/api", "package": "sample", "name": "api", "kind": "function", "path": "src/lib.rs", "line": 1}
-        self.bundle = {"version": 3, "components": [{"id": "sample", "package": "sample", "path": "."}],
+        self.api = {"id": "sample/api", "package": "sample", "name": "api", "kind": "function", "identity": {"kind": "definition"}, "path": "src/lib.rs", "line": 1}
+        self.bundle = {"version": 4, "components": [{"id": "sample", "package": "sample", "path": "."}],
                        "apis": [self.api], "calls": [], "tests": [], "unresolved": [], "coverage": {},
                        "units": [{"package": "sample", "target_kind": "lib", "target_name": "sample", "is_test": False, "features": [], "purposes": ["production"], "source": "src/lib.rs"}],
                        "excluded_targets": [], "configuration": {"scope": "Default features on current host", "toolchain": "nightly", "cargo": ["build", "test"]}}
@@ -37,7 +37,7 @@ class ViewerTests(unittest.TestCase):
 
     def test_snapshot_embeds_compiler_span_source_without_needles(self):
         payload = viewer.capture(self.root, self.bundle)
-        self.assertEqual(payload["version"], 3)
+        self.assertEqual(payload["version"], 4)
         self.assertEqual(payload["files"]["src/lib.rs"]["content"], self.source.read_text())
         self.assertNotIn("locations", payload)
         self.assertIsNone(payload["files"]["src/lib.rs"]["github_url"])

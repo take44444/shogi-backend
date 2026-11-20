@@ -115,7 +115,7 @@ def merge_shards(root, shards, components):
     seen = set()
     for shard in shards:
         fields(shard, ("version", "unit", "apis", "calls", "tests", "unresolved", "coverage"))
-        require(type(shard["version"]) is int and shard["version"] == 3, "compiler shard version must be 3")
+        require(type(shard["version"]) is int and shard["version"] == 4, "compiler shard version must be 4")
         signature = canonical(shard)
         if signature in seen:
             continue
@@ -141,11 +141,21 @@ def merge_shards(root, shards, components):
         for category in ("apis", "calls", "tests", "unresolved"):
             require(isinstance(shard[category], list), f"shard {category} must be an array")
         for api in shard["apis"]:
-            fields(api, ("id", "package", "name", "kind", "path", "line"))
+            fields(api, ("id", "package", "name", "kind", "identity", "path", "line"))
             identity = text(api["id"])
             require(api["package"] in packages, f"unknown API package: {api['package']}")
             text(api["name"])
             text(api["kind"])
+            provenance = api["identity"]
+            fields(provenance, ("kind",))
+            if provenance["kind"] == "definition":
+                require(provenance == {"kind": "definition"}, "invalid definition identity")
+            else:
+                require(provenance["kind"] == "compilation-occurrence", "unknown API identity kind")
+                require(set(provenance) == {"kind", "unit", "reason"}, "invalid compilation occurrence identity")
+                require(provenance["unit"] == {key: value for key, value in unit.items() if key != "purposes"},
+                        "API occurrence belongs to a different compiler unit")
+                text(provenance["reason"])
             source_location(root, api, generated_sources)
             require(identity not in apis or apis[identity] == api, f"conflicting API definition: {identity}")
             apis[identity] = api
@@ -193,7 +203,9 @@ def merge_shards(root, shards, components):
     for test in tests.values():
         for target in test["targets"]:
             require(target in apis, f"unknown explicit test target API: {target}")
-    return {"version": 3, "components": sorted_records(components), "apis": sorted_records(apis.values()),
+            require(apis[target]["identity"]["kind"] == "definition",
+                    f"ambiguous compiler API identity cannot be a test target: {target}")
+    return {"version": 4, "components": sorted_records(components), "apis": sorted_records(apis.values()),
             "calls": sorted_records(calls.values()), "references": sorted_records(references.values()),
             "tests": sorted_records(tests.values()),
             "units": sorted_records(units.values()), "coverage": dict(sorted(coverage.items())),
@@ -263,7 +275,8 @@ def reconcile_units(bundle, artifacts):
 def check_production_targets(bundle, shards):
     production = {api["id"] for shard in shards
                   if not shard["unit"]["is_test"] and "production" in shard["unit"]["purposes"]
-                  and shard["unit"]["target_kind"] in ("lib", "bin") for api in shard["apis"]}
+                  and shard["unit"]["target_kind"] in ("lib", "bin") for api in shard["apis"]
+                  if api["identity"]["kind"] == "definition"}
     for test in bundle["tests"]:
         missing = set(test["targets"]) - production
         require(not missing,
