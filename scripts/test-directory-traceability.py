@@ -13,25 +13,153 @@ TOOLS = Path(os.environ.get("TRACEABILITY_TEST_TOOL_ROOT", REPOSITORY)).resolve(
 
 
 class CompilerPipelineTests(unittest.TestCase):
-    def test_cfg_macro_identity_split_cannot_silently_drop_a_production_test_target(self):
-        with tempfile.TemporaryDirectory(prefix="compiler-trace-cfg-macro-") as directory:
+    def check_macro_identities(self, generated, target=None, *, preserve_input_span=False, declarative=False):
+        with tempfile.TemporaryDirectory(prefix="compiler-trace-ambiguous-macro-") as directory:
             root = Path(directory)
             (root / "tools").mkdir()
             (root / "tools/traceability").symlink_to(TOOLS / "tools/traceability", target_is_directory=True)
+            test = ('#[traceability::targets(' + target + ')] #[test] fn exact() {}') if target else '#[test] fn unrelated() {}'
+            macro = 'use proc_macro::TokenStream;\n#[proc_macro] pub fn generate(_:TokenStream)->TokenStream { ' + json.dumps(generated) + '.parse().unwrap() }\n'
+            if preserve_input_span:
+                macro = '''use proc_macro::{TokenStream, TokenTree, Span, Group};
+fn assign(tokens: TokenStream, span: Span) -> TokenStream {
+    tokens.into_iter().map(|token| match token {
+        TokenTree::Group(group) => {
+            let mut result = Group::new(group.delimiter(), assign(group.stream(), span));
+            result.set_span(span);
+            TokenTree::Group(result)
+        }
+        mut other => { other.set_span(span); other }
+    }).collect()
+}
+#[proc_macro] pub fn generate(input: TokenStream) -> TokenStream {
+    let span = input.into_iter().next().unwrap().span();
+    assign(''' + json.dumps(generated) + '''.parse().unwrap(), span)
+}
+'''
+            invocation = 'generator::generate!(origin);' if preserve_input_span else 'generator::generate!();'
+            source = generated if declarative else invocation
             files = {
                 "Cargo.toml": '[workspace]\nmembers=["api"]\nexclude=["macros"]\nresolver="3"\n',
                 "api/Cargo.toml": '[package]\nname="api"\nversion="0.1.0"\nedition="2024"\n[dependencies]\ngenerator={path="../macros"}\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(TOOLS / "tools/traceability-attributes")) + '}\n',
-                "api/src/lib.rs": 'generator::generate!();\n#[cfg(test)] mod tests { #[traceability::targets(super::Hidden::hidden)] #[test] fn exact() {} }\n',
+                "api/src/lib.rs": source + '\n#[cfg(test)] mod tests { ' + test + ' }\n',
                 "macros/Cargo.toml": '[package]\nname="generator"\nversion="0.1.0"\nedition="2024"\n[lib]\nproc-macro=true\n',
-                "macros/src/lib.rs": 'use proc_macro::TokenStream;\n#[proc_macro] pub fn generate(_:TokenStream)->TokenStream { "pub struct Hidden; #[cfg(test)] const _: () = { fn padding() {} }; const _: () = { impl Hidden { pub fn hidden() {} } };".parse().unwrap() }\n',
+                "macros/src/lib.rs": macro,
             }
             for relative, content in files.items():
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
             trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
-            with self.assertRaisesRegex(trace.InvalidTrace, "no matching definition in the production build"):
-                trace.load_traces(root)
+            if target:
+                with self.assertRaisesRegex(trace.InvalidTrace, "ambiguous compiler API identity"):
+                    trace.load_traces(root)
+            else:
+                bundle, _ = trace.load_traces(root)
+                occurrences = [api for api in bundle["apis"] if api["identity"]["kind"] == "compilation-occurrence"]
+                self.assertTrue(occurrences)
+                apis = {api["id"]: api for api in occurrences}
+                callers = [call for call in bundle["calls"] if call["caller"] in apis]
+                for call in callers:
+                    self.assertEqual(len({trace.unit_key(origin) for origin in call["origins"]}), 1,
+                                     "ambiguous callers must not merge between compiler units")
+                normal = {api["id"] for api in occurrences if not api["identity"]["unit"]["is_test"]}
+                test = {api["id"] for api in occurrences if api["identity"]["unit"]["is_test"]}
+                self.assertTrue(normal)
+                self.assertTrue(test)
+                self.assertTrue(normal.isdisjoint(test))
+
+    def test_cfg_macro_cannot_join_a_target_to_another_nominal_receiver(self):
+        self.check_macro_identities('''
+pub trait Factory { type Product; }
+pub struct EntryA;
+pub struct EntryB;
+pub fn consume_test() {}
+pub fn consume_a() {}
+pub fn consume_b() {}
+#[cfg(test)] const _: () = {
+    pub struct Local;
+    impl Local { pub fn operation() { consume_test(); } }
+};
+const _: () = {
+    pub struct Local;
+    impl Factory for EntryA { type Product = Local; }
+    impl Local { pub fn operation() { consume_a(); } }
+};
+const _: () = {
+    pub struct Local;
+    impl Factory for EntryB { type Product = Local; }
+    impl Local { pub fn operation() { consume_b(); } }
+};
+pub fn prod_a() { <EntryA as Factory>::Product::operation(); }
+pub fn prod_b() { <EntryB as Factory>::Product::operation(); }
+''', '<super::EntryA as super::Factory>::Product::operation')
+
+    def test_cfg_macro_equal_sibling_counts_do_not_prove_equivalence(self):
+        self.check_macro_identities('''
+pub trait Factory { type Product; }
+pub struct Entry;
+#[cfg(test)] const _: () = { fn different() {} };
+const _: () = {
+    pub struct Local;
+    impl Factory for Entry { type Product = Local; }
+    impl Local { pub fn operation() {} }
+};
+#[cfg(not(test))] const _: () = { fn different() {} };
+''', '<super::Entry as super::Factory>::Product::operation')
+
+    def test_ambiguous_private_calls_remain_separate_without_a_target(self):
+        self.check_macro_identities('''
+#[cfg(test)] const _: () = { fn operation() {} };
+const _: () = { fn operation() {} };
+const _: () = { fn operation() {} };
+''')
+
+    def test_one_macro_sibling_per_build_does_not_prove_equivalence(self):
+        self.check_macro_identities('''
+#[cfg(not(test))] const _: () = { fn operation() { production_only(); } };
+#[cfg(test)] const _: () = { fn operation() { test_only(); } };
+pub fn production_only() {}
+pub fn test_only() {}
+''')
+
+    def test_cfg_macro_const_expression_callers_cannot_be_merged(self):
+        self.check_macro_identities('''
+pub const fn consume_test() -> usize { 1 }
+pub const fn consume_a() -> usize { 1 }
+pub const fn consume_b() -> usize { 1 }
+pub fn operation() {
+    #[cfg(test)] let _: [u8; { consume_test() }] = [0];
+    let _: [u8; { consume_a() }] = [0];
+    let _: [u8; { consume_b() }] = [0];
+}
+''')
+
+    def test_macro_input_spans_do_not_make_anonymous_scopes_identifiable(self):
+        self.check_macro_identities('''
+#[cfg(not(test))] const _: () = { fn operation() { production_only(); } };
+#[cfg(test)] const _: () = { fn operation() { test_only(); } };
+pub fn production_only() {}
+pub fn test_only() {}
+''', preserve_input_span=True)
+
+    def test_macro_definition_spans_do_not_make_anonymous_scopes_identifiable(self):
+        self.check_macro_identities('''
+macro_rules! generate {
+    ($callee:path) => { const _: () = { fn operation() { $callee(); } }; };
+}
+pub fn production_only() {}
+pub fn test_only() {}
+#[cfg(not(test))] generate!(production_only);
+#[cfg(test)] generate!(test_only);
+''', declarative=True)
+
+    def test_cfg_macro_identity_split_cannot_silently_drop_a_production_test_target(self):
+        self.check_macro_identities('''
+pub struct Hidden;
+#[cfg(test)] const _: () = { fn padding() {} };
+const _: () = { impl Hidden { pub fn hidden() {} } };
+''', 'super::Hidden::hidden')
 
     def test_compiler_inventory_calls_targets_and_warm_cache(self):
         with tempfile.TemporaryDirectory(prefix="compiler-trace-cli-") as directory:

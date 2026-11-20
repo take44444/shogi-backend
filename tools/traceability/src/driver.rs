@@ -1,4 +1,6 @@
-use crate::model::{Api, Call, Coverage, Location, Shard, Test, Unit, Unresolved, Workspace};
+use crate::model::{
+    Api, Call, Coverage, Identity, Location, Shard, Test, Unit, Unresolved, Workspace,
+};
 use rustc_attr_ir::{Attribute, AttributeKind, LangItem};
 use rustc_data_structures::steal::Steal;
 use rustc_driver::{Callbacks, Compilation};
@@ -16,7 +18,7 @@ use rustc_middle::{
 };
 use rustc_span::{FileName, Span};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     env, fs,
     path::PathBuf,
     process::Command,
@@ -26,6 +28,7 @@ use std::{
 const TARGET_MARKER: &str = "__traceability_targets_";
 type MirProvider = for<'tcx> fn(TyCtxt<'tcx>, LocalDefId) -> &'tcx Steal<mir::Body<'tcx>>;
 static UNIT_TARGET: OnceLock<String> = OnceLock::new();
+static CAPTURE_UNIT: OnceLock<Unit> = OnceLock::new();
 static MIR_PROVIDER: OnceLock<MirProvider> = OnceLock::new();
 static WORKSPACE: OnceLock<Workspace> = OnceLock::new();
 static GENERATED_SOURCES: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
@@ -88,7 +91,8 @@ impl Capture {
                 && previous.name == api.name
                 && previous.kind == api.kind
                 && previous.path == api.path
-                && previous.line == api.line)
+                && previous.line == api.line
+                && previous.identity == api.identity)
             {
                 self.error = Some(format!(
                     "compiler API identity collision for {} between DefId({}:{}) and DefId({}:{}); fix semantic definition identity before capture",
@@ -218,6 +222,9 @@ pub fn run() -> Result<(), String> {
             unit.target_kind, unit.target_name, unit.source
         ))
         .map_err(|_| "compiler supports one compilation per process")?;
+    CAPTURE_UNIT
+        .set(unit.clone())
+        .map_err(|_| "compiler supports one compilation per process")?;
     WORKSPACE
         .set(workspace)
         .map_err(|_| "compiler supports one compilation per process")?;
@@ -312,8 +319,7 @@ impl Callbacks for Collector {
             if let Some(test_name) = marker {
                 if let Some(error) = visitor.invalid_targets.first() {
                     self.error = Some(error.clone());
-                }
-                if visitor.targets.is_empty() {
+                } else if visitor.targets.is_empty() {
                     self.error = Some(format!(
                         "test target marker {name} contains no workspace callable target"
                     ));
@@ -357,7 +363,7 @@ impl Callbacks for Collector {
             generated_sources: std::mem::take(
                 &mut *GENERATED_SOURCES.get().unwrap().lock().unwrap(),
             ),
-            version: 3,
+            version: 4,
             unit,
             apis: capture.apis.into_values().map(|(_, api)| api).collect(),
             calls: capture.calls,
@@ -444,7 +450,7 @@ fn is_infrastructure(tcx: TyCtxt<'_>, mut definition: DefId) -> bool {
         {
             return true;
         }
-        if matches!(tcx.def_kind(definition), DefKind::Static { .. }) {
+        if definition.is_local() && matches!(tcx.def_kind(definition), DefKind::Static { .. }) {
             #[allow(deprecated)]
             if tcx.get_all_attrs(definition).iter().any(|attribute| {
                 matches!(
@@ -623,6 +629,15 @@ fn external_crate_identity(tcx: TyCtxt<'_>, krate: hir::def_id::CrateNum) -> Str
     let location = tcx.sess.source_map().lookup_char_pos(span.lo());
     format!("rustc-{}-{}", tcx.sess.cfg_version, location.file.src_hash)
 }
+enum IdentityContext {
+    Display,
+    Definition {
+        reason: Option<String>,
+        active_implementations: HashSet<DefId>,
+        validated_implementations: HashSet<DefId>,
+    },
+}
+
 fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
     let path = tcx
         .def_path(definition)
@@ -640,7 +655,7 @@ fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
             tcx.type_of(implementation)
                 .instantiate_identity()
                 .skip_norm_wip(),
-            false,
+            &mut IdentityContext::Display,
         );
         return match item.container {
             ty::AssocContainer::TraitImpl(_) => {
@@ -654,7 +669,7 @@ fn canonical_name(tcx: TyCtxt<'_>, definition: DefId) -> String {
                         tcx,
                         trait_ref.def_id,
                         &trait_ref.args.as_slice()[1..],
-                        false
+                        &mut IdentityContext::Display
                     ),
                     item.name()
                 )
@@ -677,10 +692,10 @@ fn canonical_generic_path(
     tcx: TyCtxt<'_>,
     definition: DefId,
     arguments: &[ty::GenericArg<'_>],
-    identity: bool,
+    context: &mut IdentityContext,
 ) -> String {
-    let name = if identity {
-        definition_identity(tcx, definition)
+    let name = if matches!(context, IdentityContext::Definition { .. }) {
+        definition_identity(tcx, definition, context)
     } else {
         canonical_name(tcx, definition)
     };
@@ -690,15 +705,15 @@ fn canonical_generic_path(
     let arguments = arguments
         .iter()
         .map(|argument| match argument.kind() {
-            ty::GenericArgKind::Type(ty) => canonical_type(tcx, ty, identity),
+            ty::GenericArgKind::Type(ty) => canonical_type(tcx, ty, context),
             ty::GenericArgKind::Lifetime(region) => region.to_string(),
-            ty::GenericArgKind::Const(value) => canonical_const(tcx, value, identity),
+            ty::GenericArgKind::Const(value) => canonical_const(tcx, value, context),
         })
         .collect::<Vec<_>>()
         .join(", ");
     format!("{name}<{arguments}>")
 }
-fn canonical_const(tcx: TyCtxt<'_>, value: ty::Const<'_>, identity: bool) -> String {
+fn canonical_const(tcx: TyCtxt<'_>, value: ty::Const<'_>, context: &mut IdentityContext) -> String {
     match value.kind() {
         ty::ConstKind::Alias(_, ty::AliasConst { kind, args, .. }) => match kind {
             ty::AliasConstKind::Projection { def_id }
@@ -706,42 +721,105 @@ fn canonical_const(tcx: TyCtxt<'_>, value: ty::Const<'_>, identity: bool) -> Str
             | ty::AliasConstKind::InherentImpl { def_id }
             | ty::AliasConstKind::Free { def_id }
             | ty::AliasConstKind::Anon { def_id } => {
-                canonical_generic_path(tcx, def_id, args.as_slice(), identity)
+                canonical_generic_path(tcx, def_id, args.as_slice(), context)
             }
         },
-        _ => value.to_string(),
+        _ => {
+            if matches!(context, IdentityContext::Definition { .. }) {
+                validate_argument_origins(tcx, value.into(), context);
+            }
+            value.to_string()
+        }
     }
 }
-fn canonical_type(tcx: TyCtxt<'_>, ty: ty::Ty<'_>, identity: bool) -> String {
+fn canonical_type(tcx: TyCtxt<'_>, ty: ty::Ty<'_>, context: &mut IdentityContext) -> String {
     match *ty.kind() {
         ty::Adt(adt, arguments) => {
-            canonical_generic_path(tcx, adt.did(), arguments.as_slice(), identity)
+            canonical_generic_path(tcx, adt.did(), arguments.as_slice(), context)
         }
         ty::Array(inner, length) => format!(
             "[{}; {}]",
-            canonical_type(tcx, inner, identity),
-            canonical_const(tcx, length, identity),
+            canonical_type(tcx, inner, context),
+            canonical_const(tcx, length, context),
         ),
         ty::Ref(_, inner, mutability) => format!(
             "&{}{}",
             if mutability.is_mut() { "mut " } else { "" },
-            canonical_type(tcx, inner, identity)
+            canonical_type(tcx, inner, context)
         ),
         ty::RawPtr(inner, mutability) => format!(
             "*{} {}",
             if mutability.is_mut() { "mut" } else { "const" },
-            canonical_type(tcx, inner, identity)
+            canonical_type(tcx, inner, context)
         ),
-        ty::Slice(inner) => format!("[{}]", canonical_type(tcx, inner, identity)),
+        ty::Slice(inner) => format!("[{}]", canonical_type(tcx, inner, context)),
         ty::Tuple(elements) => format!(
             "({})",
             elements
                 .iter()
-                .map(|inner| canonical_type(tcx, inner, identity))
+                .map(|inner| canonical_type(tcx, inner, context))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        _ => ty.to_string(),
+        _ => {
+            if matches!(context, IdentityContext::Definition { .. }) {
+                validate_argument_origins(tcx, ty.into(), context);
+            }
+            ty.to_string()
+        }
+    }
+}
+fn validate_argument_origins(
+    tcx: TyCtxt<'_>,
+    value: ty::GenericArg<'_>,
+    context: &mut IdentityContext,
+) {
+    let mut definitions = Vec::new();
+    for argument in value.walk() {
+        match argument.kind() {
+            ty::GenericArgKind::Type(value) => match *value.kind() {
+                ty::Adt(adt, _) | ty::View(adt, ..) => definitions.push(adt.did()),
+                ty::Foreign(definition)
+                | ty::FnDef(definition, _)
+                | ty::Closure(definition, _)
+                | ty::CoroutineClosure(definition, _)
+                | ty::Coroutine(definition, _)
+                | ty::CoroutineWitness(definition, _) => definitions.push(definition),
+                ty::Alias(_, alias) => definitions.push(match alias.kind {
+                    ty::AliasTyKind::Projection { def_id }
+                    | ty::AliasTyKind::Inherent { def_id }
+                    | ty::AliasTyKind::Opaque { def_id }
+                    | ty::AliasTyKind::Free { def_id } => def_id,
+                }),
+                ty::Dynamic(predicates, _) => {
+                    definitions.extend(predicates.iter().map(|predicate| predicate.def_id()));
+                }
+                _ => {}
+            },
+            ty::GenericArgKind::Const(value) => {
+                if let ty::ConstKind::Alias(_, alias) = value.kind() {
+                    definitions.push(match alias.kind {
+                        ty::AliasConstKind::Projection { def_id }
+                        | ty::AliasConstKind::InherentSelf { def_id }
+                        | ty::AliasConstKind::InherentImpl { def_id }
+                        | ty::AliasConstKind::Free { def_id }
+                        | ty::AliasConstKind::Anon { def_id } => def_id,
+                    });
+                }
+            }
+            ty::GenericArgKind::Lifetime(_) => {}
+        }
+    }
+    for definition in definitions {
+        let mut parent = Some(definition);
+        while let Some(current) = parent {
+            if tcx.def_key(current).disambiguated_data.data == hir::definitions::DefPathData::Impl {
+                validate_implementation_origins(tcx, current, context);
+            } else {
+                origin_disambiguator(tcx, current, context);
+            }
+            parent = tcx.opt_parent(current);
+        }
     }
 }
 fn definition_origin(tcx: TyCtxt<'_>, definition: DefId) -> String {
@@ -770,17 +848,100 @@ fn definition_origin(tcx: TyCtxt<'_>, definition: DefId) -> String {
         span.hi().0 - span.lo().0,
     )
 }
-fn implementation_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
+fn validate_implementation_origins(
+    tcx: TyCtxt<'_>,
+    definition: DefId,
+    context: &mut IdentityContext,
+) {
+    if let IdentityContext::Definition {
+        reason,
+        active_implementations,
+        validated_implementations,
+    } = context
+    {
+        if validated_implementations.contains(&definition) {
+            return;
+        }
+        if !active_implementations.insert(definition) {
+            reason.get_or_insert_with(|| format!(
+                "ambiguous compiler API identity for {}; recursive implementation type dependencies cannot establish definition equivalence",
+                format!("{:?}", tcx.def_path(definition).data).chars().take(160).collect::<String>(),
+            ));
+            return;
+        }
+    } else {
+        return;
+    }
+    let typing_env = ty::TypingEnv::post_analysis(tcx, definition);
+    let receiver_type = tcx.type_of(definition).instantiate_identity();
+    match tcx.try_normalize_erasing_regions(typing_env, receiver_type) {
+        Ok(normalized) => validate_argument_origins(tcx, normalized.into(), context),
+        Err(_) => {
+            if let IdentityContext::Definition { reason, .. } = context {
+                reason.get_or_insert_with(|| format!(
+                    "ambiguous compiler API identity for {}; receiver type dependencies could not be normalized",
+                    format!("{:?}", tcx.def_path(definition).data).chars().take(160).collect::<String>(),
+                ));
+            }
+        }
+    }
+    if let Some(reference) = tcx.impl_opt_trait_ref(definition) {
+        match tcx.try_normalize_erasing_regions(typing_env, reference.instantiate_identity()) {
+            Ok(normalized) => {
+                for argument in normalized.args.iter() {
+                    validate_argument_origins(tcx, argument, context);
+                }
+            }
+            Err(_) => {
+                if let IdentityContext::Definition { reason, .. } = context {
+                    reason.get_or_insert_with(|| format!(
+                        "ambiguous compiler API identity for {}; trait type dependencies could not be normalized",
+                        format!("{:?}", tcx.def_path(definition).data).chars().take(160).collect::<String>(),
+                    ));
+                }
+            }
+        }
+    }
+    if let IdentityContext::Definition {
+        active_implementations,
+        validated_implementations,
+        ..
+    } = context
+    {
+        active_implementations.remove(&definition);
+        validated_implementations.insert(definition);
+    }
+}
+fn implementation_identity(
+    tcx: TyCtxt<'_>,
+    definition: DefId,
+    context: &mut IdentityContext,
+) -> String {
+    validate_implementation_origins(tcx, definition, context);
+    if matches!(
+        context,
+        IdentityContext::Definition {
+            reason: Some(_),
+            ..
+        }
+    ) {
+        return String::new();
+    }
     let receiver = canonical_type(
         tcx,
         tcx.type_of(definition)
             .instantiate_identity()
             .skip_norm_wip(),
-        true,
+        context,
     );
     let trait_ref = tcx.impl_opt_trait_ref(definition).map(|reference| {
         let reference = reference.instantiate_identity().skip_norm_wip();
-        canonical_generic_path(tcx, reference.def_id, &reference.args.as_slice()[1..], true)
+        canonical_generic_path(
+            tcx,
+            reference.def_id,
+            &reference.args.as_slice()[1..],
+            context,
+        )
     });
     format!(
         "Impl<{receiver}{}>@{}",
@@ -790,18 +951,31 @@ fn implementation_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
         definition_origin(tcx, definition),
     )
 }
-fn definition_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
+fn definition_identity(
+    tcx: TyCtxt<'_>,
+    definition: DefId,
+    context: &mut IdentityContext,
+) -> String {
     let mut path = Vec::new();
     let mut parent = Some(definition);
     while let Some(current) = parent {
+        if matches!(
+            context,
+            IdentityContext::Definition {
+                reason: Some(_),
+                ..
+            }
+        ) {
+            return String::new();
+        }
         let part = tcx.def_key(current).disambiguated_data;
         if part.data == hir::definitions::DefPathData::Impl {
-            path.push(implementation_identity(tcx, current));
+            path.push(implementation_identity(tcx, current, context));
         } else {
             path.push(format!(
                 "{:?}#{}@{}",
                 part.data,
-                origin_disambiguator(tcx, current),
+                origin_disambiguator(tcx, current, context),
                 definition_origin(tcx, current),
             ));
         }
@@ -817,27 +991,80 @@ fn definition_identity(tcx: TyCtxt<'_>, definition: DefId) -> String {
         definition_origin(tcx, definition),
     )
 }
-fn origin_disambiguator(tcx: TyCtxt<'_>, definition: DefId) -> usize {
+fn origin_disambiguator(
+    tcx: TyCtxt<'_>,
+    definition: DefId,
+    context: &mut IdentityContext,
+) -> usize {
     let key = tcx.def_key(definition);
-    if key.disambiguated_data.disambiguator == 0 {
+    let span = tcx.def_span(definition);
+    if span.is_dummy() {
         return 0;
     }
-    let span = tcx.def_span(definition);
     let siblings = DEFINITION_SIBLINGS
         .get_or_init(|| Mutex::new(DefinitionSiblings::default()))
         .lock()
         .unwrap()
         .get(tcx, definition);
-    // Cfg can remove earlier siblings. Only indistinguishable source origins need numbering.
-    siblings
+    let same_origin = siblings
         .into_iter()
-        .filter(|&sibling| {
-            let other = tcx.def_key(sibling);
-            other.disambiguated_data.disambiguator < key.disambiguated_data.disambiguator
-        })
         .filter(|&sibling| {
             let other = tcx.def_span(sibling);
             other.lo() == span.lo() && other.hi() == span.hi()
+        })
+        .collect::<Vec<_>>();
+    let identity_siblings = same_origin
+        .iter()
+        .filter(|&&sibling| !is_infrastructure(tcx, sibling))
+        .filter(|&&sibling| tcx.def_kind(sibling) == tcx.def_kind(definition))
+        .count();
+    let anonymous = matches!(
+        key.disambiguated_data.data,
+        hir::definitions::DefPathData::ValueNs(name) if name.as_str() == "_"
+    ) || matches!(
+        key.disambiguated_data.data,
+        hir::definitions::DefPathData::AnonConst
+            | hir::definitions::DefPathData::Closure
+            | hir::definitions::DefPathData::OpaqueTy
+            | hir::definitions::DefPathData::SyntheticCoroutineBody
+            | hir::definitions::DefPathData::NestedStatic
+    );
+    let mut owner = Some(definition);
+    let mut erased_anonymous_origin = anonymous && !definition.is_local();
+    while anonymous
+        && definition.is_local()
+        && let Some(current) = owner
+    {
+        let expansion = tcx.expn_that_defined(current);
+        if expansion != rustc_span::ExpnId::root()
+            && matches!(expansion.expn_data().kind, rustc_span::ExpnKind::Macro(..))
+        {
+            erased_anonymous_origin = true;
+            break;
+        }
+        owner = tcx.opt_parent(current);
+    }
+    if identity_siblings > 1 || erased_anonymous_origin {
+        let error = format!(
+            "ambiguous compiler API identity for {} at {}; source and expansion provenance cannot establish definition equivalence across cfg compilations",
+            format!("{:?}", tcx.def_path(definition).data)
+                .chars()
+                .take(160)
+                .collect::<String>(),
+            definition_origin(tcx, definition)
+                .chars()
+                .take(160)
+                .collect::<String>(),
+        );
+        if let IdentityContext::Definition { reason, .. } = context {
+            reason.get_or_insert(error);
+        }
+    }
+    same_origin
+        .into_iter()
+        .filter(|&sibling| {
+            tcx.def_key(sibling).disambiguated_data.disambiguator
+                < key.disambiguated_data.disambiguator
         })
         .count()
 }
@@ -862,7 +1089,31 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
         _ => "other",
     }
     .to_owned();
-    let id = definition_identity(tcx, definition);
+    let mut context = IdentityContext::Definition {
+        reason: None,
+        active_implementations: HashSet::new(),
+        validated_implementations: HashSet::new(),
+    };
+    let stable_id = definition_identity(tcx, definition, &mut context);
+    let (id, identity) = match context {
+        IdentityContext::Definition {
+            reason: Some(reason),
+            ..
+        } => {
+            let unit = CAPTURE_UNIT.get().unwrap().clone();
+            let defining_context = target_identity(tcx, definition)
+                .unwrap_or_else(|| external_crate_identity(tcx, definition.krate));
+            let id = format!(
+                "@compilation-occurrence/{}::{}[{}]::{:?}",
+                serde_json::to_string(&unit).unwrap(),
+                tcx.crate_name(definition.krate),
+                defining_context,
+                tcx.def_path(definition).data,
+            );
+            (id, Identity::CompilationOccurrence { unit, reason })
+        }
+        _ => (stable_id, Identity::Definition),
+    };
     Some(Api {
         id,
         package: package.name.clone(),
@@ -870,6 +1121,7 @@ fn api(tcx: TyCtxt<'_>, definition: DefId) -> Option<Api> {
         kind,
         path: location.path,
         line: location.line,
+        identity,
     })
 }
 fn trait_declaration(tcx: TyCtxt<'_>, definition: DefId) -> DefId {
@@ -1100,8 +1352,12 @@ impl<'tcx> Visitor<'tcx> for References<'_, 'tcx> {
                     .map(|instance| instance.def_id())
                     .unwrap_or(definition);
                     if let Some(api) = api(self.tcx, resolved) {
-                        self.targets.insert(api.id.clone());
-                        self.capture.insert_api(resolved, api);
+                        if let Identity::CompilationOccurrence { reason, .. } = &api.identity {
+                            self.invalid_targets.push(reason.clone());
+                        } else {
+                            self.targets.insert(api.id.clone());
+                            self.capture.insert_api(resolved, api);
+                        }
                     } else {
                         let location = source_location(self.tcx, expression.span.source_callsite());
                         self.invalid_targets.push(format!(
@@ -1152,6 +1408,7 @@ mod tests {
             kind: "function".into(),
             path: "src/lib.rs".into(),
             line: 1,
+            identity: Identity::Definition,
         };
         {
             let mut guard = capture.lock().unwrap();

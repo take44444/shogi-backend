@@ -20,10 +20,10 @@ class CompilerReportTests(unittest.TestCase):
         (self.root / "src").mkdir()
         (self.root / "src/lib.rs").write_text("pub fn api() {}\nfn caller() { api(); }\nfn check() {}\n")
         self.components = [{"id": "sample", "package": "sample", "path": "."}]
-        self.api = {"id": "sample/api", "package": "sample", "name": "api", "kind": "function", "path": "src/lib.rs", "line": 1}
+        self.api = {"id": "sample/api", "package": "sample", "name": "api", "kind": "function", "identity": {"kind": "definition"}, "path": "src/lib.rs", "line": 1}
         self.caller = {**self.api, "id": "sample/caller", "name": "caller", "line": 2}
         self.shard = {
-            "version": 3,
+            "version": 4,
             "unit": {"package": "sample", "crate_name": "sample", "target_kind": "lib", "target_name": "sample", "is_test": True, "features": [], "purposes": ["tests"], "source": "src/lib.rs"},
             "apis": [self.api, self.caller],
             "calls": [{"caller": "sample/caller", "caller_package": "sample", "callee": "sample/api", "path": "src/lib.rs", "line": 2, "dispatch": "static"}],
@@ -65,6 +65,49 @@ class CompilerReportTests(unittest.TestCase):
         normal["apis"][0]["line"] = 2
         with self.assertRaisesRegex(trace.InvalidTrace, "conflicting API definition"):
             self.merge(self.shard, normal)
+
+    def test_compilation_occurrences_keep_calls_separate_between_units(self):
+        normal = deepcopy(self.shard)
+        normal["unit"].update(is_test=False, purposes=["production"])
+        normal["tests"] = []
+        self.shard["tests"][0]["targets"] = []
+        for shard in (normal, self.shard):
+            caller = shard["apis"][1]
+            caller["id"] += "/test" if shard["unit"]["is_test"] else "/normal"
+            caller["identity"] = {"kind": "compilation-occurrence",
+                                  "unit": {key: value for key, value in shard["unit"].items() if key != "purposes"},
+                                  "reason": "macro-generated anonymous scope"}
+            shard["calls"][0]["caller"] = caller["id"]
+        bundle = self.merge(normal, self.shard)
+        self.assertEqual(len(bundle["calls"]), 2)
+        self.assertTrue(all(len(call["origins"]) == 1 for call in bundle["calls"]))
+        self.assertEqual(len(bundle["apis"]), 3)
+
+    def test_an_occurrence_cannot_be_an_explicit_test_target(self):
+        self.shard["apis"][0]["identity"] = {
+            "kind": "compilation-occurrence",
+            "unit": {key: value for key, value in self.shard["unit"].items() if key != "purposes"},
+            "reason": "macro-generated anonymous scope",
+        }
+        with self.assertRaisesRegex(trace.InvalidTrace, "ambiguous compiler API identity cannot be a test target"):
+            self.merge()
+
+    def test_api_identity_requires_a_valid_kind_and_observing_unit(self):
+        provenance = {"kind": "compilation-occurrence",
+                      "unit": {key: value for key, value in self.shard["unit"].items() if key != "purposes"},
+                      "reason": "macro-generated anonymous scope"}
+        wrong_unit = deepcopy(provenance)
+        wrong_unit["unit"]["is_test"] = False
+        for identity in ({}, {"kind": "guessed"}, wrong_unit):
+            with self.subTest(identity=identity), self.assertRaises(trace.InvalidTrace):
+                self.shard["apis"][0]["identity"] = identity
+                self.merge()
+
+    def test_different_observations_with_the_same_unit_are_rejected(self):
+        changed = deepcopy(self.shard)
+        changed["calls"] = []
+        with self.assertRaisesRegex(trace.InvalidTrace, "multiple different shards for compiler unit"):
+            self.merge(self.shard, changed)
 
     def test_every_call_and_test_reference_must_resolve(self):
         for category, field in (("calls", "callee"), ("calls", "caller"), ("tests", "targets")):
@@ -267,8 +310,8 @@ class CompilerReportTests(unittest.TestCase):
     def test_duplicate_inventory_name_and_legacy_schema_fail(self):
         with self.assertRaisesRegex(trace.InvalidTrace, "duplicate test names"):
             trace.parse_inventory("check: test\ncheck: test\n")
-        self.shard["version"] = 2
-        with self.assertRaisesRegex(trace.InvalidTrace, "version must be 3"):
+        self.shard["version"] = 3
+        with self.assertRaisesRegex(trace.InvalidTrace, "version must be 4"):
             self.merge()
 
     def test_no_test_name_or_substring_can_establish_a_run_passed(self):

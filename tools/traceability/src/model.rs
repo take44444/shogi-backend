@@ -156,7 +156,7 @@ fn relative_path(root: &Path, path: &Path) -> String {
     relative.to_string_lossy().replace('\\', "/")
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct Unit {
     pub package: String,
     pub crate_name: String,
@@ -166,6 +166,12 @@ pub struct Unit {
     pub features: Vec<String>,
     pub source: String,
 }
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Identity {
+    Definition,
+    CompilationOccurrence { unit: Unit, reason: String },
+}
 #[derive(Clone, Serialize)]
 pub struct Api {
     pub id: String,
@@ -174,6 +180,7 @@ pub struct Api {
     pub kind: String,
     pub path: String,
     pub line: usize,
+    pub identity: Identity,
 }
 #[derive(Serialize)]
 pub struct Call {
