@@ -13,18 +13,37 @@ TOOLS = Path(os.environ.get("TRACEABILITY_TEST_TOOL_ROOT", REPOSITORY)).resolve(
 
 
 class CompilerPipelineTests(unittest.TestCase):
-    def assert_macro_identity_is_rejected(self, generated, target=None):
+    def assert_macro_identity_is_rejected(self, generated, target=None, *, preserve_input_span=False):
         with tempfile.TemporaryDirectory(prefix="compiler-trace-ambiguous-macro-") as directory:
             root = Path(directory)
             (root / "tools").mkdir()
             (root / "tools/traceability").symlink_to(TOOLS / "tools/traceability", target_is_directory=True)
             test = ('#[traceability::targets(' + target + ')] #[test] fn exact() {}') if target else '#[test] fn unrelated() {}'
+            macro = 'use proc_macro::TokenStream;\n#[proc_macro] pub fn generate(_:TokenStream)->TokenStream { ' + json.dumps(generated) + '.parse().unwrap() }\n'
+            if preserve_input_span:
+                macro = '''use proc_macro::{TokenStream, TokenTree, Span, Group};
+fn assign(tokens: TokenStream, span: Span) -> TokenStream {
+    tokens.into_iter().map(|token| match token {
+        TokenTree::Group(group) => {
+            let mut result = Group::new(group.delimiter(), assign(group.stream(), span));
+            result.set_span(span);
+            TokenTree::Group(result)
+        }
+        mut other => { other.set_span(span); other }
+    }).collect()
+}
+#[proc_macro] pub fn generate(input: TokenStream) -> TokenStream {
+    let span = input.into_iter().next().unwrap().span();
+    assign(''' + json.dumps(generated) + '''.parse().unwrap(), span)
+}
+'''
+            invocation = 'generator::generate!(origin);' if preserve_input_span else 'generator::generate!();'
             files = {
                 "Cargo.toml": '[workspace]\nmembers=["api"]\nexclude=["macros"]\nresolver="3"\n',
                 "api/Cargo.toml": '[package]\nname="api"\nversion="0.1.0"\nedition="2024"\n[dependencies]\ngenerator={path="../macros"}\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(TOOLS / "tools/traceability-attributes")) + '}\n',
-                "api/src/lib.rs": 'generator::generate!();\n#[cfg(test)] mod tests { ' + test + ' }\n',
+                "api/src/lib.rs": invocation + '\n#[cfg(test)] mod tests { ' + test + ' }\n',
                 "macros/Cargo.toml": '[package]\nname="generator"\nversion="0.1.0"\nedition="2024"\n[lib]\nproc-macro=true\n',
-                "macros/src/lib.rs": 'use proc_macro::TokenStream;\n#[proc_macro] pub fn generate(_:TokenStream)->TokenStream { ' + json.dumps(generated) + '.parse().unwrap() }\n',
+                "macros/src/lib.rs": macro,
             }
             for relative, content in files.items():
                 path = root / relative
@@ -99,6 +118,14 @@ pub fn operation() {
     let _: [u8; { consume_b() }] = [0];
 }
 ''')
+
+    def test_macro_input_spans_do_not_make_anonymous_scopes_identifiable(self):
+        self.assert_macro_identity_is_rejected('''
+#[cfg(not(test))] const _: () = { fn operation() { production_only(); } };
+#[cfg(test)] const _: () = { fn operation() { test_only(); } };
+pub fn production_only() {}
+pub fn test_only() {}
+''', preserve_input_span=True)
 
     def test_cfg_macro_identity_split_cannot_silently_drop_a_production_test_target(self):
         self.assert_macro_identity_is_rejected('''
