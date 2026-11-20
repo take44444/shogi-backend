@@ -153,7 +153,13 @@ async fn declared_async_boundary() { assert_eq!(renamed::calculate(), 5); }
         assert len(shared) == 3 and len({api["id"] for api in shared}) == 3, shared
         assert {api["name"].split("::")[0] for api in shared} == {"boundary_api", "reused", "reused_again"}, shared
         anonymous = [api for api in apis.values() if api["kind"] == "closure" and "same_span_closures" in api["name"]]
-        assert len(anonymous) == 2 and len({api["id"] for api in anonymous}) == 2, anonymous
+        assert len(anonymous) == 4 and len({api["id"] for api in anonymous}) == 4, anonymous
+        assert all(api["identity"]["kind"] == "compilation-occurrence" for api in anonymous), anonymous
+        for shard in shards:
+            assert shard["version"] == 4, shard["version"]
+            for api in shard["apis"]:
+                if api["identity"]["kind"] == "compilation-occurrence":
+                    assert api["identity"]["unit"] == shard["unit"], api
         generated = {key: value for shard in shards for key, value in shard["generated_sources"].items()}
         assert generated == {"@generated/boundary-api/generated.rs": "pub fn generated() -> u32 { calculate() }\n"}, generated
         assert any(api["path"] == "@generated/boundary-api/generated.rs" for api in apis.values())
