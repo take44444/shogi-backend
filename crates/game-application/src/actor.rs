@@ -240,5 +240,5 @@ pub(crate) fn snapshot_from_record(record: GameRecord) -> Result<Snapshot, Appli
 }
 
 #[cfg(test)]
-#[path = "tests/game-command-recovery/support.rs"]
+#[path = "tests/actor.rs"]
 mod tests;

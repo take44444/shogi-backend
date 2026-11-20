@@ -440,5 +440,5 @@ fn decode(value: String) -> Result<String, Error> {
 }
 
 #[cfg(test)]
-#[path = "tests/public-record-search/support.rs"]
+#[path = "tests/records.rs"]
 mod tests;

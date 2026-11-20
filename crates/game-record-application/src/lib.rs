@@ -341,5 +341,5 @@ impl GameRecords {
 }
 
 #[cfg(test)]
-#[path = "tests/public-record-search/support.rs"]
+#[path = "tests/records.rs"]
 mod tests;

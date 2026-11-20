@@ -253,5 +253,5 @@ pub fn select_pair(tickets: &[Ticket], now: i64) -> Option<(&Ticket, &Ticket)> {
 }
 
 #[cfg(test)]
-#[path = "tests/matchmaking-pairing/selection/tests.rs"]
+#[path = "tests/matchmaking.rs"]
 mod tests;

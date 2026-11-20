@@ -520,5 +520,5 @@ impl AccountRepository for PostgresAccounts {
 }
 
 #[cfg(test)]
-#[path = "tests/account-google-login/support.rs"]
+#[path = "tests/accounts.rs"]
 mod tests;

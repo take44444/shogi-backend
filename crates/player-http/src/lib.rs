@@ -361,13 +361,13 @@ impl From<Detail> for DetailDto {
 }
 
 #[cfg(test)]
-#[path = "tests/public-api-documents/support.rs"]
+#[path = "tests/openapi.rs"]
 mod openapi_tests;
 
 #[cfg(test)]
-#[path = "tests/public-record-search/http-resource-policy/tests.rs"]
+#[path = "tests/search.rs"]
 mod contract_tests;
 
 #[cfg(test)]
-#[path = "tests/public-record-detail/router_support.rs"]
+#[path = "tests/router_support.rs"]
 mod record_route_support;

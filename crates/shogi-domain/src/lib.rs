@@ -140,5 +140,5 @@ impl Game {
 }
 
 #[cfg(test)]
-#[path = "tests/game-play/support.rs"]
+#[path = "tests/game.rs"]
 mod tests;

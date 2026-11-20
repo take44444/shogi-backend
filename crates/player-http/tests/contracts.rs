@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 #[path = "contracts/user-ratings/support.rs"]
 mod rating_tests;
-#[path = "../src/tests/public-record-detail/router_support.rs"]
+#[path = "../src/tests/router_support.rs"]
 mod record_route_support;
 #[path = "contracts/public-record-detail/support.rs"]
 mod tests;

@@ -81,5 +81,5 @@ pub trait AccountRepository: Send + Sync {
 }
 
 #[cfg(test)]
-#[path = "tests/account-profile/display-name/tests.rs"]
+#[path = "tests/display_name.rs"]
 mod tests;
