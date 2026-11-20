@@ -88,25 +88,24 @@ pub fn production_only() {}
 pub fn test_only() {}
 ''')
 
+    def test_cfg_macro_const_expression_callers_cannot_be_merged(self):
+        self.assert_macro_identity_is_rejected('''
+pub const fn consume_test() -> usize { 1 }
+pub const fn consume_a() -> usize { 1 }
+pub const fn consume_b() -> usize { 1 }
+pub fn operation() {
+    #[cfg(test)] let _: [u8; { consume_test() }] = [0];
+    let _: [u8; { consume_a() }] = [0];
+    let _: [u8; { consume_b() }] = [0];
+}
+''')
+
     def test_cfg_macro_identity_split_cannot_silently_drop_a_production_test_target(self):
-        with tempfile.TemporaryDirectory(prefix="compiler-trace-cfg-macro-") as directory:
-            root = Path(directory)
-            (root / "tools").mkdir()
-            (root / "tools/traceability").symlink_to(TOOLS / "tools/traceability", target_is_directory=True)
-            files = {
-                "Cargo.toml": '[workspace]\nmembers=["api"]\nexclude=["macros"]\nresolver="3"\n',
-                "api/Cargo.toml": '[package]\nname="api"\nversion="0.1.0"\nedition="2024"\n[dependencies]\ngenerator={path="../macros"}\n[dev-dependencies]\ntraceability={package="traceability-attributes",path=' + json.dumps(str(TOOLS / "tools/traceability-attributes")) + '}\n',
-                "api/src/lib.rs": 'generator::generate!();\n#[cfg(test)] mod tests { #[traceability::targets(super::Hidden::hidden)] #[test] fn exact() {} }\n',
-                "macros/Cargo.toml": '[package]\nname="generator"\nversion="0.1.0"\nedition="2024"\n[lib]\nproc-macro=true\n',
-                "macros/src/lib.rs": 'use proc_macro::TokenStream;\n#[proc_macro] pub fn generate(_:TokenStream)->TokenStream { "pub struct Hidden; #[cfg(test)] const _: () = { fn padding() {} }; const _: () = { impl Hidden { pub fn hidden() {} } };".parse().unwrap() }\n',
-            }
-            for relative, content in files.items():
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(content)
-            trace.execute(["cargo", "+" + trace.toolchain(root), "generate-lockfile"], root)
-            with self.assertRaisesRegex(trace.InvalidTrace, "no matching definition in the production build"):
-                trace.load_traces(root)
+        self.assert_macro_identity_is_rejected('''
+pub struct Hidden;
+#[cfg(test)] const _: () = { fn padding() {} };
+const _: () = { impl Hidden { pub fn hidden() {} } };
+''', 'super::Hidden::hidden')
 
     def test_compiler_inventory_calls_targets_and_warm_cache(self):
         with tempfile.TemporaryDirectory(prefix="compiler-trace-cli-") as directory:
