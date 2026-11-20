@@ -509,5 +509,5 @@ mod realtime_session_commands_limits_outgoing;
 #[path = "../matchmaking-tickets/browser-owner/tests.rs"]
 mod matchmaking_tickets_browser_owner;
 
-#[path = "../../internal/matchmaking-openapi.rs"]
+#[path = "../matchmaking-tickets/openapi.rs"]
 mod matchmaking_tickets_browser_schema;

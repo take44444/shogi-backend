@@ -129,5 +129,5 @@ mod account_session_session_cookie_input;
 #[path = "../../account-session/cookie-issuance/tests.rs"]
 mod account_session_cookie_issuance;
 
-#[path = "../../../internal/startup-schema-isolation/contract-browser-config/tests.rs"]
+#[path = "../../browser-config.rs"]
 mod startup_schema_isolation_contract_browser_config;

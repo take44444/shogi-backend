@@ -46,5 +46,5 @@ mod user_ratings_application_forwarding;
 
 #[path = "http-input/tests.rs"]
 mod user_ratings_http_input;
-#[path = "../../internal/rating-openapi.rs"]
+#[path = "openapi.rs"]
 mod user_ratings_http_openapi;
