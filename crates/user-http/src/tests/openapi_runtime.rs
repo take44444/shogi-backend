@@ -1,0 +1,26 @@
+use super::*;
+
+#[tokio::test]
+async fn runtime_document_equals_offline_document_without_storage_or_provider_calls() {
+    for secure in [true, false] {
+        let response = offline_router(secure)
+            .oneshot(
+                Request::builder()
+                    .uri("/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(response.headers()[header::REFERRER_POLICY], "no-referrer");
+        assert_eq!(
+            response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+            "nosniff"
+        );
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), document());
+    }
+}

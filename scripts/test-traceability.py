@@ -1,444 +1,303 @@
 #!/usr/bin/env python3
-import contextlib
-import copy
+from copy import deepcopy
 import importlib.util
-import io
 import json
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-CHECKER = Path(__file__).with_name("traceability.py").resolve()
-RECORD = Path("crates/sample/src/trace/ratings/feature.rs")
-spec = importlib.util.spec_from_file_location("traceability", CHECKER)
-traceability = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(traceability)
-BASE = {
-    "version": 1,
-    "feature": {"id": "ratings", "title": "Ratings", "flow": ["HTTP delegates to a reader"], "source": {"path": "source.rs", "needle": "// feature"}},
-    "guarantees": [{"id": "public", "statement": "Both pools", "contracts": ["reader", "http"]}],
-    "contracts": [
-        {"id": name, "statement": f"{name} contract", "source": {"path": "source.rs", "needle": f"// {name}"},
-         "evidence": [{"test": "one", "relationship": "asserts", "reason": "Compares the result"}]}
-        for name in ("reader", "http")
-    ],
-    "tests": [{"id": "one", "package": "sample", "target": {"kind": "lib"}, "name": "module::selected",
-               "source": {"path": "source.rs", "needle": "fn selected() {}"}, "scope": "Fake repository"}],
-    "limitations": ["No end-to-end assertion"],
-}
+spec = importlib.util.spec_from_file_location("traceability", Path(__file__).with_name("traceability.py"))
+trace = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(trace)
 
 
-class TraceabilityTests(unittest.TestCase):
+class CompilerReportTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="trace-validator-")
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.graph = copy.deepcopy(BASE)
-        self.records = {RECORD: self.graph}
-        (self.root / "source.rs").write_text("// feature\n// reader\n// http\nfn selected() {}\nfn other() {}\n")
-        (self.root / "proto").mkdir()
-        (self.root / "proto/game.proto").write_text("service GameService { rpc Selected(Request) returns (Response); }\n")
-        self.bundle = {
-            "graphs": [], "inventories": [], "classifications": [], "excluded_targets": [],
-            "packages": [{"name": "sample", "path": "crates/sample"}],
-            "examples": [{"package": "sample", "example": "sample-openapi", "source": "source.rs", "kind": "OpenApi", "reason": "Exports the schema"}],
-            "surfaces": [
-                {"kind": "OpenApi", "package": "sample", "example": "sample-openapi", "operation": "GET /ratings", "feature": "ratings"},
-                {"kind": "Grpc", "path": "proto/game.proto", "service": "GameService", "operation": "Selected", "feature": "ratings"},
-            ],
-            "entrypoints": [{"feature": "ratings", "name": "Worker", "source": {"path": "source.rs", "needle": "// feature"}}],
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        (self.root / "src").mkdir()
+        (self.root / "src/lib.rs").write_text("pub fn api() {}\nfn caller() { api(); }\nfn check() {}\n")
+        self.components = [{"id": "sample", "package": "sample", "path": "."}]
+        self.api = {"id": "sample/api", "package": "sample", "name": "api", "kind": "function", "path": "src/lib.rs", "line": 1}
+        self.caller = {**self.api, "id": "sample/caller", "name": "caller", "line": 2}
+        self.shard = {
+            "version": 3,
+            "unit": {"package": "sample", "crate_name": "sample", "target_kind": "lib", "target_name": "sample", "is_test": True, "features": [], "purposes": ["tests"], "source": "src/lib.rs"},
+            "apis": [self.api, self.caller],
+            "calls": [{"caller": "sample/caller", "caller_package": "sample", "callee": "sample/api", "path": "src/lib.rs", "line": 2, "dispatch": "static"}],
+            "tests": [{"package": "sample", "target_kind": "lib", "target_name": "sample", "name": "check", "path": "src/lib.rs", "line": 3, "targets": ["sample/api"]}],
+            "unresolved": [], "coverage": {"bodies": 3, "calls": 1, "function_references": 0, "external_calls": 0},
         }
-        self.protocol = {"inventory": {"sample|lib|": "module::selected: test\n"}}
-        self.commands = []
 
-    def load_fixture(self, root):
-        traceability.require(self.records, "no feature declarations")
-        traces = traceability.Traces(self.bundle)
-        for record, graph in self.records.items():
-            graph, lines = traceability.validate_graph(root, graph)
-            traces.append((record, graph, lines))
-        traceability.unique([graph["feature"]["id"] for _, graph, _ in traces], "global feature IDs")
-        traces.sort(key=lambda trace: trace[1]["feature"]["id"])
-        return traces
+    def merge(self, *shards):
+        return trace.merge_shards(self.root, shards or [self.shard], self.components)
 
-    def execute_fixture(self, args, root):
-        self.commands.append(args)
-        if args[0:2] == ["cargo", "check"]:
-            traceability.require(not self.protocol.get("example_check_exit"), "example compilation failed")
-            return ""
-        if args[0:2] == ["cargo", "run"]:
-            traceability.require(not self.protocol.get("openapi_exit"), "command failed")
-            return json.dumps(self.protocol.get("openapi", {"paths": {"/ratings": {"get": {}}}}))
-        if "--list" in args:
-            traceability.require(not self.protocol.get("inventory_exit"), "command failed")
-            kind = "lib" if "--lib" in args else "test" if "--test" in args else "bin"
-            target = "" if kind == "lib" else args[args.index("--" + kind) + 1]
-            key = "|".join((args[args.index("-p") + 1], kind, target))
-            return self.protocol["inventory"].get(key, "")
-        traceability.require(not self.protocol.get("execution_exit"), "command failed")
-        name = args[args.index("--") - 1]
-        return self.protocol.get("execution", f"running 1 test\ntest {name} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
+    def test_explicit_targets_must_join_the_production_definition(self):
+        normal = deepcopy(self.shard)
+        normal["unit"].update(is_test=False, purposes=["production"])
+        normal["tests"] = []
+        bundle = self.merge(self.shard, normal)
+        trace.check_production_targets(bundle, [self.shard, normal])
+        for changed in (self.shard, {**normal, "unit": {**normal["unit"], "purposes": ["tests"]}},
+                        {**normal, "apis": [{**api, "id": api["id"] + "-cfg"} for api in normal["apis"]]}):
+            with self.subTest(unit=changed["unit"]), self.assertRaisesRegex(trace.InvalidTrace, "no matching definition in the production build"):
+                trace.check_production_targets(bundle, [self.shard, changed])
 
-    def run_cli(self, command):
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with patch.object(traceability, "load_traces", self.load_fixture), patch.object(traceability, "execute", self.execute_fixture):
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                code = traceability.main([command, "--root", str(self.root)])
-        return SimpleNamespace(returncode=code, stdout=stdout.getvalue(), stderr=stderr.getvalue())
+    def test_merging_normal_and_test_units_deduplicates_calls_and_preserves_targets(self):
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["tests"] = []
+        first = self.merge(self.shard, normal, normal)
+        second = self.merge(normal, self.shard)
+        self.assertEqual(first, second)
+        self.assertEqual(first["coverage"]["bodies"], 6)
+        self.assertEqual(len(first["calls"]), 1)
+        self.assertEqual(first["calls"][0]["origins"], trace.sorted_records([normal["unit"], self.shard["unit"]]))
+        self.assertEqual(first["tests"][0]["targets"], ["sample/api"])
+        self.assertEqual(len(first["units"]), 2)
 
-    def succeeds(self, command):
-        result = self.run_cli(command)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return result
+    def test_conflicting_definition_is_rejected(self):
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["tests"] = []
+        normal["apis"][0]["line"] = 2
+        with self.assertRaisesRegex(trace.InvalidTrace, "conflicting API definition"):
+            self.merge(self.shard, normal)
 
-    def rejects(self, message, command="check"):
-        result = self.run_cli(command)
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn(message, result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
-        return result
+    def test_every_call_and_test_reference_must_resolve(self):
+        for category, field in (("calls", "callee"), ("calls", "caller"), ("tests", "targets")):
+            with self.subTest(category=category, field=field):
+                broken = deepcopy(self.shard)
+                broken[category][0][field] = ["absent"] if field == "targets" else "absent"
+                with self.assertRaisesRegex(trace.InvalidTrace, "unknown .*API"):
+                    self.merge(broken)
 
-    def add_feature(self):
-        other = copy.deepcopy(BASE)
-        other["feature"]["id"] = "other-feature"
-        record = Path("apps/sample/src/trace/other-feature/feature.rs")
-        self.records[record] = other
-        self.bundle["entrypoints"].append({"feature": "other-feature", "name": "Other worker", "source": {"path": "source.rs", "needle": "// feature"}})
-        return record, other
+    def test_test_target_does_not_promote_concrete_impl_to_interface(self):
+        concrete = {**self.api, "id": "sample/concrete", "name": "<Concrete as Trait>::api", "kind": "trait-impl-method"}
+        interface = {**self.api, "id": "sample/trait", "name": "Trait::api", "kind": "trait-method"}
+        self.shard["apis"] += [concrete, interface]
+        self.shard["calls"][0]["callee"] = interface["id"]
+        self.shard["calls"][0]["dispatch"] = "dyn"
+        self.shard["tests"][0]["targets"] = [concrete["id"]]
+        bundle = self.merge()
+        self.assertEqual(bundle["tests"][0]["targets"], ["sample/concrete"])
+        self.assertEqual(bundle["calls"][0]["callee"], "sample/trait")
 
-    def test_check_and_run_use_exact_identity_without_presentation_files(self):
-        self.graph["contracts"][1]["evidence"][0]["relationship"] = "exercises"
-        first = self.succeeds("check").stdout
-        self.assertEqual(first, self.succeeds("check").stdout)
-        self.assertFalse(any("--list" not in args and args[:2] == ["cargo", "test"] for args in self.commands))
-        traces = self.load_fixture(self.root)
-        self.assertEqual(traces[0][2]["one"], 4)
-        self.assertEqual({edge["relationship"] for contract in traces[0][1]["contracts"] for edge in contract["evidence"]}, {"asserts", "exercises"})
-        self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
-        self.assertEqual(self.commands[-1], ["cargo", "test", "--locked", "-p", "sample", "--lib", "module::selected", "--", "--exact", "--format", "pretty", "--color", "never"])
-        self.assertFalse((self.root / "docs").exists())
-        self.assertFalse((self.root / "target").exists())
+    def test_calls_do_not_assign_targets_to_unannotated_tests(self):
+        self.shard["tests"][0]["targets"] = []
+        bundle = self.merge()
+        self.assertEqual(trace.selected_tests(bundle, "targeted"), [])
+        self.assertEqual(trace.selected_tests(bundle, "untargeted"), bundle["tests"])
+        self.assertEqual(trace.selected_tests(bundle, "all"), bundle["tests"])
 
-    def test_render_command_is_rejected(self):
-        with contextlib.redirect_stderr(io.StringIO()) as stderr:
-            with self.assertRaises(SystemExit) as error:
-                traceability.main(["render", "--root", str(self.root)])
-        self.assertEqual(error.exception.code, 2)
-        self.assertIn("invalid choice", stderr.getvalue())
-        self.assertEqual(self.commands, [])
+    def test_missing_compiler_shards_and_wrong_unit_context_fail(self):
+        with self.assertRaisesRegex(trace.InvalidTrace, "no compiler shards"):
+            trace.merge_shards(self.root, [], self.components)
+        self.shard["tests"][0]["target_name"] = "other"
+        with self.assertRaisesRegex(trace.InvalidTrace, "incorrect compiler unit context"):
+            self.merge()
 
-    def test_multiple_features_share_inventory_and_execute_each_identity_once(self):
-        self.add_feature()
-        self.succeeds("check")
-        self.commands.clear()
-        self.assertIn("PASS other-feature/one, ratings/one", self.succeeds("run").stdout)
-        self.assertEqual(sum("--list" in command for command in self.commands), 1)
-        self.assertEqual(sum(command[1] == "test" and "--list" not in command for command in self.commands), 1)
+    def test_source_locations_are_confined_and_lines_are_real(self):
+        for path, line in (("../outside.rs", 1), ("/tmp/outside.rs", 1), ("src/lib.rs", 5), ("src/lib.rs", True)):
+            with self.subTest(path=path, line=line):
+                broken = deepcopy(self.shard)
+                broken["apis"][0].update(path=path, line=line)
+                with self.assertRaises(trace.InvalidTrace):
+                    self.merge(broken)
 
-    def test_global_inventory_rejects_unclassified_tests_in_empty_and_new_targets(self):
-        for target in ({"kind": "lib"}, {"kind": "test", "name": "new_target"}, {"kind": "bin", "name": "worker"}):
-            with self.subTest(target=target):
-                self.bundle["inventories"] = [{"package": "sample", "target": target, "tests": ["module::selected"] if target["kind"] == "lib" else []}]
-                key = "|".join(("sample", target["kind"], target.get("name", "")))
-                self.protocol["inventory"][key] = ("module::selected: test\n" if target["kind"] == "lib" else "") + "hidden: test\n"
-                self.rejects("global classification inventory mismatch")
-                self.protocol["inventory"][key] = "module::selected: test\n" if target["kind"] == "lib" else ""
+    def test_symlink_source_outside_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as outside:
+            path = Path(outside) / "outside.rs"
+            path.write_text("pub fn outside() {}\n")
+            (self.root / "src/link.rs").symlink_to(path)
+            self.shard["apis"][0]["path"] = "src/link.rs"
+            with self.assertRaisesRegex(trace.InvalidTrace, "outside repository"):
+                self.merge()
 
-    def test_global_inventory_keeps_multiplicity_and_zero_test_targets(self):
-        self.bundle["inventories"] = [{"package": "other", "target": {"kind": "lib"}, "tests": []}]
-        self.succeeds("check")
-        self.assertTrue(any("other" in command and "--list" in command for command in self.commands))
-        self.protocol["inventory"]["other|lib|"] = "hidden: test\nhidden: test\n"
-        self.rejects("unclassified compiled ['hidden', 'hidden']")
+    def test_unresolved_calls_remain_visible(self):
+        self.shard["unresolved"] = [{"caller": "sample/caller", "path": "src/lib.rs", "line": 2, "reason": "function pointer target unknown"}]
+        self.assertEqual(self.merge()["unresolved"], [{**self.shard["unresolved"][0], "origins": [self.shard["unit"]]}])
 
-    def test_duplicate_global_feature_and_missing_all_declarations_are_rejected(self):
-        record, other = self.add_feature()
-        other["feature"]["id"] = "ratings"
-        self.rejects("global feature IDs: duplicate")
-        self.records.clear()
-        self.rejects("no feature declarations")
+    def test_call_reference_and_unresolved_origins_preserve_only_observed_units(self):
+        self.shard["references"] = deepcopy(self.shard["calls"])
+        self.shard["unresolved"] = [{"caller": "sample/caller", "path": "src/lib.rs", "line": 2, "reason": "function pointer target unknown"}]
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["tests"] = []
+        normal["calls"] = []
+        for category in ("references", "unresolved"):
+            normal[category] += deepcopy(normal[category])
+        first = self.merge(self.shard, normal)
+        self.assertEqual(first, self.merge(normal, self.shard, normal))
+        self.assertEqual(first["calls"][0]["origins"], [self.shard["unit"]])
+        for category in ("references", "unresolved"):
+            self.assertEqual(len(first[category]), 1)
+            self.assertEqual(first[category][0]["origins"], trace.sorted_records([normal["unit"], self.shard["unit"]]))
 
-    def test_surface_unknown_owners_duplicates_and_missing_entrypoint_anchor(self):
-        self.bundle["surfaces"][0]["feature"] = "absent"
-        self.rejects("unknown feature owner absent")
-        self.bundle["surfaces"][0]["feature"] = "ratings"
-        self.bundle["surfaces"].append(copy.deepcopy(self.bundle["surfaces"][0]))
-        self.rejects("duplicate OpenAPI operation owner")
-        self.bundle["surfaces"].pop()
-        self.bundle["entrypoints"][0]["source"]["needle"] = "deleted worker"
-        self.rejects("source needle must occur exactly once")
+    def test_function_references_remain_separate_from_calls_and_validate_api_ids(self):
+        self.shard["references"] = self.shard["calls"]
+        self.shard["calls"] = []
+        bundle = self.merge()
+        self.assertEqual(bundle["calls"], [])
+        self.assertEqual(len(bundle["references"]), 1)
+        self.shard["references"][0]["callee"] = "absent"
+        with self.assertRaisesRegex(trace.InvalidTrace, "unknown call callee API"):
+            self.merge()
 
-    def test_new_openapi_exporters_and_changed_operations_are_rejected(self):
-        self.protocol["openapi"] = {"paths": {"/ratings": {"get": {}, "post": {}}}}
-        self.rejects("uncataloged ['POST /ratings']")
-        self.protocol["openapi"] = {"paths": {}}
-        self.rejects("absent ['GET /ratings']")
-        self.bundle["examples"].append({"package": "other", "example": "schema", "source": "source.rs", "kind": "OpenApi", "reason": "Exports another schema"})
-        self.rejects("OpenAPI exporter set mismatch")
+    def test_generated_sources_resolve_logical_spans_without_temporary_build_paths(self):
+        path = "@generated/sample/wire.rs"
+        self.shard["generated_sources"] = {path: "pub fn generated() {}\n"}
+        self.shard["apis"].append({**self.api, "id": "sample/generated", "name": "generated", "path": path})
+        bundle = self.merge()
+        self.assertEqual(bundle["generated_sources"], {path: "pub fn generated() {}\n"})
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["tests"] = []
+        normal["generated_sources"][path] = "pub fn changed() {}\n"
+        with self.assertRaisesRegex(trace.InvalidTrace, "conflicting generated source contents"):
+            self.merge(self.shard, normal)
 
-    def test_example_packages_compile_once_and_only_openapi_examples_execute(self):
-        self.bundle["examples"].append({"package": "sample", "example": "demo", "source": "source.rs", "kind": "Program", "reason": "Needs a running service"})
-        self.succeeds("check")
-        checks = [args for args in self.commands if args[:2] == ["cargo", "check"]]
-        self.assertEqual(checks, [["cargo", "check", "--locked", "-p", "sample", "--examples"]])
-        runs = [args for args in self.commands if args[:2] == ["cargo", "run"]]
-        self.assertEqual([args[-1] for args in runs], ["sample-openapi"])
-        self.protocol["example_check_exit"] = True
-        self.rejects("example compilation failed")
+    def test_generated_sources_cannot_override_repository_files_or_escape_namespace(self):
+        for key in ("src/lib.rs", "@generated/unknown/file.rs", "@generated/sample/../../file.rs"):
+            with self.subTest(key=key):
+                self.shard["generated_sources"] = {key: "fn bad() {}"}
+                with self.assertRaisesRegex(trace.InvalidTrace, "invalid generated source key"):
+                    self.merge()
+        path = "@generated/sample/file.rs"
+        (self.root / path).parent.mkdir(parents=True)
+        (self.root / path).write_text("fn real() {}\n")
+        self.shard["generated_sources"] = {path: "fn bad() {}"}
+        with self.assertRaisesRegex(trace.InvalidTrace, "collides with repository file"):
+            self.merge()
 
-    def test_grpc_new_file_service_rpc_missing_and_unsupported_syntax_are_rejected(self):
-        path = self.root / "proto/another.proto"
-        path.write_text("service Another { rpc Added(Request) returns (Response); }")
-        self.rejects("uncataloged [('proto/another.proto', 'Another', 'Added')]")
-        path.unlink()
-        path = self.root / "proto/game.proto"
-        path.write_text("service GameService { rpc Added(Request) returns (Response); }")
-        self.rejects("operation set mismatch")
-        path.write_text("service GameService { rpc Selected(Request) returns (Response) { option x = true; } }")
-        self.rejects("missing or unsupported gRPC service block")
+    def test_cargo_artifacts_reconcile_normal_and_test_units(self):
+        metadata = {"workspace_members": ["sample-id"], "packages": [{"id": "sample-id", "name": "sample"}]}
+        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"}, "profile": {"test": True}, "features": [], "executable": "/test-binary"}
+        artifacts = trace.cargo_artifacts([("tests", json.dumps(message))], metadata)
+        self.assertEqual(artifacts, trace.cargo_artifacts([("tests", json.dumps(message) + "\n" + json.dumps(message))], metadata))
+        bundle = self.merge()
+        trace.reconcile_units(bundle, artifacts)
+        missing = {**artifacts[0], "is_test": False}
+        with self.assertRaisesRegex(trace.InvalidTrace, "missing shards"):
+            trace.reconcile_units(bundle, artifacts + [missing])
 
-    def test_empty_tests_require_explicit_contract_gaps_and_flow_is_required(self):
-        self.graph["tests"] = []
-        for contract in self.graph["contracts"]:
-            contract.update(evidence=[], gap="No direct assertion")
-        self.succeeds("check")
-        self.graph["feature"]["flow"] = []
-        self.rejects("nonempty list")
-        self.graph["feature"]["flow"] = ["two\nlines"]
-        self.rejects("single-line text")
+    def test_features_and_cargo_phases_preserve_distinct_normal_unit_origins(self):
+        metadata = {"workspace_members": ["sample-id"], "packages": [{"id": "sample-id", "name": "sample"}]}
+        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"},
+                   "profile": {"test": False}, "features": [], "executable": None}
+        feature_message = {**message, "features": ["extra"]}
+        artifacts = trace.cargo_artifacts([("production", json.dumps(message)),
+                                           ("tests", json.dumps(message) + "\n" + json.dumps(feature_message))], metadata)
+        self.assertEqual({tuple(artifact["features"]): artifact["purposes"] for artifact in artifacts},
+                         {(): ["production", "tests"], ("extra",): ["tests"]})
+        normal = deepcopy(self.shard)
+        normal["unit"]["is_test"] = False
+        normal["unit"].pop("purposes")
+        normal["tests"] = []
+        feature = deepcopy(normal)
+        feature["unit"]["features"] = ["extra"]
+        normal["calls"] = []
+        shards = trace.compilation_purposes([normal, feature], artifacts)
+        bundle = self.merge(*shards)
+        trace.reconcile_units(bundle, artifacts)
+        self.assertEqual(len(bundle["units"]), 2)
+        self.assertEqual(bundle["calls"][0]["origins"][0]["purposes"], ["tests"])
+        self.assertFalse(bundle["calls"][0]["origins"][0]["is_test"])
+        self.assertEqual(bundle, self.merge(*reversed(shards)))
 
-    def test_missing_required_guarantee_edge_and_orphan_contract(self):
-        self.graph["guarantees"][0]["contracts"] = []
-        self.rejects("nonempty list")
-        self.graph["guarantees"][0]["contracts"] = ["reader"]
-        self.rejects("orphan contract")
+    def test_features_and_purposes_are_required_canonical_unit_fields(self):
+        for field, value in (("features", None), ("features", ["extra", "extra"]),
+                             ("features", ["z", "a"]), ("features", [True]),
+                             ("purposes", []), ("purposes", ["unknown"]),
+                             ("purposes", ["tests", "tests"])):
+            with self.subTest(field=field, value=value):
+                shard = deepcopy(self.shard)
+                shard["unit"][field] = value
+                with self.assertRaises(trace.InvalidTrace):
+                    self.merge(shard)
+        for field in ("features", "purposes"):
+            shard = deepcopy(self.shard)
+            del shard["unit"][field]
+            with self.assertRaisesRegex(trace.InvalidTrace, "expected object fields"):
+                self.merge(shard)
 
-    def test_unknown_and_duplicate_associations(self):
-        refs = self.graph["guarantees"][0]["contracts"]
-        refs.append("missing")
-        self.rejects("unknown contract")
-        refs[-1] = "reader"
-        self.rejects("duplicate association")
+    def test_compiled_inventory_must_match_every_compiler_test(self):
+        artifact = {**self.shard["unit"], "executable": "/test-binary"}
+        bundle = self.merge()
+        runtimes = {"/test-binary": {"executable": "/test-binary", "directory": str(self.root), "environment": {"CARGO_PKG_NAME": "sample"}}}
+        with patch.object(trace, "execute", return_value="check: test\n") as execute:
+            artifacts = trace.check_inventory(bundle, [artifact], self.root, runtimes)
+            runtime = artifacts[trace.target_key(artifact)]
+            self.assertEqual(runtime["executable"], "/test-binary")
+            self.assertEqual(runtime["directory"], self.root)
+            self.assertEqual(runtime["environment"]["CARGO_PKG_NAME"], "sample")
+            self.assertEqual(execute.call_args.args[0], ["/test-binary", "--list", "--format=terse"])
+            self.assertEqual(execute.call_args.kwargs["env"]["CARGO_PKG_NAME"], "sample")
+        with patch.object(trace, "execute", return_value="check: test\nmissed: test\n"):
+            with self.assertRaisesRegex(trace.InvalidTrace, "compiler missing.*missed"):
+                trace.check_inventory(bundle, [artifact], self.root, runtimes)
+        with patch.object(trace, "execute", return_value=""):
+            with self.assertRaisesRegex(trace.InvalidTrace, "absent from binary.*check"):
+                trace.check_inventory(bundle, [artifact], self.root, runtimes)
+        with patch.object(trace, "execute", return_value="check: test\n"):
+            with self.assertRaisesRegex(trace.InvalidTrace, "multiple compiled test artifacts"):
+                trace.check_inventory(bundle, [artifact, {**artifact, "features": ["extra"]}], self.root, runtimes)
 
-    def test_deleted_evidence_requires_explicit_gap(self):
-        self.graph["contracts"][0]["evidence"] = []
-        self.rejects("evidence or explicit gap required")
-        self.graph["contracts"][0]["gap"] = "No direct assertion"
-        self.succeeds("check")
-        self.assertEqual(self.load_fixture(self.root)[0][1]["contracts"][0]["gap"], "No direct assertion")
+    def test_cargo_runtime_capture_rejects_custom_runners(self):
+        for target, environment in (({"cfg(unix)": {"runner": "custom"}}, {}),
+                                    ({}, {"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "custom"})):
+            with self.subTest(targets=list(target), variables=list(environment)), patch.object(trace, "cargo_configuration", return_value=target):
+                with self.assertRaisesRegex(trace.InvalidTrace, "target runners are not supported"):
+                    trace.capture_test_runtimes([], [], self.root, environment, [], "", self.root)
 
-    def test_orphan_test_and_unknown_evidence_are_rejected(self):
-        for contract in self.graph["contracts"]:
-            contract["evidence"] = []
-            contract["gap"] = "Missing"
-        self.rejects("orphan test")
-        self.graph["contracts"][0]["evidence"] = [{"test": "missing", "relationship": "asserts", "reason": "Missing"}]
-        self.rejects("unknown test")
+    def test_cargo_runtime_capture_requires_the_original_artifacts_and_each_capture(self):
+        message = {"reason": "compiler-artifact", "package_id": "sample-id", "target": {"kind": ["lib"], "name": "sample"},
+                   "profile": {"test": True}, "features": [], "executable": "/test-binary"}
+        artifact = {**self.shard["unit"], "executable": "/test-binary"}
+        runtimes = self.root / "runtimes"
+        runtimes.mkdir()
+        for changed in (True, False):
+            output = json.dumps({**message, "executable": "/other-binary"} if changed else message)
+            with self.subTest(changed=changed), patch.object(trace, "cargo_configuration", return_value={}), patch.object(trace, "execute", return_value=output):
+                with self.assertRaisesRegex(trace.InvalidTrace, "changed compiled artifact identities" if changed else "runtime capture mismatch"):
+                    trace.capture_test_runtimes([], [], self.root, {}, [artifact], json.dumps(message), runtimes)
 
-    def test_sources_reject_missing_escape_absolute_and_symlink_paths(self):
-        for path in ("missing.rs", "../source.rs", str(self.root / "source.rs")):
-            with self.subTest(path=path):
-                self.graph["feature"]["source"]["path"] = path
-                self.rejects("source")
-        (self.root / "outside").symlink_to("/etc/passwd")
-        self.graph["feature"]["source"]["path"] = "outside"
-        self.rejects("outside repository")
+    def test_duplicate_inventory_name_and_legacy_schema_fail(self):
+        with self.assertRaisesRegex(trace.InvalidTrace, "duplicate test names"):
+            trace.parse_inventory("check: test\ncheck: test\n")
+        self.shard["version"] = 2
+        with self.assertRaisesRegex(trace.InvalidTrace, "version must be 3"):
+            self.merge()
 
-    def test_stale_and_ambiguous_needles(self):
-        self.graph["feature"]["source"]["needle"] = "not present"
-        self.rejects("exactly once")
-        self.graph["feature"]["source"]["needle"] = "//"
-        self.rejects("exactly once")
-
-    def test_source_needle_names_the_declared_test(self):
-        self.graph["tests"][0]["source"]["needle"] = "fn other() {}"
-        self.rejects("source needle must name")
-
-    def test_check_and_run_leave_stale_legacy_and_extra_markdown_untouched(self):
-        paths = ["docs/reference/feature-traceability.md", "docs/reference/traceability/ratings.md",
-                 "docs/reference/traceability/obsolete.md", "docs/reference/ratings-traceability.md"]
-        for relative in paths:
-            path = self.root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"User content in {relative}\n")
-        before = {path: path.read_bytes() for path in (self.root / "docs").rglob("*") if path.is_file()}
-        self.succeeds("check")
-        self.succeeds("run")
-        self.assertEqual(before, {path: path.read_bytes() for path in (self.root / "docs").rglob("*") if path.is_file()})
-        self.assertFalse((self.root / "target").exists())
-
-    def test_missing_exact_identity_is_not_a_substring_match(self):
-        self.protocol["inventory"]["sample|lib|"] = "module::selected_extra: test\n"
-        self.rejects("exactly one compiled test")
-
-    def test_duplicate_compiled_and_declared_identities(self):
-        self.protocol["inventory"]["sample|lib|"] *= 2
-        self.rejects("exactly one compiled test")
-        self.protocol["inventory"]["sample|lib|"] = "module::selected: test\n"
-        other = dict(self.graph["tests"][0], id="two")
-        self.graph["tests"].append(other)
-        self.graph["contracts"][0]["evidence"].append({"test": "two", "relationship": "exercises", "reason": "Other"})
-        self.rejects("Cargo tests: duplicate")
-
-    def test_inventory_is_scoped_to_package_and_target_even_when_names_collide(self):
-        other = copy.deepcopy(self.graph["tests"][0])
-        other.update(id="two", package="other", target={"kind": "test", "name": "ratings"})
-        self.graph["tests"].append(other)
-        self.graph["contracts"][0]["evidence"].append({"test": "two", "relationship": "exercises", "reason": "Other"})
-        self.rejects("two: expected exactly one")
-        self.protocol["inventory"]["other|test|ratings"] = "module::selected: test\n"
-        self.succeeds("check")
-        self.succeeds("run")
-        self.graph["tests"][1]["target"] = {"kind": "lib"}
-        self.rejects("two: expected exactly one")
-
-    def test_integration_target_names_accept_underscores(self):
-        self.graph["tests"][0]["target"] = {"kind": "test", "name": "schema_contract"}
-        self.protocol["inventory"]["sample|test|schema_contract"] = "module::selected: test\n"
-        self.succeeds("check")
-        self.succeeds("run")
-
-    def test_wrong_package_cannot_use_another_packages_inventory(self):
-        self.graph["tests"][0]["package"] = "other"
-        self.rejects("expected exactly one")
-
-    def test_command_failure_and_unsupported_listing_are_rejected(self):
-        self.succeeds("check")
-        self.protocol["inventory_exit"] = 1
-        self.rejects("command failed")
-        self.protocol["inventory_exit"] = 0
-        self.protocol["inventory"]["sample|lib|"] = "unrecognized output\n"
-        self.rejects("unsupported Cargo inventory")
-        self.assertFalse((self.root / "docs").exists())
-
-    def test_run_rejects_zero_ignored_multiple_failed_wrong_and_nonstandard_outcomes(self):
-        self.succeeds("check")
-        cases = [
-            "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s\n",
-            "running 1 test\ntest module::selected ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
-            "running 2 tests\ntest module::selected ... ok\ntest module::other ... ok\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n",
-            "running 1 test\ntest module::selected ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
-            "running 1 test\ntest module::other ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
-            "custom runner success\n",
-        ]
-        for output in cases:
-            with self.subTest(output=output):
-                self.protocol["execution"] = output
-                self.rejects("expected one passed exact test", "run")
-        self.protocol["execution_exit"] = 1
-        self.rejects("command failed", "run")
-
-    def test_run_accepts_parent_success_with_nested_libtest_processes(self):
-        name = "publisher_session_lock_excludes_a_second_process_and_releases_on_drop"
-        self.graph["tests"][0].update(name=name, source={"path": "source.rs", "needle": f"fn {name}() {{}}"})
-        with (self.root / "source.rs").open("a") as source:
-            source.write(f"fn {name}() {{}}\n")
-        self.protocol["inventory"]["sample|lib|"] = f"{name}: test\n"
-        self.succeeds("check")
-        self.protocol["execution"] = """
-running 1 test
-
-running 1 test
-test publisher_lock_probe ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.15s
-
-
-running 1 test
-test publisher_lock_probe ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.15s
-
-test publisher_session_lock_excludes_a_second_process_and_releases_on_drop ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.88s
-"""
-        self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
-
-    def test_run_uses_parent_result_when_nested_tests_are_empty_or_ignored(self):
-        self.succeeds("check")
-        children = [
-            "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s\n",
-            "running 1 test\ntest child ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
-        ]
-        for child in children:
-            with self.subTest(child=child):
-                self.protocol["execution"] = ("running 1 test\n" + child + "test module::selected ... ok\n"
-                                              "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
-                self.succeeds("run")
-
-    def test_run_accepts_serial_parent_completion_after_nested_child(self):
-        self.succeeds("check")
-        self.protocol["execution"] = (
-            "running 1 test\ntest module::selected ... \n"
-            "running 1 test\ntest child ... ok\n"
-            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n"
-            "ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
-        self.assertIn("PASS ratings/one", self.succeeds("run").stdout)
-
-    def test_run_rejects_invalid_serial_parent_and_orphan_completions(self):
-        self.succeeds("check")
-        child = ("running 1 test\ntest child ... ok\n"
-                 "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
-        parent = ("running 1 test\ntest module::selected ... \n" + child + "ok\n"
-                  "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
-        cases = [
-            parent.replace("\nok\n", "\nignored\n"),
-            parent.replace("\nok\n", "\nFAILED\n"),
-            parent.replace("module::selected", "module::other"),
-            parent.replace("\nok\n", "\n"),
-            parent.replace("\nok\n", "\nunsupported\n"),
-            parent.replace("test module::selected ... \n", "test module::selected ...\n"),
-            parent.replace("\nok\n", "\ntest module::selected ... ok\n"),
-            parent.replace("\nok\n", "\ntest module::selected ... \nok\n"),
-            parent + "ok\n",
-            parent + "FAILED\n",
-            parent + "ignored\n",
-            "ok\n" + parent,
-            "running 1 test\nok\n" + parent,
-            parent + parent,
-        ]
-        for output in cases:
-            with self.subTest(output=output):
-                self.protocol["execution"] = output
-                self.rejects("expected one passed exact test", "run")
-
-    def test_run_rejects_unbalanced_malformed_and_repeated_runs(self):
-        self.succeeds("check")
-        parent = ("running 1 test\ntest module::selected ... ok\n"
-                  "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s\n")
-        cases = [
-            parent.removeprefix("running 1 test\n"),
-            "running 1 test\n" + parent,
-            parent + "running 0 tests\n",
-            parent + "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
-            parent + parent,
-            parent.replace("running 1 test", "running unknown tests"),
-            parent.replace("test result: ok.", "test result: unsupported."),
-            "running 1 test\nrunning 0 tests\ntest result: unsupported\n" + parent.removeprefix("running 1 test\n"),
-            parent.replace("running 1 test", "running 2 tests"),
-            "running 1 test\n" + parent + "test module::selected ... ignored\n"
-            "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out; finished in 0.00s\n",
-        ]
-        for output in cases:
-            with self.subTest(output=output):
-                self.protocol["execution"] = output
-                self.rejects("expected one passed exact test", "run")
-
-    def test_unknown_fields_bad_relationships_duplicate_ids_and_wrong_types(self):
-        self.graph["extra"] = "typo"
-        self.rejects("expected fields")
-        self.graph.pop("extra")
-        self.graph["contracts"][0]["evidence"][0]["relationship"] = "proves"
-        self.rejects("invalid relationship")
-        self.graph["contracts"][0]["evidence"][0]["relationship"] = "asserts"
-        self.graph["tests"][0]["id"] = "reader"
-        self.rejects("graph IDs: duplicate")
-        self.graph["tests"][0]["id"] = "one"
-        self.graph["guarantees"][0]["contracts"] = "reader"
-        self.rejects("nonempty list")
+    def test_no_test_name_or_substring_can_establish_a_run_passed(self):
+        test = self.shard["tests"][0]
+        artifacts = {trace.target_key(test): {"executable": "/captured-test-binary", "directory": self.root / "sample", "environment": {"CARGO_PKG_NAME": "sample"}}}
+        failures = ["test check ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
+                    "test another_check ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
+                    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n"]
+        for output in failures:
+            with self.subTest(output=output), patch.object(trace, "execute", return_value=output):
+                with self.assertRaises(trace.InvalidTrace):
+                    trace.run_tests([test], artifacts)
+        output = "running 1 test\ntest check ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n"
+        with patch.object(trace, "execute", return_value=output) as execute:
+            trace.run_tests([test], artifacts)
+            self.assertEqual(execute.call_args.args,
+                             (["/captured-test-binary", "check", "--exact", "--format", "pretty", "--color", "never"],
+                              self.root / "sample"))
+            self.assertEqual(execute.call_args.kwargs["env"], {"CARGO_PKG_NAME": "sample"})
+        child = "running 1 test\ntest child ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n"
+        with patch.object(trace, "execute", return_value=child + output):
+            trace.run_tests([test], artifacts)
+        with patch.object(trace, "execute", return_value=child + failures[-1]):
+            with self.assertRaises(trace.InvalidTrace):
+                trace.run_tests([test], artifacts)
+        with patch.object(trace, "execute") as execute:
+            with self.assertRaisesRegex(trace.InvalidTrace, "compiled test artifact missing"):
+                trace.run_tests([test], {})
+            execute.assert_not_called()
 
 
 if __name__ == "__main__":

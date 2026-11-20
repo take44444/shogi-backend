@@ -359,29 +359,15 @@ impl From<Detail> for DetailDto {
         }
     }
 }
-#[cfg(test)]
-#[path = "trace/public-record-detail/support.rs"]
-mod tests;
 
 #[cfg(test)]
-#[path = "trace/public-api-documents/support.rs"]
+#[path = "tests/openapi.rs"]
 mod openapi_tests;
 
 #[cfg(test)]
-#[path = "trace/public-record-search/http-resource-policy/tests.rs"]
+#[path = "tests/search.rs"]
 mod contract_tests;
 
 #[cfg(test)]
-#[path = "trace/public-record-detail/router_support.rs"]
+#[path = "tests/router_support.rs"]
 mod record_route_support;
-
-#[cfg(test)]
-#[path = "trace/user-ratings/support.rs"]
-mod rating_tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;

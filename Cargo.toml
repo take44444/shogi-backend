@@ -4,6 +4,7 @@ members = [
   "crates/*",
   "apps/*",
 ]
+exclude = ["tools/traceability", "tools/traceability-attributes"]
 
 [workspace.dependencies]
 utoipa = { version = "6.0.0", features = ["axum_extras"] }

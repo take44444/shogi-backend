@@ -140,9 +140,5 @@ impl Game {
 }
 
 #[cfg(test)]
-#[path = "trace/game-play/support.rs"]
+#[path = "tests/game.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

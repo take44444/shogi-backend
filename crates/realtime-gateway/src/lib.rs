@@ -628,10 +628,3 @@ async fn run_connection(
 pub fn openapi() -> utoipa::openapi::OpenApi {
     matchmaking::openapi()
 }
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-#[cfg(test)]
-mod trace_metadata;

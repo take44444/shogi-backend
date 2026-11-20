@@ -117,8 +117,8 @@ const pendingCommand = {type: 'move', request_id: crypto.randomUUID(), expected_
 socket.send(JSON.stringify(pendingCommand));
 ```
 
-操作結果と更新通知の扱いは[対局操作の定義](../../crates/realtime-gateway/src/trace/realtime-session-commands-limits/feature.rs)、
-初期局面と通知の同期は[リアルタイム配信の定義](../../crates/realtime-gateway/src/trace/realtime-game-feed/feature.rs)を参照すること。
+操作結果と更新通知の扱いは[ゲートウェイの公開 API](../../crates/realtime-gateway/src/lib.rs)、
+初期局面と通知の同期は[ゲートウェイの対局処理](../../crates/realtime-gateway/src/game.rs)を参照すること。
 
 ## 操作結果が不明な場合や切断後に復旧する
 

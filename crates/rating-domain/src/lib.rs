@@ -124,9 +124,5 @@ pub fn calculate(
 }
 
 #[cfg(test)]
-#[path = "trace/rating-application/pure-calculation/tests.rs"]
+#[path = "tests/rating.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

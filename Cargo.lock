@@ -980,6 +980,7 @@ dependencies = [
  "shogi-domain",
  "syn 2.0.119",
  "tokio",
+ "traceability-attributes",
  "uuid",
 ]
 
@@ -2426,6 +2427,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.28.0",
  "tonic",
+ "traceability-attributes",
  "url",
  "user-application",
  "user-http",
@@ -3029,6 +3031,7 @@ name = "shogi-domain"
 version = "0.1.0"
 dependencies = [
  "rsshogi",
+ "traceability-attributes",
 ]
 
 [[package]]
@@ -3607,6 +3610,14 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
+
+[[package]]
+name = "traceability-attributes"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "tracing"

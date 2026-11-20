@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate source-backed feature graphs and export the HTML viewer."""
+"""Collect compiler-derived Rust calls and explicitly targeted tests."""
 import argparse
 from collections import Counter
 import json
@@ -9,11 +9,8 @@ import re
 import shlex
 import subprocess
 import sys
-
-
-ID = re.compile(r"[a-z][a-z0-9-]*\Z")
-CARGO_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
-TEST_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*\Z")
+import tempfile
+import tomllib
 
 
 class InvalidTrace(Exception):
@@ -25,27 +22,6 @@ def require(condition, message):
         raise InvalidTrace(message)
 
 
-def fields(value, required, optional=()):
-    require(isinstance(value, dict), "expected an object")
-    require(set(required) <= value.keys() <= set(required) | set(optional),
-            f"expected fields {sorted(required)}, optional {sorted(optional)}; got {sorted(value)}")
-
-
-def text(value):
-    require(isinstance(value, str) and bool(value.strip()) and "\n" not in value and "\r" not in value,
-            "expected nonempty single-line text")
-    return value
-
-
-def sequence(value, *, nonempty=True):
-    require(isinstance(value, list) and (bool(value) or not nonempty), "expected a nonempty list")
-    return value
-
-
-def unique(values, context):
-    require(len(values) == len(set(values)), f"{context}: duplicate association or identity")
-
-
 def no_duplicate_keys(pairs):
     result = {}
     for key, value in pairs:
@@ -54,360 +30,472 @@ def no_duplicate_keys(pairs):
     return result
 
 
-def source_location(source, root, *, parsed_test=False):
-    fields(source, ("path", "needle", "line") if parsed_test else ("path", "needle"))
-    path, needle = text(source["path"]), text(source["needle"])
-    relative = PurePosixPath(path)
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=no_duplicate_keys)
+
+
+def text(value):
+    require(isinstance(value, str) and bool(value.strip()) and "\n" not in value and "\r" not in value,
+            "expected nonempty single-line text")
+    return value
+
+
+def fields(value, required):
+    require(isinstance(value, dict) and set(required) <= value.keys(), f"expected object fields {required}")
+
+
+def repository_file(root, path):
+    relative = PurePosixPath(text(path))
     require(not relative.is_absolute() and ".." not in relative.parts and str(relative) == path,
             f"source path must be repository-relative: {path}")
-    resolved = (root / path).resolve()
-    require(resolved.is_relative_to(root) and resolved.is_file(), f"source file missing or outside repository: {path}")
-    content = resolved.read_text(encoding="utf-8")
-    if parsed_test:
-        line = source["line"]
-        content_lines = content.splitlines()
-        require(type(line) is int and 0 < line <= len(content_lines), "invalid parsed Rust source line")
-        require(content_lines[line - 1].strip() == needle, f"parsed Rust source line changed: {path}:{line}")
-        return line
-    require(content.count(needle) == 1, f"source needle must occur exactly once: {path}: {needle}")
-    return content[:content.index(needle)].count("\n") + 1
+    resolved = (Path(root).resolve() / path).resolve()
+    require(resolved.is_relative_to(Path(root).resolve()) and resolved.is_file(),
+            f"source file missing or outside repository: {path}")
+    return resolved
 
 
-def validate_graph(root, graph, *, parsed_tests=False):
-    fields(graph, ("version", "feature", "guarantees", "contracts", "tests", "limitations"))
-    require(type(graph["version"]) is int and graph["version"] == 1, "unsupported version")
-    fields(graph["feature"], ("id", "title", "source", "flow"))
-    text(graph["feature"]["title"])
-    for step in sequence(graph["feature"]["flow"]):
-        text(step)
-    for limitation in sequence(graph["limitations"]):
-        text(limitation)
-    nodes = [graph["feature"]]
-    for group, required, optional in (
-        ("guarantees", ("id", "statement", "contracts"), ()),
-        ("contracts", ("id", "statement", "source", "evidence"), ("gap",)),
-        ("tests", ("id", "package", "target", "name", "source", "scope"), ()),
-    ):
-        for node in sequence(graph[group], nonempty=group != "tests"):
-            fields(node, required, optional)
-            nodes.append(node)
-    for node in nodes:
-        require(ID.fullmatch(text(node["id"])), f"invalid ID: {node['id']}")
-    unique([node["id"] for node in nodes], "graph IDs")
-    contracts = {node["id"]: node for node in graph["contracts"]}
-    tests = {node["id"]: node for node in graph["tests"]}
-    used_contracts, used_tests = set(), set()
-    for guarantee in graph["guarantees"]:
-        text(guarantee["statement"])
-        refs = [text(ref) for ref in sequence(guarantee["contracts"])]
-        unique(refs, guarantee["id"])
-        require(set(refs) <= contracts.keys(), f"{guarantee['id']}: unknown contract")
-        used_contracts.update(refs)
-    for contract in contracts.values():
-        text(contract["statement"])
-        if "gap" in contract:
-            text(contract["gap"])
-        evidence = sequence(contract["evidence"], nonempty=False)
-        require(evidence or "gap" in contract, f"{contract['id']}: evidence or explicit gap required")
-        for edge in evidence:
-            fields(edge, ("test", "relationship", "reason"))
-            require(text(edge["test"]) in tests, f"{contract['id']}: unknown test")
-            require(edge["relationship"] in ("asserts", "exercises", "unreviewed"), f"{contract['id']}: invalid relationship")
-            text(edge["reason"])
-            used_tests.add(edge["test"])
-        require(any(edge["relationship"] in ("asserts", "exercises") for edge in evidence) or "gap" in contract,
-                f"{contract['id']}: evidence or explicit gap required; unreviewed ownership is insufficient")
-        unique([edge["test"] for edge in evidence], contract["id"])
-    require(used_contracts == contracts.keys(), "orphan contract")
-    require(used_tests == tests.keys(), "orphan test")
+def source_location(root, record, generated_sources=None):
+    fields(record, ("path", "line"))
+    if record["path"].startswith("@generated/"):
+        require(record["path"] in (generated_sources or {}), f"missing generated source: {record['path']}")
+        content = generated_sources[record["path"]]
+    else:
+        content = repository_file(root, record["path"]).read_text(encoding="utf-8")
+    require(type(record["line"]) is int and 0 < record["line"] <= len(content.splitlines()),
+            f"invalid compiler source location: {record['path']}:{record['line']}")
+
+
+def target_key(value):
+    return value["package"], value["target_kind"], value["target_name"]
+
+
+def test_key(value):
+    return (*target_key(value), value["name"])
+
+
+def unit_key(value):
+    return (*target_key(value), value["is_test"], tuple(value["features"]))
+
+
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def sorted_records(records):
+    return sorted(records, key=canonical)
+
+
+def merge_fact(records, fact, unit):
+    record = records.setdefault(canonical(fact), {**fact, "origins": []})
+    if unit not in record["origins"]:
+        record["origins"] = sorted_records([*record["origins"], unit])
+
+
+def merge_shards(root, shards, components):
+    """Merge compiler units without inferring test intent or implementation relations."""
+    shards = list(shards)
+    apis, tests, units, calls, references, unresolved, coverage = {}, {}, {}, {}, {}, {}, Counter()
+    packages = {component["id"] for component in components}
+    generated_sources = {}
+    for shard in shards:
+        require(isinstance(shard, dict), "compiler shard must be an object")
+        sources = shard.get("generated_sources", {})
+        require(isinstance(sources, dict), "generated_sources must be an object")
+        for path, content in sources.items():
+            relative = PurePosixPath(text(path))
+            require(len(relative.parts) >= 3 and relative.parts[0] == "@generated"
+                    and relative.parts[1] in packages and ".." not in relative.parts and str(relative) == path,
+                    f"invalid generated source key: {path}")
+            local = Path(root) / path
+            require(not local.exists() and not local.is_symlink(), f"generated source key collides with repository file: {path}")
+            require(isinstance(content, str), f"generated source contents must be text: {path}")
+            require(path not in generated_sources or generated_sources[path] == content,
+                    f"conflicting generated source contents: {path}")
+            generated_sources[path] = content
+    seen = set()
+    for shard in shards:
+        fields(shard, ("version", "unit", "apis", "calls", "tests", "unresolved", "coverage"))
+        require(type(shard["version"]) is int and shard["version"] == 3, "compiler shard version must be 3")
+        signature = canonical(shard)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        unit = shard["unit"]
+        fields(unit, ("package", "crate_name", "target_kind", "target_name", "is_test", "features", "purposes", "source"))
+        require(unit["package"] in packages, f"unknown compiler unit package: {unit['package']}")
+        require(type(unit["is_test"]) is bool, "unit is_test must be boolean")
+        require(isinstance(unit["features"], list) and all(isinstance(feature, str) and feature for feature in unit["features"]),
+                "unit features must be an array of nonempty names")
+        require(unit["features"] == sorted(set(unit["features"])), "unit features must be sorted and unique")
+        require(isinstance(unit["purposes"], list) and all(purpose in ("production", "tests") for purpose in unit["purposes"]),
+                "unit purposes must identify Cargo compilation phases")
+        require(unit["purposes"] == sorted(set(unit["purposes"])), "unit purposes must be sorted and unique")
+        require(unit["purposes"] or unit["target_kind"] == "custom-build", "compiler unit has no Cargo compilation purpose")
+        for key in ("crate_name", "target_kind", "target_name"):
+            text(unit[key])
+        repository_file(root, unit["source"])
+        key = unit_key(unit)
+        require(key not in units or units[key] == unit, f"conflicting compiler unit: {key}")
+        require(key not in units, f"multiple different shards for compiler unit: {key}")
+        units[key] = unit
+        for category in ("apis", "calls", "tests", "unresolved"):
+            require(isinstance(shard[category], list), f"shard {category} must be an array")
+        for api in shard["apis"]:
+            fields(api, ("id", "package", "name", "kind", "path", "line"))
+            identity = text(api["id"])
+            require(api["package"] in packages, f"unknown API package: {api['package']}")
+            text(api["name"])
+            text(api["kind"])
+            source_location(root, api, generated_sources)
+            require(identity not in apis or apis[identity] == api, f"conflicting API definition: {identity}")
+            apis[identity] = api
+        for category, records in (("calls", calls), ("references", references)):
+            require(isinstance(shard.get(category, []), list), f"shard {category} must be an array")
+            for call in shard.get(category, []):
+                fields(call, ("caller", "caller_package", "callee", "path", "line", "dispatch"))
+                text(call["caller"])
+                text(call["callee"])
+                text(call["dispatch"])
+                require(call["caller_package"] == unit["package"], "call package differs from compiler unit")
+                source_location(root, call, generated_sources)
+                merge_fact(records, call, unit)
+        for test in shard["tests"]:
+            fields(test, ("package", "target_kind", "target_name", "name", "path", "line", "targets"))
+            require(target_key(test) == target_key(unit) and unit["is_test"], "test has incorrect compiler unit context")
+            text(test["name"])
+            require(isinstance(test["targets"], list), "test targets must be an array")
+            require(all(isinstance(target, str) and target for target in test["targets"]), "test target must be API ID")
+            require(len(test["targets"]) == len(set(test["targets"])), f"duplicate test target: {test['name']}")
+            source_location(root, test, generated_sources)
+            value = {**test, "targets": sorted(test["targets"])}
+            key = test_key(test)
+            require(key not in tests or tests[key] == value, f"conflicting test definition: {key}")
+            tests[key] = value
+        for item in shard["unresolved"]:
+            fields(item, ("caller", "path", "line", "reason"))
+            text(item["caller"])
+            text(item["reason"])
+            source_location(root, item, generated_sources)
+            merge_fact(unresolved, item, unit)
+        require(isinstance(shard["coverage"], dict), "coverage must be an object")
+        for name in ("bodies", "calls", "function_references", "external_calls"):
+            require(name in shard["coverage"], f"missing compiler coverage counter: {name}")
+        for name, count in shard["coverage"].items():
+            require(type(count) is int and count >= 0, f"invalid compiler coverage counter: {name}")
+            coverage[name] += count
+    require(units, "no compiler shards produced; workspace units must be reanalyzed even with a warm Cargo cache")
+    for call in [*calls.values(), *references.values()]:
+        require(call["caller"] in apis, f"unknown call caller API: {call['caller']}")
+        require(call["callee"] in apis, f"unknown call callee API: {call['callee']}")
+        require(apis[call["caller"]]["package"] == call["caller_package"], "caller API package mismatch")
+    for item in unresolved.values():
+        require(item["caller"] in apis, f"unknown unresolved caller API: {item['caller']}")
     for test in tests.values():
-        require(CARGO_NAME.fullmatch(text(test["package"])), f"{test['id']}: invalid package")
-        fields(test["target"], ("kind",), ("name",))
-        kind = test["target"]["kind"]
-        require(kind in ("lib", "test", "bin"), f"{test['id']}: unsupported target kind")
-        require((kind != "lib") == ("name" in test["target"]), f"{test['id']}: test and bin targets need name; lib has none")
-        if kind != "lib":
-            require(CARGO_NAME.fullmatch(text(test["target"]["name"])), f"{test['id']}: invalid target name")
-        require(TEST_NAME.fullmatch(text(test["name"])), f"{test['id']}: expected a complete Rust test identity")
-        fields(test["source"], ("path", "needle", "line") if parsed_tests else ("path", "needle"))
-        require(f"fn {test['name'].split('::')[-1]}(" in text(test["source"]["needle"]),
-                f"{test['id']}: source needle must name the declared test function")
-        text(test["scope"])
-    unique([(*target_key(test), test["name"]) for test in tests.values()], "Cargo tests")
-    lines = {node["id"]: source_location(node["source"], root, parsed_test=parsed_tests and node["id"] in tests) for node in nodes if "source" in node}
-    return graph, lines
+        for target in test["targets"]:
+            require(target in apis, f"unknown explicit test target API: {target}")
+    return {"version": 3, "components": sorted_records(components), "apis": sorted_records(apis.values()),
+            "calls": sorted_records(calls.values()), "references": sorted_records(references.values()),
+            "tests": sorted_records(tests.values()),
+            "units": sorted_records(units.values()), "coverage": dict(sorted(coverage.items())),
+            "unresolved": sorted_records(unresolved.values()), "generated_sources": dict(sorted(generated_sources.items()))}
 
 
-class Traces(list):
-    def __init__(self, bundle):
-        super().__init__()
-        self.directory_bundle = bundle
-
-
-def directory_traces(root):
-    repository = Path(__file__).resolve().parent.parent
-    manifest = repository / "tools/traceability/Cargo.toml"
-    args = ["cargo", "run", "--quiet", "--locked", "--manifest-path", str(manifest)]
-    if "CARGO_TARGET_DIR" not in os.environ:
-        args += ["--target-dir", str(repository / "target")]
-    output = execute(args + ["--", str(root)], root)
-    bundle = json.loads(output, object_pairs_hook=no_duplicate_keys)
-    fields(bundle, ("graphs", "inventories", "classifications", "entrypoints", "surfaces", "excluded_targets", "packages", "examples"))
-    return bundle
-
-
-def load_traces(root):
-    bundle = directory_traces(root)
-    require(bundle.get("graphs"), "no feature declarations under workspace src/trace/ or tests/trace/")
-    traces = Traces(bundle)
-    for fragment in bundle.get("graphs", []):
-        fields(fragment, ("record", "graph"))
-        try:
-            graph, lines = validate_graph(root, fragment["graph"], parsed_tests=True)
-            traces.append((Path(fragment["record"]), graph, lines))
-        except (InvalidTrace, OSError, ValueError) as error:
-            raise InvalidTrace(f"{fragment['record']}: {error}") from error
-    unique([graph["feature"]["id"] for _, graph, _ in traces], "global feature IDs")
-    traces.sort(key=lambda trace: trace[1]["feature"]["id"])
-    return traces
-
-
-def target_key(test):
-    return test["package"], test["target"]["kind"], test["target"].get("name")
-
-
-def cargo_command(test):
-    args = ["cargo", "test", "--locked", "-p", test["package"]]
-    target = test["target"]
-    return args + (["--lib"] if target["kind"] == "lib" else ["--" + target["kind"], target["name"]])
-
-
-def execute(args, root):
-    result = subprocess.run(args, cwd=root, capture_output=True, text=True)
+def execute(args, root, *, env=None):
+    result = subprocess.run([str(arg) for arg in args], cwd=root, capture_output=True, text=True, env=env)
     require(result.returncode == 0,
-            f"command failed ({result.returncode}): {shlex.join(args)}\n{result.stdout}{result.stderr}")
+            f"command failed ({result.returncode}): {shlex.join(map(str, args))}\n{result.stdout}{result.stderr}")
     return result.stdout
 
 
-def check_surfaces(traces, root):
-    bundle = traces.directory_bundle
-    features = {graph["feature"]["id"] for _, graph, _ in traces}
-    owned_features = set()
-
-    def own(feature, label):
-        require(text(feature) in features, f"{label}: unknown feature owner {feature}")
-        owned_features.add(feature)
-
-    openapi, grpc = {}, {}
-    for surface in sequence(bundle["surfaces"], nonempty=False):
-        kind = surface.get("kind")
-        if kind == "OpenApi":
-            fields(surface, ("kind", "feature", "package", "example", "operation"))
-            package, example, operation = (text(surface[key]) for key in ("package", "example", "operation"))
-            require(CARGO_NAME.fullmatch(package) and CARGO_NAME.fullmatch(example), "invalid OpenAPI package or example")
-            require(re.fullmatch(r"(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE) /\S*", operation),
-                    f"invalid OpenAPI operation: {operation}")
-            key = package, example
-            expected = openapi.setdefault(key, {})
-            require(operation not in expected, f"duplicate OpenAPI operation owner: {key} {operation}")
-            expected[operation] = surface["feature"]
-            own(surface["feature"], f"{package}: {operation}")
-        elif kind == "Grpc":
-            fields(surface, ("kind", "feature", "path", "service", "operation"))
-            path, service, operation = (text(surface[key]) for key in ("path", "service", "operation"))
-            require(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) for item in (service, operation)), "invalid gRPC service or operation")
-            key = path, service, operation
-            require(key not in grpc, f"duplicate gRPC operation owner: {key}")
-            grpc[key] = surface["feature"]
-            own(surface["feature"], f"{service}.{operation}")
-        else:
-            require(False, f"unsupported surface kind: {kind}")
-
-    exporters, example_packages, example_identities = set(), set(), set()
-    for entry in sequence(bundle["examples"], nonempty=False):
-        fields(entry, ("package", "example", "source", "kind", "reason"))
-        package, example, source, kind, _ = (text(entry[key]) for key in ("package", "example", "source", "kind", "reason"))
-        require(CARGO_NAME.fullmatch(package) and CARGO_NAME.fullmatch(example), "invalid Cargo example identity")
-        identity = package, example
-        require(identity not in example_identities, f"duplicate Cargo example: {identity}")
-        example_identities.add(identity)
-        relative = PurePosixPath(source)
-        require(not relative.is_absolute() and ".." not in relative.parts and str(relative) == source,
-                f"example source must be repository-relative: {source}")
-        resolved = (root / source).resolve()
-        require(resolved.is_relative_to(root) and resolved.is_file(), f"example source missing or outside repository: {source}")
-        require(kind in ("OpenApi", "Program"), f"unsupported example kind: {kind}")
-        example_packages.add(package)
-        if kind == "OpenApi":
-            exporters.add(identity)
-    for package in sorted(example_packages):
-        execute(["cargo", "check", "--locked", "-p", package, "--examples"], root)
-    require(set(openapi) == exporters,
-            f"OpenAPI exporter set mismatch: missing {sorted(exporters - openapi.keys())}; extra {sorted(openapi.keys() - exporters)}")
-    methods = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
-    for (package, example), operations in sorted(openapi.items()):
-        output = execute(["cargo", "run", "--quiet", "--locked", "-p", package, "--example", example], root)
-        document = json.loads(output, object_pairs_hook=no_duplicate_keys)
-        require(isinstance(document, dict) and isinstance(document.get("paths"), dict), "OpenAPI output needs paths")
-        actual = set()
-        for path, item in document["paths"].items():
-            require(isinstance(path, str) and path.startswith("/") and isinstance(item, dict), "invalid OpenAPI path item")
-            require("$ref" not in item, "unsupported referenced OpenAPI path item")
-            for method in item.keys() & methods:
-                require(isinstance(item[method], dict), "invalid OpenAPI operation object")
-                actual.add(f"{method.upper()} {path}")
-        require(actual == set(operations),
-                f"{package}: OpenAPI operation set mismatch: uncataloged {sorted(actual - operations.keys())}; absent {sorted(operations.keys() - actual)}")
-
-    proto_files = set()
-    for directory in [root / "proto"] + [root / package["path"] / "proto" for package in bundle["packages"]]:
-        if directory.is_dir():
-            for path in directory.rglob("*.proto"):
-                resolved = path.resolve()
-                require(resolved.is_relative_to(root), f"proto source outside repository: {path}")
-                proto_files.add(resolved)
-    actual_grpc = set()
-    declaration = r"\brpc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*(?:stream\s+)?[.\w]+\s*\)\s*returns\s*\(\s*(?:stream\s+)?[.\w]+\s*\)\s*;"
-    for path in sorted(proto_files):
-        proto = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.DOTALL)
-        blocks = re.findall(r"\bservice\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([^{}]*)\}", proto)
-        require(len(blocks) == len(re.findall(r"\bservice\b", proto)), f"missing or unsupported gRPC service block: {path.relative_to(root)}")
-        unique([service for service, _ in blocks], "gRPC services")
-        for service, block in blocks:
-            names = re.findall(declaration, block)
-            require(names and not re.sub(declaration, "", block).strip(), f"unsupported gRPC declarations: {service}")
-            unique(names, "gRPC operations")
-            actual_grpc.update((path.relative_to(root).as_posix(), service, name) for name in names)
-    require(actual_grpc == set(grpc),
-            f"gRPC operation set mismatch: uncataloged {sorted(actual_grpc - grpc.keys())}; absent {sorted(grpc.keys() - actual_grpc)}")
-
-    entry_names = []
-    for entry in sequence(bundle["entrypoints"], nonempty=False):
-        fields(entry, ("feature", "name", "source"))
-        name = text(entry["name"])
-        source_location(entry["source"], root)
-        own(entry["feature"], name)
-        entry_names.append(name)
-    unique(entry_names, "entrypoint names")
-    require(features == owned_features, f"orphan feature without surface or entrypoint: {sorted(features - owned_features)}")
+def cargo_target_kind(target):
+    kinds = target["kind"]
+    return "lib" if any(kind in ("lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro") for kind in kinds) else kinds[0]
 
 
-def mapped_tests(traces):
-    tests = {}
-    for _, graph, _ in traces:
-        for test in graph["tests"]:
-            key = (*target_key(test), test["name"])
-            if key not in tests:
-                tests[key] = (test, [])
-            tests[key][1].append(f"{graph['feature']['id']}/{test['id']}")
-    return tests.values()
+def cargo_artifacts(outputs, metadata):
+    packages = {package["id"]: package["name"] for package in metadata["packages"]
+                if package["id"] in metadata["workspace_members"]}
+    artifacts = {}
+    for purpose, output in outputs:
+        require(purpose in ("production", "tests"), f"unknown Cargo compilation purpose: {purpose}")
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+            message = json.loads(line, object_pairs_hook=no_duplicate_keys)
+            if message.get("reason") != "compiler-artifact" or message["package_id"] not in packages:
+                continue
+            target = message["target"]
+            kind = cargo_target_kind(target)
+            if kind == "custom-build":
+                continue
+            artifact = {"package": packages[message["package_id"]], "target_kind": kind,
+                        "target_name": target["name"], "is_test": message["profile"]["test"],
+                        "features": sorted(message["features"]), "executable": message.get("executable")}
+            key = unit_key(artifact)
+            if key in artifacts:
+                previous = {name: value for name, value in artifacts[key].items() if name != "purposes"}
+                require(previous == artifact, f"conflicting Cargo artifact: {key}")
+                artifacts[key]["purposes"] = sorted(set(artifacts[key]["purposes"]) | {purpose})
+            else:
+                artifacts[key] = {**artifact, "purposes": [purpose]}
+    require(artifacts, "Cargo produced no workspace compilation artifacts")
+    return sorted_records(artifacts.values())
 
 
-def cargo_inventory(test, root):
-    args = cargo_command(test) + ["--", "--list", "--format", "terse"]
-    output = execute(args, root)
+def compilation_purposes(shards, artifacts):
+    purposes = {unit_key(artifact): artifact["purposes"] for artifact in artifacts}
+    result = []
+    for shard in shards:
+        unit = shard["unit"]
+        key = unit_key(unit)
+        require(unit["target_kind"] == "custom-build" or key in purposes, f"compiler unit has no Cargo artifact: {key}")
+        result.append({**shard, "unit": {**unit, "purposes": purposes.get(key, [])}})
+    return result
+
+
+def reconcile_units(bundle, artifacts):
+    actual = {unit_key(unit) for unit in bundle["units"] if unit["target_kind"] != "custom-build"}
+    expected = {unit_key(artifact) for artifact in artifacts}
+    require(actual == expected,
+            f"compiler unit coverage mismatch: missing shards {sorted(expected - actual)}; unexpected shards {sorted(actual - expected)}")
+
+
+def check_production_targets(bundle, shards):
+    production = {api["id"] for shard in shards
+                  if not shard["unit"]["is_test"] and "production" in shard["unit"]["purposes"]
+                  and shard["unit"]["target_kind"] in ("lib", "bin") for api in shard["apis"]}
+    for test in bundle["tests"]:
+        missing = set(test["targets"]) - production
+        require(not missing,
+                f"test target has no matching definition in the production build: {test_key(test)}; "
+                "target a production API and check cfg or macro definition identity")
+
+
+def parse_inventory(output):
     names = []
     for line in output.splitlines():
         if not line.strip():
             continue
         match = re.fullmatch(r"(.+): (test|benchmark)", line)
-        require(match is not None, f"unsupported Cargo inventory: {shlex.join(args)}\n{output}")
+        require(match is not None, f"unsupported compiled test inventory line: {line}")
         if match[2] == "test":
             names.append(match[1])
-    return Counter(names)
+    require(len(names) == len(set(names)), "compiled inventory contains duplicate test names")
+    return set(names)
 
 
-def check_inventory(tests, root, directory_bundle=None):
-    inventories = {}
-    for test, _ in tests:
+def cargo_configuration(cargo, root, key):
+    result = subprocess.run(cargo + ["-Z", "unstable-options", "config", "get", key, "--format=json-value"],
+                            cwd=root, capture_output=True, text=True)
+    if result.returncode == 101 and result.stderr.splitlines()[-1:] == [f"error: config value `{key}` is not set"]:
+        return {}
+    require(result.returncode == 0, f"cannot inspect Cargo {key} configuration ({result.returncode})")
+    return json.loads(result.stdout, object_pairs_hook=no_duplicate_keys)
+
+
+def capture_runtime(directory, keys_path, executable, *arguments):
+    keys = read_json(keys_path)
+    runtime = {"executable": str(Path(executable).resolve()), "directory": str(Path.cwd()),
+               "environment": {key: os.environ[key] for key in keys if key in os.environ}}
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", dir=directory, encoding="utf-8", delete=False) as output:
+        output.write(canonical(runtime))
+
+
+def capture_test_runtimes(cargo, command, root, environment, artifacts, output, directory):
+    targets = cargo_configuration(cargo, root, "target")
+    require(not any("runner" in target for target in targets.values())
+            and not any(re.fullmatch(r"CARGO_TARGET_.+_RUNNER", key) for key in environment),
+            "Cargo target runners are not supported by runtime capture; remove the configured runner")
+    keys = {"CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH", "OUT_DIR",
+            "CARGO_PKG_VERSION", "CARGO_PKG_VERSION_MAJOR", "CARGO_PKG_VERSION_MINOR", "CARGO_PKG_VERSION_PATCH",
+            "CARGO_PKG_VERSION_PRE", "CARGO_PKG_NAME", "CARGO_PKG_AUTHORS", "CARGO_PKG_DESCRIPTION",
+            "CARGO_PKG_HOMEPAGE", "CARGO_PKG_REPOSITORY", "CARGO_PKG_LICENSE", "CARGO_PKG_LICENSE_FILE",
+            "CARGO_PKG_RUST_VERSION", "CARGO_PKG_README", "PATH", "LD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "LIBPATH"}
+    keys.update(cargo_configuration(cargo, root, "env"))
+    for line in output.splitlines():
+        message = json.loads(line, object_pairs_hook=no_duplicate_keys)
+        if message.get("reason") == "build-script-executed":
+            keys.update(key for key, _ in message["env"])
+    keys_path = directory.parent / "runtime-keys.json"
+    keys_path.write_text(canonical(sorted(keys)), encoding="utf-8")
+    config = directory.parent / "runtime-runner.toml"
+    runner = [sys.executable, str(Path(__file__).resolve()), "__capture_runtime", str(directory), str(keys_path)]
+    config.write_text("[target.'cfg(all())']\nrunner = " + json.dumps(runner) + "\n", encoding="utf-8")
+    # Ask Cargo for runtime values so build-script and config precedence and loader paths stay Cargo's responsibility.
+    captured = execute(cargo + [arg for arg in command if arg != "--no-run"] + ["--config", config], root, env=environment)
+    messages = [json.loads(line, object_pairs_hook=no_duplicate_keys) for line in captured.splitlines()]
+    original = [json.loads(line, object_pairs_hook=no_duplicate_keys) for line in output.splitlines()]
+    def identities(messages):
+        return {canonical({key: message[key] for key in ("package_id", "target", "profile", "features", "executable")})
+                for message in messages if message.get("reason") == "compiler-artifact"}
+    require(identities(messages) == identities(original), "Cargo runtime capture changed compiled artifact identities")
+    runtimes = {}
+    for path in sorted(directory.glob("*.json")):
+        runtime = read_json(path)
+        executable = runtime["executable"]
+        require(executable not in runtimes, f"duplicate Cargo runtime capture: {executable}")
+        runtimes[executable] = runtime
+    expected = {artifact["executable"] for artifact in artifacts if artifact["is_test"] and artifact["executable"]}
+    require(set(runtimes) == expected,
+            f"Cargo runtime capture mismatch: missing {sorted(expected - runtimes.keys())}; unexpected {sorted(runtimes.keys() - expected)}")
+    return runtimes
+
+
+def check_inventory(bundle, artifacts, root, runtimes):
+    directories = {component["id"]: Path(root) / component["path"] for component in bundle["components"]}
+    inventories, test_artifacts = {}, {}
+    for artifact in artifacts:
+        if not artifact["is_test"] or not artifact["executable"]:
+            continue
+        key = target_key(artifact)
+        require(key not in test_artifacts, f"multiple compiled test artifacts for target: {key}")
+        runtime = runtimes[artifact["executable"]]
+        require(Path(runtime["directory"]) == directories[artifact["package"]], f"Cargo runtime directory differs from package: {key}")
+        runtime = {**runtime, "directory": Path(runtime["directory"]), "environment": {**os.environ, **runtime["environment"]}}
+        inventories[key] = parse_inventory(execute([runtime["executable"], "--list", "--format=terse"], runtime["directory"], env=runtime["environment"]))
+        test_artifacts[key] = runtime
+    expected = {}
+    for test in bundle["tests"]:
+        expected.setdefault(target_key(test), set()).add(test["name"])
+    for key in set(inventories) | set(expected):
+        actual, compiled = expected.get(key, set()), inventories.get(key, set())
+        require(actual == compiled,
+                f"compiled test inventory mismatch in {key}: compiler missing {sorted(compiled - actual)}; absent from binary {sorted(actual - compiled)}")
+    return test_artifacts
+
+
+def excluded_targets(metadata, artifacts):
+    compiled = {target_key(artifact) for artifact in artifacts}
+    result = []
+    for package in metadata["packages"]:
+        if package["id"] not in metadata["workspace_members"]:
+            continue
+        for target in package["targets"]:
+            kind = cargo_target_kind(target)
+            key = package["name"], kind, target["name"]
+            if kind != "custom-build" and key not in compiled:
+                result.append({"package": package["name"], "target_kind": kind, "target_name": target["name"],
+                               "required_features": target.get("required-features", []),
+                               "reason": "not compiled by this Cargo configuration"})
+    return sorted_records(result)
+
+
+def toolchain(root):
+    path = root / "tools/traceability/rust-toolchain.toml"
+    require(path.is_file(), f"missing compiler toolchain pin: {path}")
+    return tomllib.loads(path.read_text(encoding="utf-8"))["toolchain"]["channel"]
+
+
+def load_traces(root):
+    """Return the deterministic report and reconciled runtime test artifacts."""
+    root = Path(root).resolve()
+    channel = toolchain(root)
+    cargo = ["cargo", "+" + channel]
+    prerequisites = f"Install the pinned compiler components with: rustup toolchain install {channel} --component rustc-dev --component llvm-tools-preview"
+    try:
+        execute(cargo + ["build", "--locked", "--manifest-path", root / "tools/traceability/Cargo.toml",
+                         "--target-dir", root / "target/traceability-driver"], root)
+    except InvalidTrace as error:
+        raise InvalidTrace(f"{error}\n{prerequisites}") from error
+    driver = root / "target/traceability-driver/debug/traceability-collector"
+    require(driver.is_file(), f"compiler driver binary missing: {driver}")
+    metadata = json.loads(execute(cargo + ["metadata", "--locked", "--format-version", "1"], root),
+                          object_pairs_hook=no_duplicate_keys)
+    components = []
+    for package in metadata["packages"]:
+        if package["id"] in metadata["workspace_members"]:
+            directory = Path(package["manifest_path"]).resolve().parent
+            require(directory.is_relative_to(root), f"workspace package outside repository: {directory}")
+            components.append({"id": package["name"], "package": package["name"], "path": directory.relative_to(root).as_posix()})
+    analysis = root / "target/traceability-analysis"
+    analysis.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="run-", dir=analysis) as directory:
+        run = Path(directory)
+        shards = run / "shards"
+        shards.mkdir()
+        metadata_path = run / "metadata.json"
+        metadata_path.write_text(canonical(metadata), encoding="utf-8")
+        wrapper = run / "workspace-wrapper"
+        wrapper.symlink_to(driver)
+        sysroot = execute(["rustc", "+" + channel, "--print", "sysroot"], root).strip()
+        environment = {**os.environ, "RUSTC_WORKSPACE_WRAPPER": str(wrapper), "TRACEABILITY_ROOT": str(root),
+                       "TRACEABILITY_SHARDS": str(shards), "TRACEABILITY_METADATA": str(metadata_path),
+                       "LD_LIBRARY_PATH": str(Path(sysroot) / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")}
+        commands = [["build", "--workspace", "--lib", "--bins", "--locked"],
+                    ["test", "--workspace", "--all-targets", "--no-run", "--locked"]]
+        outputs = [execute(cargo + command + ["--message-format=json", "--target-dir", analysis], root, env=environment)
+                   for command in commands]
+        artifacts = cargo_artifacts(zip(("production", "tests"), outputs), metadata)
+        runtimes_path = run / "runtimes"
+        runtimes_path.mkdir()
+        test_artifacts = cargo_artifacts([("tests", outputs[1])], metadata)
+        runtimes = capture_test_runtimes(cargo, commands[1] + ["--message-format=json", "--target-dir", analysis],
+                                         root, environment, test_artifacts, outputs[1], runtimes_path)
+        captures = compilation_purposes([read_json(path) for path in sorted(shards.glob("*.json"))], artifacts)
+        bundle = merge_shards(root, captures, components)
+        reconcile_units(bundle, artifacts)
+        check_production_targets(bundle, captures)
+        test_artifacts = check_inventory(bundle, artifacts, root, runtimes)
+    bundle["excluded_targets"] = excluded_targets(metadata, artifacts)
+    bundle["configuration"] = {"toolchain": channel, "cargo": [shlex.join(command) for command in commands],
+                               "scope": "Current host and default Cargo features; inactive cfg branches are outside this snapshot."}
+    return bundle, test_artifacts
+
+
+def selected_tests(bundle, kind="all"):
+    return [test for test in bundle["tests"] if kind == "all" or bool(test["targets"]) == (kind == "targeted")]
+
+
+def run_tests(tests, test_artifacts):
+    for test in tests:
         key = target_key(test)
-        if key not in inventories:
-            inventories[key] = cargo_inventory(test, root)
-        require(inventories[key][test["name"]] == 1,
-                f"{test['id']}: expected exactly one compiled test in {key}: {test['name']}")
-    for inventory in (directory_bundle or {}).get("inventories", []):
-        key = target_key(inventory)
-        if key not in inventories:
-            inventories[key] = cargo_inventory(inventory, root)
-        actual = inventories[key]
-        expected = Counter(inventory["tests"])
-        require(actual == expected,
-                f"global classification inventory mismatch in {key}: "
-                f"unclassified compiled {sorted((actual - expected).elements())}; "
-                f"parsed but absent {sorted((expected - actual).elements())}")
-
-
-def run_tests(tests, root):
-    for test, aliases in tests:
-        args = cargo_command(test) + [test["name"], "--", "--exact", "--format", "pretty", "--color", "never"]
-        output = execute(args, root)
-        failure = f"{test['id']}: expected one passed exact test, zero failed/ignored\n{output}"
-        frames, runs = [], []
-        for line in output.splitlines():
-            start = re.fullmatch(r"running ([0-9]+) tests?", line)
-            event = re.fullmatch(r"test (.+) \.\.\. (.+)", line)
-            pending = re.fullmatch(r"test (.+) \.\.\. ", line)
-            if start:
-                frames.append({"count": int(start[1]), "events": [], "pending": None})
-            elif line.startswith("test result: "):
-                result = line.removeprefix("test result: ")
-                require(frames and re.fullmatch(
-                    r"(?:ok|FAILED)\. [0-9]+ passed; [0-9]+ failed; [0-9]+ ignored; [0-9]+ measured; [0-9]+ filtered out; finished in [0-9.]+s",
-                    result), failure)
-                frame = frames.pop()
-                require(frame["pending"] is None, failure)
-                frame["summary"] = result
-                if not frames:
-                    runs.append(frame)
-            elif event:
-                require(frames and frames[-1]["pending"] is None, failure)
-                frames[-1]["events"].append((event[1], event[2]))
-            elif pending:
-                require(frames and frames[-1]["pending"] is None, failure)
-                frames[-1]["pending"] = pending[1]
-            elif re.fullmatch(r"ok|FAILED|ignored(?:, .+)?", line):
-                require(frames and frames[-1]["pending"] is not None, failure)
-                frames[-1]["events"].append((frames[-1]["pending"], line))
-                frames[-1]["pending"] = None
-            elif line.startswith(("running ", "test ")):
-                require(False, failure)
-        summary = r"ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9.]+s"
-        require(not frames and len(runs) == 1 and runs[0]["count"] == 1
-                and runs[0]["events"] == [(test["name"], "ok")]
-                and re.fullmatch(summary, runs[0]["summary"]), failure)
-        print(f"PASS {', '.join(aliases)}: {shlex.join(args)}")
+        require(key in test_artifacts, f"compiled test artifact missing for target: {key}")
+        artifact = test_artifacts[key]
+        args = [artifact["executable"], test["name"], "--exact", "--format", "pretty", "--color", "never"]
+        output = execute(args, artifact["directory"], env=artifact["environment"])
+        summary = re.findall(r"^test result: (.+)$", output, flags=re.MULTILINE)
+        require(summary and re.fullmatch(r"ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9.]+s", summary[-1]),
+                f"expected one passed exact test: {test_key(test)}\n{output}")
+        require(re.search(r"^test " + re.escape(test["name"]) + r" \.\.\. ok$", output, flags=re.MULTILINE),
+                f"exact test identity not confirmed: {test_key(test)}\n{output}")
+        print(f"PASS {' / '.join(test_key(test))}")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "run", "viewer"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
-    parser.add_argument("--output", type=Path, help="viewer HTML destination (viewer only)")
+    parser.add_argument("--kind", choices=("all", "targeted", "untargeted"), default="all")
+    parser.add_argument("--output", type=Path, help="HTML destination for viewer or JSON destination for check")
     args = parser.parse_args(argv)
-    if args.output is not None and args.command != "viewer":
-        parser.error("--output is only available for viewer")
+    if args.command == "run" and args.output is not None:
+        parser.error("--output is only available for check and viewer")
     root = args.root.resolve()
     try:
-        traces = load_traces(root)
-        check_surfaces(traces, root)
-        tests = list(mapped_tests(traces))
-        check_inventory(tests, root, traces.directory_bundle)
+        bundle, test_artifacts = load_traces(root)
         if args.command == "viewer":
             from traceability_viewer import write_viewer
-
-            destination = args.output if args.output is not None else root / "target/traceability-viewer.html"
-            write_viewer(root, traces, destination)
-            print(f"Viewer snapshot for {len(traces)} features: {destination.resolve()}")
-            return 0
-        if args.command == "run":
-            run_tests(tests, root)
+            destination = args.output or root / "target/traceability-viewer.html"
+            write_viewer(root, bundle, destination)
+            print(f"Viewer snapshot: {destination.resolve()}")
+        elif args.command == "run":
+            run_tests(selected_tests(bundle, args.kind), test_artifacts)
         else:
-            print(f"Traceability surfaces, structure, and Cargo identities match: {len(traces)} features")
+            if args.output:
+                from traceability_viewer import capture, protect_destination
+                destination = protect_destination(root, args.output, capture(root, bundle))
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"Compiler traceability matches {len(bundle['units'])} units and {len(bundle['tests'])} compiled tests; "
+                  f"{len(bundle['calls'])} workspace calls; {len(bundle['unresolved'])} unresolved calls.")
         return 0
-    except (InvalidTrace, OSError, ValueError) as error:
+    except (InvalidTrace, OSError, ValueError, KeyError, TypeError) as error:
         print(f"traceability: {error}", file=sys.stderr)
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "__capture_runtime":
+        capture_runtime(*sys.argv[2:])
+    else:
+        sys.exit(main())

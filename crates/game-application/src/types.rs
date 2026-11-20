@@ -209,5 +209,5 @@ impl Error for ApplicationError {
 }
 
 #[cfg(test)]
-#[path = "trace/game-play/binding/tests.rs"]
+#[path = "tests/types.rs"]
 mod tests;

@@ -341,9 +341,5 @@ impl GameRecords {
 }
 
 #[cfg(test)]
-#[path = "trace/public-record-search/support.rs"]
+#[path = "tests/records.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;

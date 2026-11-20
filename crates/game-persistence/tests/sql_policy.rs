@@ -443,7 +443,6 @@ fn inspect(root: &Path, path: &Path, errors: &mut Vec<String>) {
         }
     }
 }
-crate::trace_support::infrastructure!("sql-policy", "リポジトリの本番ソースに対する SQL 構築方針を検査する。製品の契約を検証するものではない。";
 #[test]
 fn production_sql_uses_builders_or_reviewed_postgres_operations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -465,8 +464,6 @@ fn production_sql_uses_builders_or_reviewed_postgres_operations() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
-);
-crate::trace_support::infrastructure!("sql-policy", "禁止するソース例に対する SQL 方針の診断を検証する。リポジトリ開発用の検査である。";
 #[test]
 fn policy_rejects_application_sql_and_interpolation() {
     for source in [
@@ -491,8 +488,6 @@ fn policy_rejects_application_sql_and_interpolation() {
         assert!(!violations(source).is_empty(), "accepted {source}");
     }
 }
-);
-crate::trace_support::infrastructure!("sql-policy", "許可するテスト用データとクエリービルダーの例で SQL 方針の解析器を検証する。リポジトリ開発用の検査である。";
 #[test]
 fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
     for source in [
@@ -508,13 +503,7 @@ fn policy_accepts_builders_bound_catalog_queries_and_test_fixtures() {
         assert!(violations(source).is_empty(), "rejected {source}");
     }
 }
-);
 
-#[cfg(test)]
-#[path = "../../../scripts/traceability_model.rs"]
-mod trace_support;
-
-crate::trace_support::infrastructure!("sql-policy", "テスト専用の準備用 SQL を本番コードの診断対象から除き、通常の関数と不正なテスト属性の検査を維持する。";
 #[test]
 fn policy_distinguishes_test_functions_from_production_sql() {
     let fixture = r#"fn fixture() { db.execute_unprepared("DELETE FROM accounts"); }"#;
@@ -525,17 +514,28 @@ fn policy_distinguishes_test_functions_from_production_sql() {
         ("#![cfg(not(test))]", 1),
     ] {
         let source = format!("{attribute}\n{fixture}");
-        assert_eq!(violations(&source).len(), expected, "misclassified {source}");
+        assert_eq!(
+            violations(&source).len(),
+            expected,
+            "misclassified {source}"
+        );
     }
     for (attribute, modifier) in [
         ("#[test]", ""),
         ("#[tokio::test]", "async "),
-        (r#"#[tokio::test(flavor = "multi_thread", worker_threads = 2)]"#, "async "),
+        (
+            r#"#[tokio::test(flavor = "multi_thread", worker_threads = 2)]"#,
+            "async ",
+        ),
     ] {
         let source = format!("{attribute} {modifier}{fixture}");
         assert!(violations(&source).is_empty(), "rejected {source}");
         let source = format!("{source} mod production {{ {fixture} }}");
-        assert_eq!(violations(&source).len(), 1, "accepted production SQL in {source}");
+        assert_eq!(
+            violations(&source).len(),
+            1,
+            "accepted production SQL in {source}"
+        );
     }
     for attribute in [
         "",
@@ -553,4 +553,3 @@ fn policy_distinguishes_test_functions_from_production_sql() {
         assert_eq!(violations(&source).len(), 1, "accepted {source}");
     }
 }
-);

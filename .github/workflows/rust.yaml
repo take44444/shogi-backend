@@ -38,6 +38,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install traceability compiler
+        run: rustup toolchain install nightly-2026-11-18 --profile minimal --component rustc-dev,llvm-tools,rust-src,rustfmt,clippy
       - name: Check architecture boundaries
         run: |
           python3 scripts/check-boundaries.py
@@ -45,18 +47,26 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --all -- --check
-          cargo fmt --manifest-path tools/traceability/Cargo.toml -- --check
+          cargo +nightly-2026-11-18 fmt --manifest-path tools/traceability/Cargo.toml -- --check
+          cargo fmt --manifest-path tools/traceability-attributes/Cargo.toml -- --check
       - name: Check lints
         run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
-          CARGO_TARGET_DIR=target cargo clippy --locked --manifest-path tools/traceability/Cargo.toml --all-targets -- -D warnings
+          cargo +nightly-2026-11-18 clippy --locked --manifest-path tools/traceability/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --locked --manifest-path tools/traceability-attributes/Cargo.toml --all-targets -- -D warnings
       - name: Test workspace against PostgreSQL
         run: cargo test --locked --workspace
-      - name: Check feature traceability
+      - name: Check compiler-derived traceability
         run: |
           python3 scripts/test-traceability.py
           python3 scripts/test-traceability-viewer.py
-          CARGO_TARGET_DIR=target python3 scripts/test-directory-traceability.py
+          python3 scripts/test-traceability-runtime.py
+          python3 tools/traceability/tests/compiler_fixture.py
+          python3 tools/traceability/tests/method_identity_fixture.py
+          python3 tools/traceability/tests/definition_identity_fixture.py
+          python3 tools/traceability/tests/external_declaration_identity_fixture.py
+          cargo +nightly-2026-11-18 test --locked --manifest-path tools/traceability/Cargo.toml
+          python3 scripts/test-directory-traceability.py
           python3 scripts/traceability.py check
       - name: Generate traceability viewer
         run: python3 scripts/traceability.py viewer
