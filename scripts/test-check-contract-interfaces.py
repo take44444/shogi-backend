@@ -51,7 +51,7 @@ class ContractInterfaceTests(unittest.TestCase):
                 for package in checker.PACKAGES:
                     compile_crate(package.replace("-", "_"), "pub use support::Value;", [("support", support)])
 
-                contracts = root / "tests/contracts"
+                contracts = root / "tests/interface_checks"
                 contracts.mkdir(parents=True)
                 (contracts / "valid.rs").write_text("\n".join(
                     f"pub fn {package.replace('-', '_')}(value: {package.replace('-', '_')}::Value) {{}}"

@@ -1,2 +1,2 @@
-#[path = "contracts/rating-application/support.rs"]
+#[path = "ratings/mod.rs"]
 mod ratings;

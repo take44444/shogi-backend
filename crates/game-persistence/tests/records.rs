@@ -1,2 +1,2 @@
-#[path = "contracts/public-record-detail/support.rs"]
+#[path = "records/mod.rs"]
 mod records;

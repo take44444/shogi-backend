@@ -440,5 +440,4 @@ fn decode(value: String) -> Result<String, Error> {
 }
 
 #[cfg(test)]
-#[path = "tests/records.rs"]
 mod tests;

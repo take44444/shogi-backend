@@ -50,7 +50,7 @@ def main():
         for case, expected in CASES.items():
             command = [os.environ.get("RUSTC", "rustc"), "--edition=2024", "--crate-name", "contract",
                        "--crate-type=lib", "--error-format=json", "-A", "dead_code",
-                       "--out-dir", output, str(ROOT / "tests/contracts" / f"{case}.rs")]
+                       "--out-dir", output, str(ROOT / "tests/interface_checks" / f"{case}.rs")]
             for name, library in libraries.items():
                 command.extend(["--extern", f"{name}={library}"])
             for dependency_dir in sorted(dependency_dirs):

@@ -1,2 +1,2 @@
-#[path = "contracts/game-play/support.rs"]
+#[path = "service/mod.rs"]
 mod service;
