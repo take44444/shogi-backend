@@ -13,17 +13,15 @@ fn sequence_cap_is_portable() {
     );
 }
 
-#[tokio::test]
-async fn exhausted_state_still_checks_expected_sequence_before_advancing() {
+#[test]
+fn exhausted_state_still_checks_expected_sequence_before_advancing() {
     let repository = store();
-    let mut actor = Actor::new(id(), repository.clone());
-    actor.refresh().await.unwrap();
-    actor.state.as_mut().unwrap().seq = i64::MAX as u64;
-    repository.0.lock().unwrap().version = i64::MAX as u64;
+    let mut state = State::restore(repository.0.lock().unwrap().clone()).unwrap();
+    state.seq = i64::MAX as u64;
     let mut request = receipt();
     request.expected_seq = u64::MAX;
     assert_eq!(
-        actor.apply(request.clone()).await,
+        state.stage(id(), Some(&request), Timestamp::new(0).unwrap()),
         Err(ApplicationError::SequenceMismatch {
             expected: u64::MAX,
             actual: i64::MAX as u64
@@ -31,7 +29,13 @@ async fn exhausted_state_still_checks_expected_sequence_before_advancing() {
     );
     request.expected_seq = i64::MAX as u64;
     assert_eq!(
-        actor.apply(request).await,
+        state.stage(id(), Some(&request), Timestamp::new(0).unwrap()),
+        Err(ApplicationError::SequenceExhausted)
+    );
+    state.seq = i64::MAX as u64 - 1;
+    request.expected_seq = state.seq;
+    assert_eq!(
+        state.stage(id(), Some(&request), Timestamp::new(0).unwrap()),
         Err(ApplicationError::SequenceExhausted)
     );
 }

@@ -39,7 +39,7 @@ async fn joined_history_load_remains_coherent_during_concurrent_commits() {
             record
                 .journal
                 .last()
-                .and_then(|receipt| receipt.acceptance.result)
+                .and_then(|receipt| receipt.acceptance().result)
         );
         let service = pg_test_support::GameFixture::new(reader.clone(), &url);
         service.snapshot(&id()).await.unwrap();

@@ -1,8 +1,8 @@
 use super::*;
 
 pub(super) struct RecordStore(
-    pub(super) Mutex<GameRecord>,
-    pub(super) Mutex<Vec<StagedGameChange>>,
+    pub(super) Arc<Mutex<GameRecord>>,
+    pub(super) Arc<Mutex<Vec<StagedGameChange>>>,
 );
 pub(super) fn id() -> GameId {
     GameId::new("lifecycle").unwrap()
@@ -17,7 +17,19 @@ pub(super) fn receipt() -> MutationRequest {
 }
 pub(super) fn store() -> Arc<RecordStore> {
     Arc::new(RecordStore(
-        Mutex::new(GameRecord {
+        Arc::new(Mutex::new(GameRecord {
+            time_control: crate::TimeControl::for_pool(crate::rating::Pool::TenMinute30),
+            initial_clock: crate::ClockState::start(
+                crate::TimeControl::for_pool(crate::rating::Pool::TenMinute30),
+                crate::Timestamp::new(0).unwrap(),
+            )
+            .unwrap(),
+            clock: crate::ClockState::start(
+                crate::TimeControl::for_pool(crate::rating::Pool::TenMinute30),
+                crate::Timestamp::new(0).unwrap(),
+            )
+            .unwrap(),
+            server_now_ms: crate::Timestamp::new(0).unwrap(),
             id: id(),
             participants: Participants::new(
                 UserId::new("black").unwrap(),
@@ -27,12 +39,28 @@ pub(super) fn store() -> Arc<RecordStore> {
             version: 0,
             result: None,
             journal: vec![],
-        }),
-        Mutex::default(),
+        })),
+        Arc::default(),
     ))
 }
 #[async_trait]
 impl GameRepository for RecordStore {
+    async fn begin_game_update(
+        &self,
+        _: &GameId,
+        terminal: bool,
+    ) -> Result<Box<dyn crate::LockedGameUpdate>, ApplicationError> {
+        Ok(Box::new(LockedRecord {
+            record: self.0.lock().unwrap().clone(),
+            stored: self.0.clone(),
+            changes: self.1.clone(),
+            terminal,
+        }))
+    }
+    async fn expired_games(&self, _: u32) -> Result<Vec<GameId>, ApplicationError> {
+        Ok(vec![])
+    }
+
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -64,13 +92,41 @@ impl GameRepository for RecordStore {
         }
         Ok(record.version)
     }
-    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), ApplicationError> {
-        self.1.lock().unwrap().push(change.clone());
-        let receipt = change.receipt();
-        let mut record = self.0.lock().unwrap();
-        record.version = receipt.acceptance.seq;
-        record.result = receipt.acceptance.result;
-        record.journal.push(receipt.clone());
+}
+
+struct LockedRecord {
+    record: GameRecord,
+    stored: Arc<Mutex<GameRecord>>,
+    changes: Arc<Mutex<Vec<StagedGameChange>>>,
+    terminal: bool,
+}
+#[async_trait]
+impl crate::LockedGameUpdate for LockedRecord {
+    fn locked_record(&self) -> &GameRecord {
+        &self.record
+    }
+    async fn decision_time(&mut self) -> Result<Timestamp, ApplicationError> {
+        Timestamp::new(0)
+    }
+    fn terminal_allowed(&self) -> bool {
+        self.terminal
+    }
+    async fn rollback(self: Box<Self>) -> Result<(), ApplicationError> {
+        Ok(())
+    }
+    async fn commit(self: Box<Self>, change: &StagedGameChange) -> Result<(), ApplicationError> {
+        let mut record = self.stored.lock().unwrap();
+        if record.version != change.entry().expected_seq() {
+            return Err(ApplicationError::SequenceMismatch {
+                expected: change.entry().expected_seq(),
+                actual: record.version,
+            });
+        }
+        record.version = change.entry().acceptance().seq;
+        record.result = change.entry().acceptance().result;
+        record.clock = change.entry().acceptance().clock;
+        record.journal.push(change.entry().clone());
+        self.changes.lock().unwrap().push(change.clone());
         Ok(())
     }
 }

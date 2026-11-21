@@ -34,7 +34,7 @@ async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_
     store.close().await.unwrap();
     let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
     let service = pg_test_support::GameFixture::new(store.clone(), &url);
-    assert_eq!(service.snapshot(&id()).await.unwrap(), ongoing);
+    assert_same_snapshot(service.snapshot(&id()).await.unwrap(), &ongoing);
     assert_eq!(service.make_move(&id(), first.clone()).await, Ok(receipt));
     let finish = service.resign(&id(), resign()).await.unwrap();
     assert_eq!(finish.result.unwrap().winner, Player::White);
@@ -45,7 +45,7 @@ async fn reconnecting_restores_position_hands_promotion_and_receipts_even_after_
         Arc::new(SeaOrmStore::connect(&url).await.unwrap()),
         &url,
     );
-    assert_eq!(service.snapshot(&id()).await.unwrap(), finished);
+    assert_same_snapshot(service.snapshot(&id()).await.unwrap(), &finished);
     assert_eq!(service.make_move(&id(), first).await, Ok(receipt));
     assert_eq!(service.resign(&id(), resign()).await, Ok(finish));
     assert_eq!(

@@ -1,10 +1,10 @@
-//! Version-one JSON notifications over Valkey Pub/Sub. A PUBLISH response
+//! Version-two JSON notifications over Valkey Pub/Sub. A PUBLISH response
 //! confirms acceptance, not subscriber delivery or durable storage.
 #![warn(missing_docs)]
 use async_trait::async_trait;
 use game_application::{
-    CommittedEvent, DomainEvent, EventKind, GameId, NotificationPublisher, PublishError, RequestId,
-    UserId,
+    CommittedEvent, DomainEvent, EventKind, EventOrigin, GameId, NotificationPublisher,
+    PublishError, RequestId, UserId,
 };
 use redis::{PushInfo, PushKind, Value};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use shogi_domain::{FinishReason, GameResult, Player};
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
-/// A decoded, validated version-one notification.
+/// A decoded, validated version-two notification.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notification(pub CommittedEvent);
 
@@ -21,17 +21,91 @@ pub struct Notification(pub CommittedEvent);
 #[error("invalid game notification")]
 pub struct DecodeError;
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum ClockDto {
+    Running {
+        main_remaining_ms: [i64; 2],
+        turn_started_at_ms: i64,
+        deadline_at_ms: i64,
+    },
+    Stopped {
+        main_remaining_ms: [i64; 2],
+        byoyomi_remaining_ms: [i64; 2],
+        stopped_at_ms: i64,
+    },
+}
+impl From<game_application::ClockState> for ClockDto {
+    fn from(value: game_application::ClockState) -> Self {
+        match value {
+            game_application::ClockState::Running {
+                main_remaining_ms,
+                turn_started_at,
+                deadline_at,
+            } => Self::Running {
+                main_remaining_ms: main_remaining_ms.map(|v| v.get()),
+                turn_started_at_ms: turn_started_at.get(),
+                deadline_at_ms: deadline_at.get(),
+            },
+            game_application::ClockState::Stopped {
+                main_remaining_ms,
+                byoyomi_remaining_ms,
+                stopped_at,
+            } => Self::Stopped {
+                main_remaining_ms: main_remaining_ms.map(|v| v.get()),
+                byoyomi_remaining_ms: byoyomi_remaining_ms.map(|v| v.get()),
+                stopped_at_ms: stopped_at.get(),
+            },
+        }
+    }
+}
+impl TryFrom<ClockDto> for game_application::ClockState {
+    type Error = DecodeError;
+    fn try_from(value: ClockDto) -> Result<Self, DecodeError> {
+        use game_application::{ClockState, Milliseconds, Timestamp};
+        let duration = |n| Milliseconds::new(n).map_err(|_| DecodeError);
+        let time = |n| Timestamp::new(n).map_err(|_| DecodeError);
+        match value {
+            ClockDto::Running {
+                main_remaining_ms: m,
+                turn_started_at_ms: s,
+                deadline_at_ms: d,
+            } if s <= d && m.iter().all(|n| (0..=600_000).contains(n)) => Ok(ClockState::Running {
+                main_remaining_ms: [duration(m[0])?, duration(m[1])?],
+                turn_started_at: time(s)?,
+                deadline_at: time(d)?,
+            }),
+            ClockDto::Stopped {
+                main_remaining_ms: m,
+                byoyomi_remaining_ms: b,
+                stopped_at_ms: s,
+            } if m.iter().all(|n| (0..=600_000).contains(n))
+                && b.iter().all(|n| (0..=30_000).contains(n)) =>
+            {
+                Ok(ClockState::Stopped {
+                    main_remaining_ms: [duration(m[0])?, duration(m[1])?],
+                    byoyomi_remaining_ms: [duration(b[0])?, duration(b[1])?],
+                    stopped_at: time(s)?,
+                })
+            }
+            _ => Err(DecodeError),
+        }
+    }
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Incoming {
+    clock: ClockDto,
+    evaluated_at_ms: i64,
     schema_version: u8,
     event_id: String,
     #[serde(rename = "type")]
     kind: String,
     game_id: String,
     seq: u64,
-    request_id: String,
-    user_id: String,
+    origin: String,
+    request_id: Option<String>,
+    user_id: Option<String>,
     movement: Option<String>,
     in_check: Option<bool>,
     result: Option<IncomingResult>,
@@ -53,7 +127,7 @@ pub fn decode_notification(
         return Err(DecodeError);
     }
     let incoming: Incoming = serde_json::from_slice(bytes).map_err(|_| DecodeError)?;
-    if incoming.schema_version != 1 || incoming.seq == 0 || incoming.seq > i64::MAX as u64 {
+    if incoming.schema_version != 2 || incoming.seq == 0 || incoming.seq > i64::MAX as u64 {
         return Err(DecodeError);
     }
     let game_id = GameId::new(incoming.game_id).map_err(|_| DecodeError)?;
@@ -80,6 +154,7 @@ pub fn decode_notification(
                 reason: match value.reason.as_str() {
                     "checkmate" => FinishReason::Checkmate,
                     "resignation" => FinishReason::Resignation,
+                    "timeout" => FinishReason::Timeout,
                     _ => return Err(DecodeError),
                 },
             })
@@ -112,10 +187,32 @@ pub fn decode_notification(
         }
         _ => return Err(DecodeError),
     };
+    let clock = incoming.clock.try_into()?;
+    let evaluated_at =
+        game_application::Timestamp::new(incoming.evaluated_at_ms).map_err(|_| DecodeError)?;
+    let origin = match (
+        incoming.origin.as_str(),
+        incoming.request_id,
+        incoming.user_id,
+    ) {
+        ("user", Some(r), Some(u))
+            if !result.is_some_and(|r| r.reason == FinishReason::Timeout) =>
+        {
+            EventOrigin::User {
+                request_id: RequestId::new(r).map_err(|_| DecodeError)?,
+                user_id: UserId::new(u).map_err(|_| DecodeError)?,
+            }
+        }
+        ("system", None, None) if result.is_some_and(|r| r.reason == FinishReason::Timeout) => {
+            EventOrigin::System
+        }
+        _ => return Err(DecodeError),
+    };
     Ok(Notification(CommittedEvent {
         game_id,
-        request_id: RequestId::new(incoming.request_id).map_err(|_| DecodeError)?,
-        user_id: UserId::new(incoming.user_id).map_err(|_| DecodeError)?,
+        clock,
+        evaluated_at,
+        origin,
         seq: incoming.seq,
         event,
     }))
@@ -258,20 +355,26 @@ impl From<GameResult> for ResultDto {
             reason: match result.reason {
                 FinishReason::Checkmate => "checkmate",
                 FinishReason::Resignation => "resignation",
+                FinishReason::Timeout => "timeout",
             },
         }
     }
 }
 #[derive(Serialize)]
 struct Envelope<'a> {
+    clock: ClockDto,
+    evaluated_at_ms: i64,
     schema_version: u8,
     event_id: String,
     #[serde(rename = "type")]
     kind: &'static str,
     game_id: &'a str,
     seq: u64,
-    request_id: &'a str,
-    user_id: &'a str,
+    origin: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     movement: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -287,8 +390,17 @@ fn encode(event: &CommittedEvent) -> Result<Vec<u8>, PublishError> {
         } => (Some(movement.to_string()), Some(in_check), result),
         DomainEvent::GameFinished { result } => (None, None, Some(result)),
     };
+    let (origin, request_id, user_id) = match &event.origin {
+        EventOrigin::User {
+            request_id,
+            user_id,
+        } => ("user", Some(request_id.as_str()), Some(user_id.as_str())),
+        EventOrigin::System => ("system", None, None),
+    };
     serde_json::to_vec(&Envelope {
-        schema_version: 1,
+        clock: event.clock.into(),
+        evaluated_at_ms: event.evaluated_at.get(),
+        schema_version: 2,
         event_id: format!(
             "{}:{}:{}",
             hex(event.game_id.as_str()),
@@ -298,8 +410,9 @@ fn encode(event: &CommittedEvent) -> Result<Vec<u8>, PublishError> {
         kind: kind(event.event.kind()),
         game_id: event.game_id.as_str(),
         seq: event.seq,
-        request_id: event.request_id.as_str(),
-        user_id: event.user_id.as_str(),
+        origin,
+        request_id,
+        user_id,
         movement,
         in_check,
         result: result.map(Into::into),

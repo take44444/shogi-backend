@@ -39,16 +39,32 @@ impl DomainEvent {
     }
 }
 
+/// Origin of a committed event. System events have no user request identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EventOrigin {
+    /// A command accepted from a bound participant.
+    User {
+        /// Retained command identity.
+        request_id: RequestId,
+        /// Participant identity.
+        user_id: UserId,
+    },
+    /// An autonomous timeout.
+    System,
+}
+
 /// A committed event identified by `(game_id, seq, event.kind())`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommittedEvent {
+    /// Clock frozen by the committed transition.
+    pub clock: crate::ClockState,
+    /// Database time when this transition was evaluated.
+    pub evaluated_at: crate::Timestamp,
     /// The game that produced the event.
     pub game_id: GameId,
-    /// The accepted request, for correlation.
-    pub request_id: RequestId,
-    /// The participant who issued the command.
-    pub user_id: UserId,
-    /// The accepted command sequence.
+    /// User correlation or an autonomous system transition.
+    pub origin: EventOrigin,
+    /// The committed state transition sequence.
     pub seq: u64,
     /// The immutable application fact.
     pub event: DomainEvent,
@@ -69,13 +85,15 @@ pub struct CommittedEvent {
 /// ```compile_fail,E0594
 /// use game_application::StagedGameChange;
 /// fn change_receipt(change: &mut StagedGameChange) {
-///     change.receipt().acceptance.seq = 2;
+///     if let game_application::JournalEntry::UserCommand(receipt) = change.entry() {
+///         receipt.acceptance.seq = 2;
+///     }
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StagedGameChange {
     game_id: GameId,
-    receipt: Receipt,
+    entry: crate::JournalEntry,
     events: Vec<CommittedEvent>,
 }
 impl StagedGameChange {
@@ -90,55 +108,77 @@ impl StagedGameChange {
     /// an expected sequence at `i64::MAX`. Returns [`ApplicationError::Corrupt`] for
     /// in-range nonconsecutive sequences or inconsistent action and result.
     pub fn new(game_id: GameId, receipt: Receipt) -> Result<Self, ApplicationError> {
-        if receipt.request.expected_seq >= i64::MAX as u64
-            || receipt.acceptance.seq > i64::MAX as u64
-        {
+        Self::from_entry(game_id, receipt.into())
+    }
+
+    /// Freezes a user or system transition and its canonical event batch.
+    pub fn from_entry(
+        game_id: GameId,
+        entry: crate::JournalEntry,
+    ) -> Result<Self, ApplicationError> {
+        let acceptance = entry.acceptance();
+        if entry.expected_seq() >= i64::MAX as u64 || acceptance.seq > i64::MAX as u64 {
             return Err(ApplicationError::SequenceExhausted);
         }
-        if receipt.request.expected_seq + 1 != receipt.acceptance.seq {
+        if entry.expected_seq() + 1 != acceptance.seq {
             return Err(ApplicationError::Corrupt);
         }
+        let origin = match entry.request() {
+            Some(r) => EventOrigin::User {
+                request_id: r.request_id.clone(),
+                user_id: r.user_id.clone(),
+            },
+            None => EventOrigin::System,
+        };
         let mut events = Vec::with_capacity(2);
         let mut push = |event| {
             events.push(CommittedEvent {
                 game_id: game_id.clone(),
-                request_id: receipt.request.request_id.clone(),
-                user_id: receipt.request.user_id.clone(),
-                seq: receipt.acceptance.seq,
+                origin: origin.clone(),
+                seq: acceptance.seq,
+                clock: acceptance.clock,
+                evaluated_at: entry.evaluated_at(),
                 event,
             })
         };
-        match receipt.request.action {
-            Action::Move(movement) => {
-                if receipt
-                    .acceptance
-                    .result
-                    .is_some_and(|r| r.reason != FinishReason::Checkmate)
-                {
-                    return Err(ApplicationError::Corrupt);
+        match &entry {
+            crate::JournalEntry::UserCommand(receipt) => match receipt.request.action {
+                Action::Move(movement) => {
+                    if acceptance
+                        .result
+                        .is_some_and(|r| r.reason != FinishReason::Checkmate)
+                    {
+                        return Err(ApplicationError::Corrupt);
+                    }
+                    push(DomainEvent::MoveCommitted {
+                        movement,
+                        in_check: acceptance.in_check,
+                        result: acceptance.result,
+                    });
                 }
-                push(DomainEvent::MoveCommitted {
-                    movement,
-                    in_check: receipt.acceptance.in_check,
-                    result: receipt.acceptance.result,
-                });
-            }
-            Action::Resign => {
-                if !receipt
-                    .acceptance
-                    .result
-                    .is_some_and(|r| r.reason == FinishReason::Resignation)
-                {
+                Action::Resign => {
+                    if !acceptance
+                        .result
+                        .is_some_and(|r| r.reason == FinishReason::Resignation)
+                    {
+                        return Err(ApplicationError::Corrupt);
+                    }
+                }
+            },
+            crate::JournalEntry::Timeout { loser, .. } => {
+                if !acceptance.result.is_some_and(|r| {
+                    r.reason == FinishReason::Timeout && r.winner == loser.opponent()
+                }) {
                     return Err(ApplicationError::Corrupt);
                 }
             }
         }
-        if let Some(result) = receipt.acceptance.result {
+        if let Some(result) = acceptance.result {
             push(DomainEvent::GameFinished { result });
         }
         Ok(Self {
             game_id,
-            receipt,
+            entry,
             events,
         })
     }
@@ -148,11 +188,10 @@ impl StagedGameChange {
         &self.game_id
     }
 
-    /// Returns the accepted command and its original response.
-    pub fn receipt(&self) -> &Receipt {
-        &self.receipt
+    /// Returns the user or system journal transition.
+    pub fn entry(&self) -> &crate::JournalEntry {
+        &self.entry
     }
-
     /// Returns the already generated events in canonical order.
     pub fn events(&self) -> &[CommittedEvent] {
         &self.events

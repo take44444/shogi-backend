@@ -140,8 +140,13 @@ async fn frozen_events_preserve_identifiers_with_nul_and_backslashes() {
     let mut queue = PostgresOutbox::connect(database.url()).await.unwrap();
     let pending = queue.next_pending().await.unwrap().unwrap();
     assert_eq!(pending.event.game_id, game);
-    assert_eq!(pending.event.user_id, black);
-    assert_eq!(pending.event.request_id, request);
+    assert_eq!(
+        pending.event.origin,
+        game_application::EventOrigin::User {
+            user_id: black,
+            request_id: request
+        }
+    );
     queue.mark_published(&pending).await.unwrap();
     assert!(queue.next_pending().await.unwrap().is_none());
 }

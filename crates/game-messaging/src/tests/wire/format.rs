@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn version_one_json_has_explicit_moves_results_and_identity() {
+fn version_two_json_has_explicit_moves_results_and_identity() {
     let result = GameResult {
         winner: Player::White,
         reason: FinishReason::Checkmate,
@@ -20,8 +20,9 @@ fn version_one_json_has_explicit_moves_results_and_identity() {
     .unwrap();
     assert_eq!(
         value,
-        json!({"schema_version":1,"event_id":"67616d65:4:move_committed", "type":"move_committed",
-            "game_id":"game","seq":4,"request_id":"r\"\0","user_id":"user","movement":"2b3c+","in_check":true,
+        json!({"schema_version":2,"event_id":"67616d65:4:move_committed", "type":"move_committed",
+            "game_id":"game","seq":4,"origin":"user", "evaluated_at_ms":0,
+            "clock":{"state":"running","main_remaining_ms":[600000,600000],"turn_started_at_ms":0,"deadline_at_ms":630000},"request_id":"r\"\0","user_id":"user","movement":"2b3c+","in_check":true,
             "result":{"winner":"white","reason":"checkmate"}})
     );
     let end: serde_json::Value = serde_json::from_slice(

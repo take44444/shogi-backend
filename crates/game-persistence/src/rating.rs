@@ -130,7 +130,7 @@ pub(crate) async fn insert_rated(
     pool: Pool,
     starts: [RatingState; 2],
 ) -> Result<(), Error> {
-    crate::insert_game(tx, id, players).await?;
+    crate::insert_game(tx, id, players, pool).await?;
     tx.execute(
         Query::insert()
             .into_table(a("rated_games"))
@@ -261,7 +261,7 @@ pub struct SeaOrmRatingJobs {
     store: SeaOrmStore,
 }
 impl SeaOrmRatingJobs {
-    /// Initializes or validates schema v8 before opening worker operations.
+    /// Initializes or validates schema v9 before opening worker operations.
     pub async fn connect(url: &str) -> Result<Self, Error> {
         Ok(Self {
             store: SeaOrmStore::connect(url).await?,

@@ -4,7 +4,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use game_application::{
-    CommittedEvent, DomainEvent, GameId, OutboxItem, OutboxRepository, RequestId, UserId,
+    CommittedEvent, DomainEvent, EventOrigin, GameId, OutboxItem, OutboxRepository, RequestId,
+    UserId,
 };
 use sea_orm::sea_query::{Expr, ExprTrait, Order, PostgresQueryBuilder, Query, Value};
 use sea_orm::sqlx::{self, AssertSqlSafe, Connection, PgConnection, postgres::PgConnectOptions};
@@ -81,36 +82,54 @@ pub(crate) async fn enqueue(tx: &DatabaseTransaction, event: &CommittedEvent) ->
         DomainEvent::GameFinished { result } => (1, None, None, Some(result)),
     };
     let (winner, reason) = result_values(terminal);
-    tx.execute(
-        Query::insert()
-            .into_table(a("outbox_events"))
-            .columns([
-                a("game_id"),
-                a("seq"),
-                a("event_kind"),
-                a("encoding_version"),
-                a("request_id"),
-                a("user_id"),
-                a("usi"),
-                a("in_check"),
-                a("winner"),
-                a("reason"),
-            ])
-            .values_panic([
-                encode_id(event.game_id.as_str()).into(),
-                signed(event.seq)?.into(),
-                kind.into(),
-                1.into(),
-                encode_id(event.request_id.as_str()).into(),
-                encode_id(event.user_id.as_str()).into(),
-                usi.into(),
-                in_check.into(),
-                winner.into(),
-                reason.into(),
-            ]),
-    )
-    .await
-    .map_err(storage)?;
+    let (request_id, user_id) = match &event.origin {
+        EventOrigin::User {
+            request_id,
+            user_id,
+        } => (
+            Some(encode_id(request_id.as_str())),
+            Some(encode_id(user_id.as_str())),
+        ),
+        EventOrigin::System => (None, None),
+    };
+    let mut insert = Query::insert();
+    insert.into_table(a("outbox_events")).columns(
+        [
+            "game_id",
+            "seq",
+            "event_kind",
+            "encoding_version",
+            "request_id",
+            "user_id",
+            "usi",
+            "in_check",
+            "winner",
+            "reason",
+            "evaluated_at",
+        ]
+        .into_iter()
+        .chain(crate::clock_columns())
+        .map(a),
+    );
+    insert.values_panic(
+        vec![
+            encode_id(event.game_id.as_str()).into(),
+            signed(event.seq)?.into(),
+            kind.into(),
+            2.into(),
+            request_id.into(),
+            user_id.into(),
+            usi.into(),
+            in_check.into(),
+            winner,
+            reason,
+            event.evaluated_at.get().into(),
+        ]
+        .into_iter()
+        .chain(crate::encode_clock(event.clock))
+        .map(Expr::from),
+    );
+    tx.execute(&insert).await.map_err(storage)?;
     Ok(())
 }
 
@@ -131,6 +150,14 @@ impl OutboxRepository for PostgresOutbox {
                 a("in_check"),
                 a("winner"),
                 a("reason"),
+                a("evaluated_at"),
+                a("clock_black"),
+                a("clock_white"),
+                a("clock_started"),
+                a("clock_deadline"),
+                a("clock_stopped"),
+                a("byoyomi_black"),
+                a("byoyomi_white"),
             ])
             .from(a("outbox_events"))
             .and_where(Expr::col(a("published")).eq(false))
@@ -148,7 +175,7 @@ impl OutboxRepository for PostgresOutbox {
         if row
             .try_get::<i32>("", "encoding_version")
             .map_err(corrupt)?
-            != 1
+            != 2
         {
             return Err(Error::Corrupt);
         }
@@ -177,18 +204,37 @@ impl OutboxRepository for PostgresOutbox {
         Ok(Some(OutboxItem {
             cursor: PostgresCursor(row.try_get("", "id").map_err(corrupt)?),
             event: CommittedEvent {
+                clock: crate::decode_clock(&row, "")?,
+                evaluated_at: game_application::Timestamp::new(
+                    row.try_get("", "evaluated_at").map_err(corrupt)?,
+                )?,
                 game_id: GameId::new(decode_id(
                     &row.try_get::<String>("", "game_id").map_err(corrupt)?,
                 )?)
                 .map_err(corrupt)?,
-                request_id: RequestId::new(decode_id(
-                    &row.try_get::<String>("", "request_id").map_err(corrupt)?,
-                )?)
-                .map_err(corrupt)?,
-                user_id: UserId::new(decode_id(
-                    &row.try_get::<String>("", "user_id").map_err(corrupt)?,
-                )?)
-                .map_err(corrupt)?,
+                origin: match (
+                    row.try_get::<Option<String>>("", "request_id")
+                        .map_err(corrupt)?,
+                    row.try_get::<Option<String>>("", "user_id")
+                        .map_err(corrupt)?,
+                ) {
+                    (Some(r), Some(u))
+                        if !terminal
+                            .is_some_and(|r| r.reason == shogi_domain::FinishReason::Timeout) =>
+                    {
+                        EventOrigin::User {
+                            request_id: RequestId::new(decode_id(&r)?).map_err(corrupt)?,
+                            user_id: UserId::new(decode_id(&u)?).map_err(corrupt)?,
+                        }
+                    }
+                    (None, None)
+                        if terminal
+                            .is_some_and(|r| r.reason == shogi_domain::FinishReason::Timeout) =>
+                    {
+                        EventOrigin::System
+                    }
+                    _ => return Err(Error::Corrupt),
+                },
                 seq: unsigned(row.try_get("", "seq").map_err(corrupt)?)?,
                 event,
             },

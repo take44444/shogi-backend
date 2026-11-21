@@ -85,6 +85,8 @@ message ResignRequest {
 }
 // The original response to one accepted mutation, retained for exact replay.
 message Acceptance {
+  // Original accepted clock, retained on exact retries.
+  ClockState clock = 4;
   // Sequence of this accepted command, from one through i64::MAX. Replay retains it.
   uint64 seq = 1;
   // Whether the side to move after this accepted command is checked.
@@ -94,9 +96,15 @@ message Acceptance {
 }
 // A game snapshot. Finished games retain position and turn but have no legal moves.
 message Snapshot {
+  // Frozen time control and durable clock.
+  TimeControl time_control = 11;
+  // Durable running or stopped clock.
+  ClockState clock = 12;
+  // UTC database epoch milliseconds for local display interpolation.
+  int64 server_now_ms = 13;
   // Game ID containing 1 through 128 UTF-8 bytes and no Unicode whitespace.
   string game_id = 1;
-  // Accepted command count, starting at zero and bounded by i64::MAX.
+  // State transition count, including system timeout, starting at zero and bounded by i64::MAX.
   uint64 seq = 2;
   // Occupied squares only, in ascending file order then ascending rank order.
   repeated BoardPiece board = 3;
@@ -211,9 +219,11 @@ enum FinishReason {
   FINISH_REASON_CHECKMATE = 1;
   // A participant resigned; the opponent wins.
   FINISH_REASON_RESIGNATION = 2;
+  // The side to move reached its persisted clock deadline.
+  FINISH_REASON_TIMEOUT = 3;
 }
 
-// Required rated pool. These values do not enable clocks or timeout adjudication.
+// Required rated pool and game time control.
 enum RatingPool {
   // Required wire default, rejected at admission.
   RATING_POOL_UNSPECIFIED = 0;
@@ -288,4 +298,46 @@ message MatchmakingTicket {
   optional bool ready = 10;
   // Exclusive readiness deadline in database epoch milliseconds, only while matched.
   optional int64 ready_deadline = 11;
+}
+
+// Immutable game clock settings in integer milliseconds.
+message TimeControl {
+  // Initial main time for each side.
+  int64 initial_main_ms = 1;
+  // Allowance renewed on each turn.
+  int64 byoyomi_ms = 2;
+}
+// Exactly one running or stopped clock.
+message ClockState {
+  // Running and stopped states are mutually exclusive.
+  oneof state {
+    // A clock with an exclusive deadline.
+    RunningClock running = 1;
+    // Final retained balances.
+    StoppedClock stopped = 2;
+  }
+}
+// Balances frozen at the beginning of a running turn.
+message RunningClock {
+  // Integer milliseconds.
+  int64 black_main_remaining_ms = 1;
+  // Integer milliseconds.
+  int64 white_main_remaining_ms = 2;
+  // Integer milliseconds.
+  int64 turn_started_at_ms = 3;
+  // Integer milliseconds.
+  int64 deadline_at_ms = 4;
+}
+// Final balances and stop time.
+message StoppedClock {
+  // Integer milliseconds.
+  int64 black_main_remaining_ms = 1;
+  // Integer milliseconds.
+  int64 white_main_remaining_ms = 2;
+  // Integer milliseconds.
+  int64 black_byoyomi_remaining_ms = 3;
+  // Integer milliseconds.
+  int64 white_byoyomi_remaining_ms = 4;
+  // Integer milliseconds.
+  int64 stopped_at_ms = 5;
 }

@@ -5,7 +5,7 @@ use serde_json::Value;
 #[derive(Clone)]
 pub(crate) enum ConnectionState {
     Bootstrapping,
-    Live(Cursor),
+    Live(Box<Cursor>),
     Closing,
 }
 
@@ -26,13 +26,13 @@ pub(crate) enum Decision {
 
 impl ConnectionState {
     pub(crate) fn bootstrapped(&mut self, seq: u64, terminal: bool) {
-        *self = Self::Live(Cursor {
+        *self = Self::Live(Box::new(Cursor {
             boundary: seq,
             last_seq: seq,
             move_event: None,
             finish_event: None,
             terminal,
-        });
+        }));
     }
 
     pub(crate) fn accept(&mut self, notification: &Notification) -> Decision {
@@ -74,8 +74,7 @@ impl Cursor {
                 DomainEvent::GameFinished { result: finish },
             ) = (&self.move_event, &event.event)
                 && result == finish
-                && prior.request_id == event.request_id
-                && prior.user_id == event.user_id
+                && prior.origin == event.origin
             {
                 self.finish_event = Some(event.clone());
                 self.terminal = true;
@@ -86,7 +85,7 @@ impl Cursor {
         if self.terminal || event.seq != self.last_seq + 1 {
             return Decision::Resync;
         }
-        if matches!(&event.event, DomainEvent::GameFinished { result } if result.reason != shogi_domain::FinishReason::Resignation)
+        if matches!(&event.event, DomainEvent::GameFinished { result } if !matches!(result.reason, shogi_domain::FinishReason::Resignation | shogi_domain::FinishReason::Timeout))
         {
             return Decision::Resync;
         }
@@ -114,6 +113,16 @@ pub(crate) fn event_json(notification: &Notification) -> Value {
         "game_id": event.game_id.as_str(), "seq": event.seq.to_string(),
     });
     let mut object = base.as_object().unwrap().clone();
+    object.insert(
+        "origin".into(),
+        match &event.origin {
+            game_application::EventOrigin::User { .. } => "user",
+            game_application::EventOrigin::System => "system",
+        }
+        .into(),
+    );
+    object.insert("clock".into(), super::game::domain_clock_json(event.clock));
+    object.insert("evaluated_at_ms".into(), event.evaluated_at.get().into());
     match event.event {
         DomainEvent::MoveCommitted {
             movement,
@@ -147,7 +156,7 @@ pub(crate) fn result_json(result: Option<shogi_domain::GameResult>) -> Value {
         None => Value::Null,
         Some(result) => serde_json::json!({
             "winner": match result.winner { shogi_domain::Player::Black => "black", shogi_domain::Player::White => "white" },
-            "reason": match result.reason { shogi_domain::FinishReason::Checkmate => "checkmate", shogi_domain::FinishReason::Resignation => "resignation" },
+            "reason": match result.reason { shogi_domain::FinishReason::Checkmate => "checkmate", shogi_domain::FinishReason::Resignation => "resignation", shogi_domain::FinishReason::Timeout => "timeout" },
         }),
     }
 }

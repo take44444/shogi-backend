@@ -104,6 +104,20 @@ impl Game {
         Ok(result)
     }
 
+    /// Finishes an ongoing game with the opponent of the side to move as winner.
+    /// The caller adjudicates the deadline. Finished games reject this operation.
+    pub fn timeout(&mut self) -> Result<GameResult, CommandError> {
+        if self.result.is_some() {
+            return Err(CommandError::GameFinished);
+        }
+        let result = GameResult {
+            winner: self.turn().opponent(),
+            reason: FinishReason::Timeout,
+        };
+        self.result = Some(result);
+        Ok(result)
+    }
+
     /// The side to move in the retained position, even after the game ends.
     pub fn turn(&self) -> Player {
         self.rules.turn()

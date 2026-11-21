@@ -34,10 +34,29 @@ pub(super) async fn setup(url: &str) -> (Arc<SeaOrmStore>, pg_test_support::Game
 pub(super) struct FaultStore {
     pub(super) inner: Arc<SeaOrmStore>,
     pub(super) mode: AtomicU8,
-    pub(super) unreadable: AtomicBool,
+    pub(super) unreadable: Arc<AtomicBool>,
 }
 #[async_trait]
 impl GameRepository for FaultStore {
+    async fn expired_games(&self, limit: u32) -> Result<Vec<GameId>, Error> {
+        self.inner.expired_games(limit).await
+    }
+    async fn begin_game_update(
+        &self,
+        id: &GameId,
+        terminal: bool,
+    ) -> Result<Box<dyn game_application::LockedGameUpdate>, Error> {
+        if self.unreadable.load(Ordering::SeqCst) {
+            return Err(Error::Unavailable);
+        }
+        Ok(Box::new(FaultUpdate {
+            locked: self.inner.begin_game_update(id, terminal).await?,
+            inner: self.inner.clone(),
+            mode: self.mode.swap(0, Ordering::SeqCst),
+            unreadable: self.unreadable.clone(),
+        }))
+    }
+
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -67,33 +86,6 @@ impl GameRepository for FaultStore {
             self.inner.version(id).await
         }
     }
-    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {
-        let mode = self.mode.swap(0, Ordering::SeqCst);
-        if mode == 1 {
-            return Err(Error::Unavailable);
-        }
-        if mode == 4 {
-            let mut different = change.receipt().clone();
-            different.request.user_id = user("white");
-            different.request.action = Action::Resign;
-            different.acceptance.result = Some(shogi_domain::GameResult {
-                winner: Player::Black,
-                reason: shogi_domain::FinishReason::Resignation,
-            });
-            let different = StagedGameChange::new(change.game_id().clone(), different)?;
-            self.inner.commit_change(&different).await?;
-        } else {
-            self.inner.commit_change(change).await?;
-        }
-        if mode == 3 {
-            self.unreadable.store(true, Ordering::SeqCst);
-        }
-        if mode >= 2 {
-            Err(Error::Unavailable)
-        } else {
-            Ok(())
-        }
-    }
 }
 
 pub(super) async fn integer_query(db: &sea_orm::DatabaseConnection, sql: &str) -> i64 {
@@ -106,4 +98,68 @@ pub(super) async fn integer_query(db: &sea_orm::DatabaseConnection, sql: &str) -
     .unwrap()
     .try_get("", "value")
     .unwrap()
+}
+
+struct FaultUpdate {
+    locked: Box<dyn game_application::LockedGameUpdate>,
+    inner: Arc<SeaOrmStore>,
+    mode: u8,
+    unreadable: Arc<AtomicBool>,
+}
+#[async_trait]
+impl game_application::LockedGameUpdate for FaultUpdate {
+    fn locked_record(&self) -> &GameRecord {
+        self.locked.locked_record()
+    }
+    async fn decision_time(&mut self) -> Result<game_application::Timestamp, Error> {
+        self.locked.decision_time().await
+    }
+    fn terminal_allowed(&self) -> bool {
+        self.locked.terminal_allowed()
+    }
+    async fn rollback(self: Box<Self>) -> Result<(), Error> {
+        self.locked.rollback().await
+    }
+    async fn commit(self: Box<Self>, change: &StagedGameChange) -> Result<(), Error> {
+        if self.mode == 1 {
+            self.locked.rollback().await?;
+            return Err(Error::Unavailable);
+        }
+        if self.mode == 4 {
+            self.locked.rollback().await?;
+            let mut locked = self.inner.begin_game_update(change.game_id(), true).await?;
+            let record = locked.locked_record().clone();
+            let mut different = match change.entry() {
+                game_application::JournalEntry::UserCommand(r) => r.clone(),
+                _ => panic!("expected user command"),
+            };
+            different.request.user_id = user("white");
+            different.request.action = Action::Resign;
+            different.acceptance.in_check = false;
+            different.acceptance.result = Some(shogi_domain::GameResult {
+                winner: Player::Black,
+                reason: shogi_domain::FinishReason::Resignation,
+            });
+            different.evaluated_at = locked.decision_time().await?;
+            different.acceptance.clock = record.clock.advance(
+                record.time_control,
+                Player::Black,
+                different.evaluated_at,
+                None,
+            )?;
+            locked
+                .commit(&StagedGameChange::new(change.game_id().clone(), different)?)
+                .await?;
+        } else {
+            self.locked.commit(change).await?;
+        }
+        if self.mode == 3 {
+            self.unreadable.store(true, Ordering::SeqCst);
+        }
+        if self.mode >= 2 {
+            Err(Error::Unavailable)
+        } else {
+            Ok(())
+        }
+    }
 }

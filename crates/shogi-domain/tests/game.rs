@@ -38,3 +38,15 @@ fn off_turn_resignation_finishes_without_changing_the_position() {
     );
     assert_eq!(game.position(), before);
 }
+
+#[test]
+fn timeout_retains_position_and_finishes_against_side_to_move() {
+    let mut game = Game::new();
+    let before = game.position();
+    let result = game.timeout().unwrap();
+    assert_eq!(result.reason, shogi_domain::FinishReason::Timeout);
+    assert_eq!(result.winner, Player::White);
+    assert_eq!(game.position(), before);
+    assert!(game.legal_moves().is_empty());
+    assert_eq!(game.timeout(), Err(CommandError::GameFinished));
+}

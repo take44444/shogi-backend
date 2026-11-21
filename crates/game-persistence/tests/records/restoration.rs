@@ -16,22 +16,45 @@ async fn reopening_preserves_current_records_history_and_outbox() {
         .await
         .unwrap();
     let db = Database::connect(&url).await.unwrap();
-    pg_test_support::seed_game(
-        &url,
-        &WriteId::new("current-ongoing").unwrap(),
-        &Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap()).unwrap(),
-    )
-    .await
-    .unwrap();
-    db.execute_unprepared("UPDATE games SET version=1,final_move_ply=1 WHERE id='current-ongoing'; INSERT INTO games VALUES
-        ('current-finished','black','white',2,1,2,'standard','public',20,1),
-        ('current-private','black','white',2,1,2,'standard','private',30,1);
-        INSERT INTO journal (game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason)
-            SELECT id,1,'move','black',0,1,'7g7f',false,NULL,NULL FROM games;
-        INSERT INTO journal (game_id,seq,request_id,user_id,expected_seq,action,usi,in_check,winner,reason)
-            SELECT id,2,'end','white',1,2,NULL,false,1,2 FROM games WHERE version=2;
-        INSERT INTO outbox_events (id,game_id,seq,event_kind,encoding_version,request_id,user_id,usi,in_check,winner,reason,published)
-            SELECT row_number() OVER (ORDER BY game_id,seq)+100,game_id,seq,CASE action WHEN 1 THEN 0 ELSE 1 END,1,request_id,user_id,usi,CASE action WHEN 1 THEN in_check ELSE NULL END,winner,reason,CASE action WHEN 1 THEN true ELSE false END FROM journal;").await.unwrap();
+    let store = Arc::new(SeaOrmStore::connect(&url).await.unwrap());
+    let games = pg_test_support::GameFixture::new(store.clone(), &url);
+    for name in ["current-finished", "current-private", "current-ongoing"] {
+        games
+            .seed(
+                WriteId::new(name).unwrap(),
+                Participants::new(UserId::new("black").unwrap(), UserId::new("white").unwrap())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        games
+            .make_move(
+                &WriteId::new(name).unwrap(),
+                game_application::MakeMove {
+                    request_id: RequestId::new("move").unwrap(),
+                    expected_seq: 0,
+                    user_id: UserId::new("black").unwrap(),
+                    movement: "7g7f".parse().unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        if name != "current-ongoing" {
+            games
+                .resign(
+                    &WriteId::new(name).unwrap(),
+                    Resign {
+                        request_id: RequestId::new("end").unwrap(),
+                        expected_seq: 1,
+                        user_id: UserId::new("white").unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+    }
+    db.execute_unprepared("UPDATE games SET finished_at=20 WHERE id='current-finished'; UPDATE games SET finished_at=30,visibility='private' WHERE id='current-private'").await.unwrap();
+    store.close().await.unwrap();
     let before = current_rows(&db).await;
     let reader_url = database.reader_url().await;
     for _ in 0..2 {

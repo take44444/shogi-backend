@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) fn receipt(action: Action, result: Option<GameResult>) -> Receipt {
     Receipt {
+        evaluated_at: crate::Timestamp::new(0).unwrap(),
         request: MutationRequest {
             request_id: RequestId::new("request").unwrap(),
             user_id: UserId::new("black").unwrap(),
@@ -9,6 +10,11 @@ pub(super) fn receipt(action: Action, result: Option<GameResult>) -> Receipt {
             action,
         },
         acceptance: Acceptance {
+            clock: crate::ClockState::start(
+                crate::TimeControl::for_pool(crate::rating::Pool::TenMinute30),
+                crate::Timestamp::new(0).unwrap(),
+            )
+            .unwrap(),
             seq: 1,
             in_check: result.is_some(),
             result,

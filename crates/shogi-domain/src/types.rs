@@ -220,6 +220,8 @@ impl PositionView {
 /// A terminal condition adjudicated by this crate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FinishReason {
+    /// The side to move exhausted its clock.
+    Timeout,
     /// The side to move is checked and has no legal moves.
     Checkmate,
     /// A player resigned, including possibly off turn.

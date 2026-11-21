@@ -56,7 +56,7 @@ async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
         ),
     ] {
         assert_eq!(service.make_move(&game, command).await, Err(expected));
-        assert_eq!(service.snapshot(&game).await.unwrap(), before);
+        assert_same_snapshot(service.snapshot(&game).await.unwrap(), &before);
     }
     let receipt = service
         .resign(&game, resignation("correct-me", 0, Player::White))
@@ -80,7 +80,7 @@ async fn every_rejection_preserves_snapshot_and_does_not_reserve_id() {
             .await,
         Err(Error::Domain(CommandError::GameFinished))
     );
-    assert_eq!(service.snapshot(&game).await.unwrap(), finished);
+    assert_same_snapshot(service.snapshot(&game).await.unwrap(), &finished);
 }
 
 #[traceability::targets(
@@ -132,7 +132,7 @@ async fn replay_precedes_stale_and_finished_checks_and_fingerprint_is_exact() {
             .await,
         Err(Error::RequestConflict)
     );
-    assert_eq!(service.snapshot(&game).await.unwrap(), finished);
+    assert_same_snapshot(service.snapshot(&game).await.unwrap(), &finished);
 }
 
 #[traceability::targets(
@@ -144,7 +144,7 @@ async fn games_and_independent_services_have_separate_id_namespaces() {
     let (_database, service) = setup().await;
     let (_other_database, other) = setup().await;
     let (a, b) = (id("a"), id("b"));
-    let initial_a = service.seed(a.clone(), participants()).await.unwrap();
+    service.seed(a.clone(), participants()).await.unwrap();
     let initial_b = service
         .seed(
             b.clone(),
@@ -156,13 +156,13 @@ async fn games_and_independent_services_have_separate_id_namespaces() {
         )
         .await
         .unwrap();
-    other.seed(a.clone(), participants()).await.unwrap();
+    let initial_other = other.seed(a.clone(), participants()).await.unwrap();
     service
         .make_move(&a, movement("shared", 0, Player::Black, "7g7f"))
         .await
         .unwrap();
-    assert_eq!(service.snapshot(&b).await.unwrap(), initial_b);
-    assert_eq!(other.snapshot(&a).await.unwrap(), initial_a);
+    assert_same_snapshot(service.snapshot(&b).await.unwrap(), &initial_b);
+    assert_same_snapshot(other.snapshot(&a).await.unwrap(), &initial_other);
     service
         .resign(
             &b,

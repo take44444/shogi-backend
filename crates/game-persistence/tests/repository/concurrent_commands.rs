@@ -21,9 +21,9 @@ async fn independent_instances_cas_refresh_and_identical_concurrent_replay() {
         (Ok(_), Err(Error::SequenceMismatch { actual: 1, .. }))
             | (Err(Error::SequenceMismatch { actual: 1, .. }), Ok(_))
     ));
-    assert_eq!(
+    assert_same_snapshot(
         a.snapshot(&game).await.unwrap(),
-        b.snapshot(&game).await.unwrap()
+        &b.snapshot(&game).await.unwrap(),
     );
     let command = movement("white", 1, "white", "3c3d");
     let (left, right) = tokio::join!(
@@ -50,7 +50,7 @@ async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery()
         let fault = Arc::new(FaultStore {
             inner: store.clone(),
             mode: AtomicU8::new(mode),
-            unreadable: AtomicBool::new(false),
+            unreadable: Arc::new(AtomicBool::new(false)),
         });
         let service = pg_test_support::GameFixture::new(fault.clone(), database.url());
         let command = movement("request", 0, "black", "7g7f");
@@ -88,4 +88,38 @@ async fn uncertain_outcomes_reconcile_durable_receipts_or_fence_until_recovery()
         }
         assert_eq!(store.load_game(&id()).await.unwrap().journal.len(), 1);
     }
+}
+
+#[traceability::targets(game_application::GameService::poll_timeouts)]
+#[tokio::test]
+async fn uncertain_timeout_commit_reconciles_system_history_without_a_user_receipt() {
+    let database = TestDatabase::new().await;
+    let (store, _) = setup(database.url()).await;
+    let raw = Database::connect(database.url()).await.unwrap();
+    raw.execute_unprepared("UPDATE games SET created_at=created_at-631000,clock_started=clock_started-631000,clock_deadline=clock_deadline-631000").await.unwrap();
+    let fault = Arc::new(FaultStore {
+        inner: store.clone(),
+        mode: AtomicU8::new(2),
+        unreadable: Arc::new(AtomicBool::new(false)),
+    });
+    let service = game_application::GameService::new(fault);
+    assert_eq!(service.poll_timeouts(16).await.unwrap(), 1);
+    assert_eq!(service.poll_timeouts(16).await.unwrap(), 0);
+    let record = store.load_game(&id()).await.unwrap();
+    assert_eq!(record.version, 1);
+    assert!(matches!(
+        record.journal[0],
+        game_application::JournalEntry::Timeout { .. }
+    ));
+    assert_eq!(
+        record.result.unwrap().reason,
+        shogi_domain::FinishReason::Timeout
+    );
+    assert_eq!(
+        integer_query(&raw, "SELECT count(*) AS value FROM outbox_events").await,
+        1
+    );
+    assert_eq!(service.snapshot(&id()).await.unwrap().clock, record.clock);
+    raw.close().await.unwrap();
+    store.close().await.unwrap();
 }

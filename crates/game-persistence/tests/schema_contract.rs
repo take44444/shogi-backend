@@ -64,12 +64,12 @@ async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() 
             .unwrap();
         let raw = Database::connect(database.url()).await.unwrap();
         raw.execute_unprepared(
-            "INSERT INTO games (id, black, white, version, rule, visibility, final_move_ply)
-                VALUES ('preserved', 'black', 'white', 1, 'standard', 'public', 1);
-             INSERT INTO journal (game_id, seq, request_id, user_id, expected_seq, action, usi, in_check)
-                VALUES ('preserved', 1, 'first', 'black', 0, 1, '7g7f', FALSE);
-             INSERT INTO outbox_events (game_id, seq, event_kind, encoding_version, request_id, user_id, usi, in_check)
-                VALUES ('preserved', 1, 0, 1, 'first', 'black', '7g7f', FALSE)",
+            "INSERT INTO games (id, black, white, version, rule, visibility, final_move_ply,initial_main_ms,byoyomi_ms,created_at,clock_black,clock_white,clock_started,clock_deadline)
+                VALUES ('preserved', 'black', 'white', 1, 'standard', 'public', 1,600000,30000,0,600000,600000,0,630000);
+             INSERT INTO journal (game_id, seq, request_id, user_id, expected_seq, action, usi, in_check,evaluated_at,clock_black,clock_white,clock_started,clock_deadline)
+                VALUES ('preserved', 1, 'first', 'black', 0, 1, '7g7f', FALSE,0,600000,600000,0,630000);
+             INSERT INTO outbox_events (game_id, seq, event_kind, encoding_version, request_id, user_id, usi, in_check,evaluated_at,clock_black,clock_white,clock_started,clock_deadline)
+                VALUES ('preserved', 1, 0, 2, 'first', 'black', '7g7f', FALSE,0,600000,600000,0,630000)",
         )
         .await
         .unwrap();
@@ -87,7 +87,7 @@ async fn changed_required_schema_is_rejected_without_modifying_schema_or_data() 
 async fn current_schema_with_unrelated_tables_and_additional_indexes_is_accepted_unchanged() {
     let database = TestDatabase::new().await;
     let raw = Database::connect(database.url()).await.unwrap();
-    raw.execute_unprepared(include_str!("fixtures/schema-v8.sql"))
+    raw.execute_unprepared(include_str!("fixtures/schema-v9.sql"))
         .await
         .unwrap();
     raw.execute_unprepared(
@@ -154,6 +154,28 @@ async fn version_seven_is_rejected_by_writer_and_reader_unchanged() {
     let database = TestDatabase::new().await;
     let raw = Database::connect(database.url()).await.unwrap();
     raw.execute_unprepared(include_str!("fixtures/schema-v7.sql"))
+        .await
+        .unwrap();
+    let before = snapshot(&raw).await;
+    assert_eq!(
+        SeaOrmStore::connect(database.url()).await.map(|_| ()),
+        Err(Error::Corrupt)
+    );
+    assert!(matches!(
+        game_record_persistence::PostgresGameRecords::connect(database.url()).await,
+        Err(game_record_application::Error::Corrupt)
+    ));
+    assert_eq!(snapshot(&raw).await, before);
+}
+#[traceability::targets(
+    game_persistence::SeaOrmStore::connect,
+    game_record_persistence::PostgresGameRecords::connect
+)]
+#[tokio::test]
+async fn version_eight_is_rejected_by_writer_and_reader_unchanged() {
+    let database = TestDatabase::new().await;
+    let raw = Database::connect(database.url()).await.unwrap();
+    raw.execute_unprepared(include_str!("fixtures/schema-v8.sql"))
         .await
         .unwrap();
     let before = snapshot(&raw).await;

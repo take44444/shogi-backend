@@ -71,6 +71,13 @@ async fn participants_and_spectator_receive_committed_moves_and_resignation() {
         assert_eq!(event["kind"], "move_committed");
         assert_eq!(event["seq"], "1");
         assert_eq!(event["usi"], "7g7f");
+        assert_eq!(event["clock"], accepted["clock"]);
+        assert_eq!(event["clock"]["state"], "running");
+        assert!(
+            event["clock"]["deadline_at_ms"].as_i64().unwrap()
+                > event["evaluated_at_ms"].as_i64().unwrap()
+        );
+        assert!(event.get("server_now_ms").is_none());
         assert!(event.get("request_id").is_none());
         assert!(event.get("user_id").is_none());
     }
@@ -91,6 +98,7 @@ async fn participants_and_spectator_receive_committed_moves_and_resignation() {
         let event = receive(socket).await;
         assert_eq!(event["seq"], "3");
         assert_eq!(event["kind"], "game_finished");
+        assert_eq!(event["clock"]["state"], "stopped");
         assert_eq!(
             event["result"],
             json!({"winner":"black", "reason":"resignation"})

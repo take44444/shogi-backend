@@ -16,7 +16,7 @@ fn public_values(black: UserId, white: UserId) {
 fn supported_results(reason: FinishReason) -> bool {
     match reason {
         FinishReason::Checkmate => true,
-        FinishReason::Resignation => false,
+        FinishReason::Resignation | FinishReason::Timeout => false,
     }
 }
 
