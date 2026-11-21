@@ -2,17 +2,23 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rust API traceability</title><style>/* VIEWER_CSS */</style></head>
 <body>
-<header><div><p class="eyebrow">COMPILER SNAPSHOT</p><h1>Rust API traceability</h1><p id="scope"></p></div><div id="summary"></div></header>
+<header><div class="brand"><span class="brand-icon" aria-hidden="true">⌘</span><div><p class="eyebrow">COMPILER SNAPSHOT / TRACEABILITY</p><h1>Follow the contracts between components.</h1></div></div><div class="tools"><label class="search-label">Search APIs, tests, and source<input id="search" type="search" placeholder="Component, API, test, or Rust source"></label><button id="gaps" type="button" aria-pressed="false">APIs without declared targets</button></div></header>
+<div class="subbar"><p>Relation map <span> / component → boundary → API → declared tests</span></p><p id="summary"></p></div>
 <main>
-<section class="controls"><label>Search APIs, tests, and source<input id="search" type="search" placeholder="API name, package, or Rust source text"></label><label>Component<select id="component"><option value="">All components</option></select></label><label>Tests<select id="test-kind"><option value="all">All tests</option><option value="targeted">Targeted</option><option value="untargeted">Untargeted / 対象未指定</option></select></label></section>
-<section><h2>Production component calls</h2><p>Arrows show Rust calls observed in normal library or binary compilations between workspace components. Select a component to inspect its APIs and call sites.</p><div class="graph-wrap"><svg id="graph" role="img" aria-label="Production component call graph"></svg></div><p id="graph-note"></p></section>
-<div class="columns"><section><h2>APIs <span id="api-count"></span></h2><div id="apis" class="items"></div></section><section><h2>Tests <span id="test-count"></span></h2><p>Only <code>#[traceability::targets(...)]</code> creates a test association. An untargeted test has no declared API target.</p><div id="tests" class="items"></div></section></div>
-<section id="selection" hidden><h2 id="selection-title"></h2><div id="selection-detail"></div></section>
-<section><h2>Source search</h2><div id="source-results"><p>Enter text to search the captured Rust source.</p></div></section>
+<div class="workspace">
+<aside class="sidebar" aria-label="Components"><div class="side-title"><h2>COMPONENTS</h2><span id="component-count"></span></div><div id="components"></div><p class="side-note">Arrows are production Rust calls. Boundary contracts are the called API definitions. Test links come only from explicit targets.</p></aside>
+<section class="map-main" aria-label="Component relation map"><div class="section-top"><div><h2 id="component-title"></h2><p>Select a component, then an arrow to inspect its boundary APIs.</p></div><button id="neighbors" type="button" aria-pressed="false">Show all neighbors</button></div><div class="graph-wrap"><svg id="graph" role="group" aria-label="Production component call graph"></svg></div><p id="graph-note" class="legend"></p><section class="contracts-strip"><h3 id="boundary-title"></h3><p id="boundary-note" class="meta"></p><div id="contracts" class="contract-chips"></div></section></section>
+<aside id="selection" class="inspector" aria-label="Selected API evidence"><p class="eyebrow">CONTRACT / SELECTED API</p><h2 id="selection-title"></h2><div id="selection-detail"></div></aside>
+</div>
+<div class="lower-details">
+<p id="scope" class="meta"></p>
+<details id="catalog"><summary>Browse all APIs and tests <span id="catalog-count"></span></summary><div class="controls"><label>Component<select id="component"><option value="">All components</option></select></label><label>Tests<select id="test-kind"><option value="all">All tests</option><option value="targeted">Targeted</option><option value="untargeted">Untargeted / 対象未指定</option></select></label></div><p class="meta">The test-kind filter applies to this test list. Only <code>#[traceability::targets(...)]</code> creates an association. A declared target does not establish a passing test result.</p><div class="columns"><section><h2>APIs <span id="api-count"></span></h2><div id="apis" class="items"></div></section><section><h2>Tests <span id="test-count"></span></h2><div id="tests" class="items"></div></section></div></details>
+<details id="source-search"><summary>Search captured source <span id="source-count"></span></summary><div id="source-results"></div></details>
 <details><summary id="unresolved-title">Unresolved calls</summary><div id="unresolved"></div></details>
-<details><summary>Compilation units and excluded targets</summary><div id="configuration"></div></details>
-<section id="source-panel" hidden><div class="source-heading"><h2 id="source-title"></h2><button id="close-source" type="button">Close source</button></div><p id="source-status"></p><a id="github" target="_blank" rel="noreferrer">View exact revision on GitHub</a><div id="source-code" tabindex="0"></div></section>
+<details><summary>Compilation units, features, and excluded targets</summary><div id="configuration"></div></details>
+</div>
 </main>
+<dialog id="source-panel" aria-labelledby="source-title"><div class="source-heading"><div><p class="eyebrow">CAPTURED SOURCE</p><h2 id="source-title"></h2></div><button id="close-source" type="button" autofocus>Close / Esc</button></div><p id="source-status"></p><p id="github-status"></p><a id="github" target="_blank" rel="noreferrer">View exact revision on GitHub ↗</a><div id="source-code" tabindex="0" role="region" aria-label="Captured source with line numbers"></div></dialog>
 <script type="application/json" id="traceability-data"><!-- VIEWER_DATA --></script>
 <script>/* VIEWER_JS */</script>
 </body></html>

@@ -5,3 +5,4 @@
 !.env.example
 /.audit/
 __pycache__/
+node_modules/
