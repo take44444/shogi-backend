@@ -6,6 +6,7 @@
 採用理由と将来の設計案は[ドキュメント一覧](docs/README.md)を参照すること。
 
 以下のコマンドは Rust、Cargo、Docker、Docker Compose がある環境で、リポジトリのルートから実行する。
+rustup は [rust-toolchain.toml](rust-toolchain.toml) で指定した Rust と Cargo を使う。
 ビルドには同梱の `protoc` を使う。
 
 ## ローカルで対局を実行する

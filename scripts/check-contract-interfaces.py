@@ -32,14 +32,19 @@ def main():
     if built.returncode:
         raise SystemExit(built.stdout + built.stderr)
     libraries = {}
+    dependency_dirs = set()
     for line in built.stdout.splitlines():
         artifact = json.loads(line)
         if artifact.get("reason") != "compiler-artifact":
             continue
         name = artifact["target"]["name"]
         for filename in artifact["filenames"]:
-            if filename.endswith(".rlib") and name.replace("_", "-") in PACKAGES:
-                libraries[name] = Path(filename)
+            library = Path(filename)
+            if library.suffix in {".rlib", ".rmeta", ".so", ".dylib", ".dll"}:
+                dependency_dirs.add(library.parent)
+            if library.suffix in {".rlib", ".rmeta"} and name.replace("_", "-") in PACKAGES:
+                if library.suffix == ".rmeta" or name not in libraries:
+                    libraries[name] = library
     assert set(libraries) == {package.replace("-", "_") for package in PACKAGES}, libraries
     with tempfile.TemporaryDirectory(prefix="shogi-contract-interfaces-") as output:
         for case, expected in CASES.items():
@@ -48,9 +53,8 @@ def main():
                        "--out-dir", output, str(ROOT / "tests/contracts" / f"{case}.rs")]
             for name, library in libraries.items():
                 command.extend(["--extern", f"{name}={library}"])
-            library_dir = next(iter(libraries.values())).parent
-            dependency_dir = library_dir if library_dir.name == "deps" else library_dir / "deps"
-            command.extend(["-L", f"dependency={dependency_dir}"])
+            for dependency_dir in sorted(dependency_dirs):
+                command.extend(["-L", f"dependency={dependency_dir}"])
             result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
             if expected is None:
                 assert result.returncode == 0, result.stderr
