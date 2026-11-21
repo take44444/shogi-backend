@@ -3,7 +3,7 @@
 コマンドはリポジトリのルートで実行する。
 マッチメイキングの HTTP 仕様は[OpenAPI の生成手順](../../README.md#api-ドキュメントを生成する)、
 WebSocket の形式は[プロトコル実装](../../crates/realtime-gateway/src/game.rs)を参照すること。
-認証、接続、資源制限の実装とテストは[HTML viewer の手順](../../docs/how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
+認証、接続、資源制限の実装とテストは[HTML viewer の手順](../../docs/how-to/check-traceability.md#html-viewer-を開く)に従って確認する。
 環境変数と上限は [GatewayConfig](../../crates/realtime-gateway/src/lib.rs) に定義する。
 
 ## Docker Compose で起動する
