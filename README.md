@@ -117,7 +117,7 @@ DATABASE_URL='postgres://shogi:shogi@localhost:5432/shogi' VALKEY_URL='redis://1
 依存サービスの障害で配信プロセスが終了した場合は、依存サービスの復旧後に同じコマンドで再起動する。
 
 配信の保証と実装は[アプリケーションの配信処理](crates/game-application/src/events.rs)、
-通知形式は[メッセージのエンコーダー](crates/game-messaging/src/lib.rs)、採用理由は[イベント配信の ADR](docs/adr/0003-game-event-delivery.md)を参照すること。
+通知形式は[メッセージのエンコーダー](crates/game-messaging/src/lib.rs)、採用理由は[対局イベントの配信と永続処理](docs/design/event-processing.md)を参照すること。
 
 使い捨ての Compose プロジェクトで、停止と再起動を含む配信全体の検証を実行する。
 

@@ -49,7 +49,6 @@ python3 scripts/traceability.py check
 ```
 
 テスト本体は実行しないため、PostgreSQL と Valkey は不要である。
-対象を指定する際の考え方は[設計判断](../design/code-derived-boundaries.md#テストの意図を明示する理由)を参照する。
 
 ## HTML viewer を開く
 
