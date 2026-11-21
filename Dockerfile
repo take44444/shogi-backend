@@ -1,9 +1,10 @@
-FROM rust:1.99-slim-trixie AS build
+FROM rust:1.100.0-slim-trixie AS build
 WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 COPY apps ./apps
 COPY proto ./proto
+COPY tools/traceability-attributes ./tools/traceability-attributes
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo build --locked --release -p game-server -p rating-worker-server -p outbox-publisher -p user-server -p player-server -p realtime-gateway-server \

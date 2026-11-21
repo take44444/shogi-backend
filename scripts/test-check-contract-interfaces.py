@@ -22,6 +22,7 @@ class ContractInterfaceTests(unittest.TestCase):
         for layout, metadata_first in [("deps", None), ("build", None), ("build", True), ("build", False)]:
             with self.subTest(layout=layout, metadata_first=metadata_first), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
+                (root / "rust-toolchain.toml").write_bytes((CHECKER.parent.parent / "rust-toolchain.toml").read_bytes())
                 artifacts = []
 
                 def compile_crate(name, source, dependencies=(), metadata_only=False):

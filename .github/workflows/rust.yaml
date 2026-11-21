@@ -38,6 +38,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Activate pinned Rust toolchain
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
       - name: Install traceability compiler
         run: rustup toolchain install nightly-2026-11-18 --profile minimal --component rustc-dev,llvm-tools,rust-src,rustfmt,clippy
       - name: Check architecture boundaries
