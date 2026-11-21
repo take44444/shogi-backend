@@ -77,6 +77,8 @@ jobs:
           path: target/traceability-viewer.html
           if-no-files-found: error
       - name: Check contract interfaces
-        run: python3 scripts/check-contract-interfaces.py
+        run: |
+          python3 scripts/test-check-contract-interfaces.py
+          python3 scripts/check-contract-interfaces.py
       - name: Check deployment isolation and grants
         run: python3 scripts/test-deployment.py
