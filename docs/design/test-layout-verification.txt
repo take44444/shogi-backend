@@ -1,0 +1,61 @@
+Workspace test-layout migration verification
+Base commit: bad91d6
+Source identity includes Rust #[test] and #[tokio::test] functions, attributes and included fixture bytes.
+
+Source test functions pinned: 213 (includes the separate compiler-tool unit test)
+Compiled workspace tests: 212 in 35 Cargo test targets
+Static fixture payloads: 6
+Compile-time interface inputs: 12
+
+baseline-workspace.log: 212 registered workspace tests, 2 additional subprocess probe executions, 5 doctests passed
+after-workspace.log: 212 registered workspace tests, 2 additional subprocess probe executions, 5 doctests passed
+
+equivalence-final.log
+Test bodies, attributes and fixture contents match the baseline
+
+inventory-final.log
+Compiled test inventory and ignored flags match the baseline
+
+viewer-browser.log
+PASS regenerated viewer finds moved gRPC replay test and opens its captured source without browser errors
+
+traceability.log
+Viewer snapshot: /tmp/shogi-test-layout-audit/traceability.html
+
+interfaces.log
+valid: passed
+private_participants: passed
+private_metadata: passed
+distinct_counts: passed
+no_writer: passed
+no_accounts: passed
+no_direct_admission: passed
+no_service_rated_admission: passed
+no_repository_admission: passed
+no_repository_rated_admission: passed
+no_ticket_lookup: passed
+frozen_events: passed
+
+Additional successful checks
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+python3 scripts/check-boundaries.py
+python3 scripts/test-check-boundaries.py (20 tests)
+python3 scripts/test-traceability.py (22 tests)
+python3 scripts/test-traceability-viewer.py (10 tests)
+python3 scripts/test-traceability-runtime.py (1 test)
+python3 scripts/test-deployment.py
+python3 scripts/test-check-contract-interfaces.py (1 test)
+python3 scripts/test-check-test-layout.py (9 tests, including negative controls)
+python3 scripts/check-test-layout.py
+
+Independent code review: no remaining correctness findings; all 866 apps/crates function bodies compare equal after relocation and fixture-path normalization.
+No-comments review: no findings.
+
+Reproduce source and compiled equivalence using docs/how-to/organize-tests.md and a checkout of bad91d6.
+Target renames: game-persistence contracts=repository; shogi-domain contracts=game; player-http contracts=http; user-http contracts=http.
+
+Verification corrections before the successful final run:
+- Extracted test-only SQL helper regained its cfg(test) marker; SQL policy was not relaxed.
+- Local shared/symlinked build caches caused runtime-path discrepancies; final compiler collection and service-backed workspace run use a real worktree target directory.
+- Viewer observation expected the function line instead of the compiler-provided attribute line; corrected the observation to the recorded span.

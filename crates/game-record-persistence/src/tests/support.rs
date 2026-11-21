@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 
 pub(super) async fn initialize(url: &str) {
