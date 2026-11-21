@@ -3,7 +3,7 @@
 Google ログインを使う HTTP アカウントサービスを起動する。
 
 API の仕様を出力するには、[API ドキュメントの生成手順](../../README.md#api-ドキュメントを生成する)に従う。
-仕様、実装、テストの対応は[HTML viewer の手順](../../docs/how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
+仕様、実装、テストの対応は[HTML viewer の手順](../../docs/how-to/check-traceability.md#html-viewer-を開く)に従って確認する。
 
 ## Google ログインを設定する
 

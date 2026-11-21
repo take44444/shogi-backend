@@ -1,23 +1,21 @@
 # コンポーネント境界とテスト対象を生成する
 
-コンポーネント間の Rust API 呼出は、コンパイラの情報から抽出する。
-テストが何を対象にするかは `targets` 属性で明示する。
-API を呼んだ事実からテストの目的を推測しない。
-
 ## 解析用 Rust を準備する
 
-製品の通常ビルドとは別に、固定した解析用ツールチェーンを使う。
+[解析用ツールチェーンの設定](../../tools/traceability/rust-toolchain.toml)に従って Rust を準備する。
+次のコマンドは固定したツールチェーンを選択し、未導入ならインストールする。
 
 ```sh
-rustup toolchain install nightly-2026-11-18 --profile minimal --component rustc-dev,llvm-tools,rust-src
+cd tools/traceability
+rustc --version
 ```
 
-解析器は [tools/traceability](../../tools/traceability/Cargo.toml) にある。
-ツールチェーンの固定は同ディレクトリの `rust-toolchain.toml` にある。
+以降のコマンドはリポジトリルートで実行する。
 
 ## テストの対象を指定する
 
 対象を指定する package の `Cargo.toml` に開発用依存を追加する。
+`path` はその package からの相対パスに合わせる。
 
 ```toml
 [dev-dependencies]
@@ -37,18 +35,12 @@ fn rejected_move_preserves_position() {
 複数の対象はカンマで区切る。
 trait のインターフェースを対象にするテストでは、dyn 互換な trait のメソッドを `<dyn Trait>::method` として指定できる。
 具体的な実装を対象にするテストには、実装型のメソッドを指定する。
-実装型のテストを trait 境界のテストに対応付けない。
-
-属性の参照先はコンパイラが解決する。
-存在しない項目やアクセスできない項目はコンパイルに失敗する。
-名前の一致、文字列 ID、別の契約登録ファイルで対応を作らない。
-
 セットアップに使っただけの constructor を、テスト対象として記述しない。
 通信だけを検証するテストには、便宜的なローカル API を割り当てない。
-対象を指定していないテストも一覧には残る。
-対象の指定はテスト作者の意図であり、その assertion が契約を十分に検証することの証明ではない。
-指定した定義 ID が通常ビルドにも存在することを検査する。
+
+通常ビルドに存在する API を対象にする。
 テスト専用の項目や、マクロ・`cfg` により通常ビルドとの対応が取れない項目を指定すると、生成に失敗する。
+対象の指定は作者の意図であり、契約を十分に検証することの証明ではない。
 
 ## 生成結果を検査する
 
@@ -56,14 +48,8 @@ trait のインターフェースを対象にするテストでは、dyn 互換�
 python3 scripts/traceability.py check
 ```
 
-対象の workspace を解析用コンパイラでビルドし、実際の Cargo テスト一覧と抽出したテストを照合する。
-テスト本体は実行しないため、この操作には PostgreSQL と Valkey は不要である。
-コンパイル設定と未解決の呼出を生成結果に記録する。
-選択した target と feature 設定の外にある `cfg` 専用コードまで解析したとは扱わない。
-
-HTTP、gRPC、メッセージの送受信を対応付ける関係は生成しない。
-HTTP adapter から application への通常のローカル Rust 呼出は含める。
-`dyn Trait` の呼出先は trait の宣言で止め、注入された具体型まで追わない。
+テスト本体は実行しないため、PostgreSQL と Valkey は不要である。
+対象を指定する際の考え方は[設計判断](../design/code-derived-boundaries.md#テストの意図を明示する理由)を参照する。
 
 ## HTML viewer を開く
 
@@ -73,23 +59,12 @@ python3 scripts/traceability.py viewer
 
 `target/traceability-viewer.html` をブラウザーで開く。
 出力先を変更するには `--output /tmp/traceability.html` を指定する。
-コンポーネント一覧から調べたい package を選び、呼出の矢印を選ぶ。
-矢印の下に並ぶ API から契約を選ぶと、右側に対象テストが表示される。
-API 定義、呼出箇所、対象テストから取り込んだソースを開ける。
-ソースのダイアログは Esc で閉じる。
-
-通常は各方向の隣接コンポーネントを最大4件表示する。
-**Show all neighbors** で残りの隣接コンポーネントも表示する。
-**APIs without declared targets** で、対象テストの指定がない API に絞る。
+package と呼出の矢印を選び、API から対象テストやソースを確認する。
 対象指定の有無とテストの実行結果は区別する。
-
-内部 API、コンポーネント間の呼出がない API、対象未指定のテストは、
-**Browse all APIs and tests** で確認する。
-取り込んだソースの検索、未解決呼出、コンパイル設定と除外 target は、画面下部で確認する。
 
 ## Viewer のブラウザーテストを実行する
 
-Node.js 24 と Python 3 を使う。
+Node.js と Python 3 を準備して実行する。
 
 ```sh
 cd tools/traceability-viewer-tests
@@ -98,11 +73,10 @@ npx playwright install chromium
 npm test
 ```
 
-テストは小さなスナップショットを生成して Chromium で開く。
-コンポーネントからソースまでの操作、対象指定の正確な対応、検索、キーボード操作、狭い画面を検査する。
-Rust のビルド、PostgreSQL、Valkey は不要である。
-
 ## テストを実行する
+
+PostgreSQL と Valkey を使える環境で実行する。
+DB の準備には[ワークスペースの検証手順](../../README.md#ワークスペースを検証する)のラッパーを使う。
 
 ```sh
 scripts/test-postgres.sh python3 scripts/traceability.py run
@@ -112,11 +86,4 @@ scripts/test-postgres.sh python3 scripts/traceability.py run --kind targeted
 `--kind targeted` は対象属性を持つテストを選ぶ。
 `--kind untargeted` は対象属性のないテストを選ぶ。
 省略時は一覧中の全テストを実行する。
-実行結果と静的な対象指定を区別して確認する。
-解析時に照合したテスト実行ファイルを、各 package のディレクトリで実行する。
-package 単体で再ビルドせず、workspace 内で有効になった feature を保持する。
-Cargo が実際に渡す package 情報、build script の環境変数、動的ライブラリの探索先も保持する。
-これらの値は実行用にだけ使い、生成する JSON や HTML には保存しない。
-実行環境の取得には一時的な Cargo runner を使うため、独自の target runner を設定した環境は対象外とする。
-
-生成モデルと抽出範囲は[設計](../design/code-derived-boundaries.md)を参照する。
+独自の Cargo target runner を設定している場合は、設定を外して実行する。

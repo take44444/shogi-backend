@@ -8,7 +8,7 @@
 
 ポーリング、ジョブの取得、再試行の設定は[起動処理](src/main.rs)で確認する。
 ワーカーを同時に複数起動する場合は、異なる `RATING_WORKER_ID` を指定する。
-仕様、実装、テストの対応は[HTML viewer の手順](../../docs/how-to/check-traceability.md#ブラウザーで保証とソースを確認する)に従って確認する。
+仕様、実装、テストの対応は[HTML viewer の手順](../../docs/how-to/check-traceability.md#html-viewer-を開く)に従って確認する。
 
 ## 隔離された対局の処理を再試行する
 
