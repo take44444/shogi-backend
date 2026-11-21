@@ -28,6 +28,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Activate pinned Rust toolchain
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
       - name: Test HTTP contracts
         run: cargo test --locked -p player-http -p user-http
       - name: Generate documents without service configuration
