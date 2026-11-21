@@ -59,3 +59,5 @@ Verification corrections before the successful final run:
 - Extracted test-only SQL helper regained its cfg(test) marker; SQL policy was not relaxed.
 - Local shared/symlinked build caches caused runtime-path discrepancies; final compiler collection and service-backed workspace run use a real worktree target directory.
 - Viewer observation expected the function line instead of the compiler-provided attribute line; corrected the observation to the recorded span.
+
+Historical note: The layout checker was removed after this migration. Current test placement instructions are in docs/how-to/organize-tests.md.

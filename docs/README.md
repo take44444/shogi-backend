@@ -12,7 +12,7 @@ API のフィールドや型は OpenAPI、[対局プロトコル](../proto/game.
 - [ブラウザー向けゲートウェイの起動](../apps/realtime-gateway/README.md)
 - [レートワーカーと隔離された対局の再試行](../apps/rating-worker-server/README.md)
 - [コンポーネント境界とテスト対象の生成](how-to/check-traceability.md)
-- [テストの配置と移動結果の検査](how-to/organize-tests.md)
+- [テストを配置する](how-to/organize-tests.md)
 
 ## 設計判断
 

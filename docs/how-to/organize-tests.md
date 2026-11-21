@@ -72,26 +72,9 @@ SQL などの入力データは `fixtures` に置く。
 ディレクトリ名から API との対応を推測しない。
 [コンポーネント境界とテスト対象の生成](check-traceability.md)に従って対応を確認する。
 
-## 配置と移動結果を検査する
+## 変更後のテストを検証する
 
-構造の検査を実行する。
-
-```sh
-python3 scripts/test-check-test-layout.py
-python3 scripts/check-test-layout.py
-```
-
-大きな移動では、変更前の checkout からテストのスナップショットを保存する。
-以下の `/tmp/shogi-before` は変更前の checkout、現在のディレクトリは変更後の checkout とする。
-
-```sh
-python3 scripts/check-test-layout.py snapshot --root /tmp/shogi-before --output /tmp/tests-before.json
-python3 scripts/check-test-layout.py compare --baseline /tmp/tests-before.json
-```
-
-比較ではテスト関数名、属性、本文、fixture の内容を保持する。
-ファイルとモジュールの移動、リテラル外の整形、同じ内容を参照する `include_str!` の相対パス変更を許容する。
-この比較は名前解決やヘルパーの動作を検証しないため、コンパイルと実際のテスト実行も行う。
+テストを移動した後は、コンパイルと実際のテスト実行を行う。
 
 ```sh
 cargo fmt --all -- --check
@@ -100,17 +83,3 @@ scripts/test-postgres.sh cargo test --locked --workspace
 python3 scripts/check-contract-interfaces.py
 python3 scripts/traceability.py check
 ```
-
-実行対象を移動した場合は、Cargo が生成したテスト一覧も比較する。
-`inventory` は Cargo の JSON 出力に記録された実行ファイルを `--list` で起動する。
-信頼するローカルビルドの出力を使う。
-
-```sh
-cargo test --locked --workspace --no-run --message-format=json > /tmp/test-artifacts.jsonl
-python3 scripts/check-test-layout.py inventory --artifacts /tmp/test-artifacts.jsonl --output /tmp/test-inventory.json
-```
-
-変更前後でそれぞれ JSON 出力を保存し、変更後の実行ファイルが変更前のビルドで上書きされないようにする。
-`compare-inventory --artifacts /tmp/test-artifacts.jsonl --baseline /tmp/test-inventory-before.json` で比較する。
-意図したターゲット名の変更だけを `--rename-target package:old=new` で指定する。
-テスト名は末尾の関数名で比較し、所属 package、実行対象、重複件数、ignore 指定を維持する。
