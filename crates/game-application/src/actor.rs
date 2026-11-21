@@ -240,5 +240,4 @@ pub(crate) fn snapshot_from_record(record: GameRecord) -> Result<Snapshot, Appli
 }
 
 #[cfg(test)]
-#[path = "tests/actor.rs"]
 mod tests;

@@ -1,2 +1,2 @@
-#[path = "contracts/durable-event-dispatch/support.rs"]
+#[path = "outbox/mod.rs"]
 mod outbox;

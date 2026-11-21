@@ -209,5 +209,4 @@ impl Error for ApplicationError {
 }
 
 #[cfg(test)]
-#[path = "tests/types.rs"]
 mod tests;

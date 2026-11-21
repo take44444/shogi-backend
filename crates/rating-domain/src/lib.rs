@@ -124,5 +124,4 @@ pub fn calculate(
 }
 
 #[cfg(test)]
-#[path = "tests/rating.rs"]
 mod tests;

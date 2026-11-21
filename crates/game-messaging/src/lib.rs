@@ -361,9 +361,4 @@ impl NotificationPublisher for ValkeyEventPublisher {
 }
 
 #[cfg(test)]
-#[path = "tests/wire.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "tests/transport.rs"]
-mod transport_tests;

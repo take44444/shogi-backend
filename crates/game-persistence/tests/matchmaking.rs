@@ -1,2 +1,2 @@
-#[path = "contracts/matchmaking-pairing/support.rs"]
-mod selection;
+#[path = "matchmaking/mod.rs"]
+mod matchmaking;

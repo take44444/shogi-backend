@@ -271,5 +271,4 @@ impl<R: OutboxRepository + ?Sized> OutboxRepository for &mut R {
 }
 
 #[cfg(test)]
-#[path = "tests/events.rs"]
 mod tests;
