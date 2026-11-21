@@ -1,2 +1,2 @@
-#[path = "contracts/matchmaking-pairing/periodic/tests.rs"]
-mod selection;
+#[path = "matchmaking/periodic.rs"]
+mod periodic;

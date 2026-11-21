@@ -520,5 +520,4 @@ impl AccountRepository for PostgresAccounts {
 }
 
 #[cfg(test)]
-#[path = "tests/accounts.rs"]
 mod tests;

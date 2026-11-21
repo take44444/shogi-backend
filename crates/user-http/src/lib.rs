@@ -432,5 +432,4 @@ async fn logout(State(app): State<App>, headers: HeaderMap) -> Result<Response, 
 }
 
 #[cfg(test)]
-#[path = "tests/openapi.rs"]
-mod openapi_tests;
+mod tests;

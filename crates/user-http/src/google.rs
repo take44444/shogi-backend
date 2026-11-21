@@ -191,5 +191,4 @@ fn verify_response(
 }
 
 #[cfg(test)]
-#[path = "tests/google.rs"]
 mod tests;

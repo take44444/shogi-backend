@@ -26,5 +26,4 @@ impl UserId {
 }
 
 #[cfg(test)]
-#[path = "tests/user_id.rs"]
 mod tests;
