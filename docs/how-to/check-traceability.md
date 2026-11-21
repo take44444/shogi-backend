@@ -73,8 +73,34 @@ python3 scripts/traceability.py viewer
 
 `target/traceability-viewer.html` をブラウザーで開く。
 出力先を変更するには `--output /tmp/traceability.html` を指定する。
-コンポーネントから API への呼出と、属性で指定したテスト対象を確認する。
-取り込んだソースと、その位置を viewer 内で開ける。
+コンポーネント一覧から調べたい package を選び、呼出の矢印を選ぶ。
+矢印の下に並ぶ API から契約を選ぶと、右側に対象テストが表示される。
+API 定義、呼出箇所、対象テストから取り込んだソースを開ける。
+ソースのダイアログは Esc で閉じる。
+
+通常は各方向の隣接コンポーネントを最大4件表示する。
+**Show all neighbors** で残りの隣接コンポーネントも表示する。
+**APIs without declared targets** で、対象テストの指定がない API に絞る。
+対象指定の有無とテストの実行結果は区別する。
+
+内部 API、コンポーネント間の呼出がない API、対象未指定のテストは、
+**Browse all APIs and tests** で確認する。
+取り込んだソースの検索、未解決呼出、コンパイル設定と除外 target は、画面下部で確認する。
+
+## Viewer のブラウザーテストを実行する
+
+Node.js 24 と Python 3 を使う。
+
+```sh
+cd tools/traceability-viewer-tests
+npm ci
+npx playwright install chromium
+npm test
+```
+
+テストは小さなスナップショットを生成して Chromium で開く。
+コンポーネントからソースまでの操作、対象指定の正確な対応、検索、キーボード操作、狭い画面を検査する。
+Rust のビルド、PostgreSQL、Valkey は不要である。
 
 ## テストを実行する
 
