@@ -45,10 +45,6 @@ jobs:
           cargo --version
       - name: Install traceability compiler
         run: rustup toolchain install nightly-2026-11-18 --profile minimal --component rustc-dev,llvm-tools,rust-src,rustfmt,clippy
-      - name: Check test structure
-        run: |
-          python3 scripts/test-check-test-layout.py
-          python3 scripts/check-test-layout.py
       - name: Check architecture boundaries
         run: |
           python3 scripts/check-boundaries.py

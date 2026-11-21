@@ -165,8 +165,6 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 python3 scripts/test-traceability.py
 python3 scripts/test-traceability-viewer.py
 python3 scripts/traceability.py check
-python3 scripts/test-check-test-layout.py
-python3 scripts/check-test-layout.py
 python3 scripts/check-contract-interfaces.py
 python3 scripts/test-deployment.py
 ```
