@@ -244,3 +244,108 @@ async fn writer_periodic_matching_progresses_without_another_join() {
     }
     raw.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn automatic_clock_poller_finishes_saved_deadlines_after_restart_without_connections() {
+    use game_application::{GameId, GameRepository, Participants, UserId, rating::Pool};
+    let database = TestDatabase::new().await;
+    let store = SeaOrmStore::connect(database.url()).await.unwrap();
+    let raw = Database::connect(database.url()).await.unwrap();
+    for pool in Pool::ALL {
+        let id = GameId::new(pool.as_str()).unwrap();
+        let p = Participants::new(
+            UserId::new(format!("{}-black", pool.as_str())).unwrap(),
+            UserId::new(format!("{}-white", pool.as_str())).unwrap(),
+        )
+        .unwrap();
+        pg_test_support::seed_rated(database.url(), &id, &p, pool)
+            .await
+            .unwrap();
+    }
+    raw.execute_unprepared("UPDATE games SET created_at=created_at-631000,clock_started=clock_started-631000,clock_deadline=clock_deadline-631000").await.unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let started = std::time::Instant::now();
+    let process = Process(
+        Command::new(env!("CARGO_BIN_EXE_game-server"))
+            .arg(address.to_string())
+            .env("DATABASE_URL", database.url())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let row = raw
+                .query_one_raw(Statement::from_string(
+                    DbBackend::Postgres,
+                    "SELECT count(*) AS n FROM games WHERE reason=3",
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            if row.try_get::<i64>("", "n").unwrap() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("saved deadlines must finish automatically without loading actors");
+    eprintln!(
+        "clock startup to two saved timeout results: {:?}",
+        started.elapsed()
+    );
+    drop(process);
+    // A second process sees the committed result rather than generating another finish.
+    let _restarted = Process(
+        Command::new(env!("CARGO_BIN_EXE_game-server"))
+            .arg(address.to_string())
+            .env("DATABASE_URL", database.url())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let mut client = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(c) = GameServiceClient::connect(format!("http://{address}")).await {
+                break c;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    for pool in Pool::ALL {
+        let id = GameId::new(pool.as_str()).unwrap();
+        let wire = client
+            .get_snapshot(proto::GetSnapshotRequest {
+                game_id: id.as_str().into(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(wire.seq, 1);
+        assert_eq!(
+            wire.result.unwrap().reason,
+            proto::FinishReason::Timeout as i32
+        );
+        assert!(matches!(
+            wire.clock.unwrap().state,
+            Some(proto::clock_state::State::Stopped(_))
+        ));
+        assert_eq!(store.load_game(&id).await.unwrap().journal.len(), 1);
+    }
+    let row = raw
+        .query_one_raw(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT (SELECT count(*) FROM outbox_events)+(SELECT count(*) FROM rating_jobs) AS n",
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.try_get::<i64>("", "n").unwrap(), 4);
+    raw.close().await.unwrap();
+    store.close().await.unwrap();
+}

@@ -56,8 +56,14 @@ async fn insert_game(
     c: &mut PgConnection,
     id: &GameId,
     p: &Participants,
+    pool: Pool,
 ) -> Result<(), ApplicationError> {
-    sqlx::query("INSERT INTO games(id,black,white,version,rule,visibility,final_move_ply) VALUES($1,$2,$3,0,'standard','public',0)").bind(encoded(id.as_str())).bind(encoded(p.black().as_str())).bind(encoded(p.white().as_str())).execute(c).await.map_err(failure)?;
+    let main: i64 = if pool == Pool::TenMinute30 {
+        600_000
+    } else {
+        0
+    };
+    sqlx::query("INSERT INTO games(id,black,white,version,rule,visibility,final_move_ply,initial_main_ms,byoyomi_ms,created_at,clock_black,clock_white,clock_started,clock_deadline) SELECT $1,$2,$3,0,'standard','public',0,$4,30000,t,t2,t2,t,t+$4+30000 FROM (SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint t, $4::bigint t2) x").bind(encoded(id.as_str())).bind(encoded(p.black().as_str())).bind(encoded(p.white().as_str())).bind(main).execute(c).await.map_err(failure)?;
     Ok(())
 }
 /// Seeds an unrated record used by low-level game-history tests.
@@ -68,7 +74,7 @@ pub async fn seed_game(
 ) -> Result<(), ApplicationError> {
     let mut c = PgConnection::connect(url).await.map_err(failure)?;
     let mut tx = c.begin().await.map_err(failure)?;
-    insert_game(&mut tx, id, players).await?;
+    insert_game(&mut tx, id, players, Pool::TenMinute30).await?;
     for (user, side) in [(players.black(), 1), (players.white(), 2)] {
         sqlx::query("INSERT INTO matchmaking_tickets(user_id,ticket_id,pool,state,enqueued_at,expires_at,rating,completed,heartbeat_seq,game_id,side,prospective_game_id,matched_side,ready,ready_deadline) VALUES($1,$2,'ten_minute_30','playing',0,1,NULL,0,0,$3,$4,$3,$4,TRUE,30000)").bind(encoded(user.as_str())).bind(uuid::Uuid::new_v4().to_string()).bind(encoded(id.as_str())).bind(side).execute(&mut *tx).await.map_err(failure)?;
     }
@@ -109,7 +115,7 @@ pub async fn seed_rated(
             return Err(ApplicationError::RatingPoolBusy);
         }
     }
-    insert_game(&mut tx, id, players).await?;
+    insert_game(&mut tx, id, players, pool).await?;
     sqlx::query("INSERT INTO rated_games(game_id,pool,black_start_rating,black_start_count,white_start_rating,white_start_count) SELECT $1,$2,b.rating,b.completed,w.rating,w.completed FROM rating_states b, rating_states w WHERE b.user_id=$3 AND w.user_id=$4 AND b.pool=$2 AND w.pool=$2").bind(encoded(id.as_str())).bind(pool.as_str()).bind(encoded(players.black().as_str())).bind(encoded(players.white().as_str())).execute(&mut *tx).await.map_err(failure)?;
     for (user, side) in [(players.black(), 1), (players.white(), 2)] {
         sqlx::query("INSERT INTO rating_slots(user_id,pool,game_id) VALUES($1,$2,$3)")

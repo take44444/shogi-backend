@@ -6,7 +6,6 @@ publish.workspace = true
 
 [dependencies]
 rating-domain = { path = "../rating-domain" }
-game-record-application = { path = "../game-record-application" }
 game-application = { path = "../game-application" }
 shogi-domain = { path = "../shogi-domain" }
 async-trait = "0.1"
@@ -16,6 +15,7 @@ uuid = { version = "=1.29.0", features = ["v4"] }
 sea-query-sqlx = { version = "0.9.1", default-features = false, features = ["sqlx-postgres"] }
 
 [dev-dependencies]
+game-record-application = { path = "../game-record-application" }
 traceability = { package = "traceability-attributes", path = "../../tools/traceability-attributes" }
 syn = { version = "2", features = ["full", "visit"] }
 game-record-persistence = { path = "../game-record-persistence" }

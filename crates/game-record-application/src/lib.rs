@@ -130,12 +130,10 @@ fn fingerprint(filters: &Filters) -> String {
         filters
             .winner
             .map(|p| if p == Player::Black { "black" } else { "white" }),
-        filters.reason.map(|r| {
-            if r == FinishReason::Checkmate {
-                "checkmate"
-            } else {
-                "resignation"
-            }
+        filters.reason.map(|r| match r {
+            FinishReason::Checkmate => "checkmate",
+            FinishReason::Resignation => "resignation",
+            FinishReason::Timeout => "timeout",
         }),
         filters.from,
         filters.to,
@@ -236,7 +234,7 @@ impl Metadata {
         if black == white
             || final_seq.get() == 0
             || final_move_ply.get()
-                != final_seq.get() - u64::from(result.reason == FinishReason::Resignation)
+                != final_seq.get() - u64::from(result.reason != FinishReason::Checkmate)
         {
             return Err(Error::Corrupt);
         }
@@ -278,6 +276,7 @@ impl Metadata {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PublicAction {
+    Timeout,
     Move(Move),
     Resign,
 }

@@ -22,7 +22,7 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
         );
         assert_eq!(store.version(&id()).await.unwrap(), 0);
         assert!(store.load_game(&id()).await.unwrap().journal.is_empty());
-        assert_eq!(service.snapshot(&id()).await.unwrap(), before);
+        assert_same_snapshot(service.snapshot(&id()).await.unwrap(), &before);
         raw.execute_unprepared("DROP TRIGGER fail_commit_change ON journal")
             .await
             .unwrap();
@@ -31,7 +31,7 @@ async fn real_statement_and_commit_failures_roll_back_both_metadata_and_receipt(
 }
 
 #[traceability::targets(
-    game_persistence::SeaOrmStore::commit_change,
+    game_persistence::SeaOrmStore::begin_game_update,
     game_application::StagedGameChange::new
 )]
 #[tokio::test]
@@ -39,6 +39,7 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     let database = TestDatabase::new().await;
     let (store, service) = setup(database.url()).await;
     let receipt = Receipt {
+        evaluated_at: game_application::Timestamp::new(0).unwrap(),
         request: MutationRequest {
             request_id: RequestId::new("r").unwrap(),
             user_id: user("outsider"),
@@ -46,6 +47,13 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
             action: Action::Move("7g7f".parse().unwrap()),
         },
         acceptance: Acceptance {
+            clock: game_application::ClockState::start(
+                game_application::TimeControl::for_pool(
+                    game_application::rating::Pool::TenMinute30,
+                ),
+                game_application::Timestamp::new(0).unwrap(),
+            )
+            .unwrap(),
             seq: 1,
             in_check: false,
             result: None,
@@ -53,7 +61,10 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     };
     assert_eq!(
         store
-            .commit_change(&StagedGameChange::new(id(), receipt.clone()).unwrap())
+            .begin_game_update(&id(), false)
+            .await
+            .unwrap()
+            .commit(&StagedGameChange::new(id(), receipt.clone()).unwrap())
             .await,
         Err(Error::NonParticipant)
     );
@@ -78,7 +89,10 @@ async fn direct_store_constraints_and_sequence_overflow_leave_no_changes() {
     duplicate.request.action = Action::Move("3c3d".parse().unwrap());
     assert_eq!(
         store
-            .commit_change(&StagedGameChange::new(id(), duplicate).unwrap())
+            .begin_game_update(&id(), false)
+            .await
+            .unwrap()
+            .commit(&StagedGameChange::new(id(), duplicate).unwrap())
             .await,
         Err(Error::Unavailable)
     );

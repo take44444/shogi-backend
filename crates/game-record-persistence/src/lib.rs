@@ -47,7 +47,7 @@ pub struct PostgresGameRecords {
     pool: PgPool,
 }
 impl PostgresGameRecords {
-    /// Connects to an existing schema-v8 database without initializing or mutating it.
+    /// Connects to an existing schema-v9 database without initializing or mutating it.
     /// Use a SELECT-only database role to enforce permissions independently of this adapter.
     /// Each connection uses read-only transactions and a two-second statement timeout.
     ///
@@ -105,7 +105,7 @@ async fn validate_schema(connection: &mut PoolConnection<Postgres>) -> Result<()
         .map_err(|_| Error::Corrupt)?;
     if rows.len() != 1
         || rows[0].try_get::<i64, _>("id").map_err(corrupt)? != 0
-        || rows[0].try_get::<i64, _>("version").map_err(corrupt)? != 8
+        || rows[0].try_get::<i64, _>("version").map_err(corrupt)? != 9
     {
         return Err(Error::Corrupt);
     }
@@ -132,6 +132,16 @@ async fn validate_schema(connection: &mut PoolConnection<Postgres>) -> Result<()
                 ("visibility", "TEXT"),
                 ("finished_at", "BIGINT"),
                 ("final_move_ply", "BIGINT"),
+                ("initial_main_ms", "BIGINT"),
+                ("byoyomi_ms", "BIGINT"),
+                ("created_at", "BIGINT"),
+                ("clock_black", "BIGINT"),
+                ("clock_white", "BIGINT"),
+                ("clock_started", "BIGINT"),
+                ("clock_deadline", "BIGINT"),
+                ("clock_stopped", "BIGINT"),
+                ("byoyomi_black", "BIGINT"),
+                ("byoyomi_white", "BIGINT"),
             ][..],
         ),
         (
@@ -145,6 +155,16 @@ async fn validate_schema(connection: &mut PoolConnection<Postgres>) -> Result<()
                 ("action", "INTEGER"),
                 ("usi", "TEXT"),
                 ("in_check", "BOOLEAN"),
+                ("evaluated_at", "BIGINT"),
+                ("loser", "INTEGER"),
+                ("deadline_at", "BIGINT"),
+                ("clock_black", "BIGINT"),
+                ("clock_white", "BIGINT"),
+                ("clock_started", "BIGINT"),
+                ("clock_deadline", "BIGINT"),
+                ("clock_stopped", "BIGINT"),
+                ("byoyomi_black", "BIGINT"),
+                ("byoyomi_white", "BIGINT"),
                 ("winner", "INTEGER"),
                 ("reason", "INTEGER"),
             ][..],
@@ -216,6 +236,7 @@ fn reason(value: i32) -> Result<FinishReason, Error> {
     match value {
         1 => Ok(FinishReason::Checkmate),
         2 => Ok(FinishReason::Resignation),
+        3 => Ok(FinishReason::Timeout),
         _ => Err(Error::Corrupt),
     }
 }
@@ -262,13 +283,11 @@ impl RecordRepository for PostgresGameRecords {
             }));
         }
         if let Some(reason) = f.reason {
-            query.and_where(
-                Expr::col(a("reason")).eq(if reason == FinishReason::Checkmate {
-                    1i32
-                } else {
-                    2
-                }),
-            );
+            query.and_where(Expr::col(a("reason")).eq(match reason {
+                FinishReason::Checkmate => 1i32,
+                FinishReason::Resignation => 2,
+                FinishReason::Timeout => 3,
+            }));
         }
         if let Some(min) = f.min_ply {
             query.and_where(Expr::col(a("final_move_ply")).gte(min as i64));
@@ -330,7 +349,7 @@ impl RecordRepository for PostgresGameRecords {
         let (sql, values) = Query::select()
             .columns(
                 [
-                    "seq", "user_id", "action", "usi", "in_check", "winner", "reason",
+                    "seq", "user_id", "action", "usi", "in_check", "winner", "reason", "loser",
                 ]
                 .map(a),
             )
@@ -353,13 +372,39 @@ impl RecordRepository for PostgresGameRecords {
             if seq != index as u64 + 1 {
                 return Err(Error::Corrupt);
             }
-            let user = decode(row.try_get("user_id").map_err(corrupt)?)?;
-            let player = if user == metadata.black().as_str() {
-                Player::Black
-            } else if user == metadata.white().as_str() {
-                Player::White
+            let code = row.try_get::<i32, _>("action").map_err(corrupt)?;
+            let user: Option<String> = row.try_get("user_id").map_err(corrupt)?;
+            let player = if code == 3 {
+                if user.is_some() {
+                    return Err(Error::Corrupt);
+                }
+                let loser = side(row.try_get("loser").map_err(corrupt)?)?;
+                if loser
+                    != if move_ply % 2 == 0 {
+                        Player::Black
+                    } else {
+                        Player::White
+                    }
+                {
+                    return Err(Error::Corrupt);
+                }
+                loser
             } else {
-                return Err(Error::Corrupt);
+                if row
+                    .try_get::<Option<i32>, _>("loser")
+                    .map_err(corrupt)?
+                    .is_some()
+                {
+                    return Err(Error::Corrupt);
+                }
+                let user = decode(user.ok_or(Error::Corrupt)?)?;
+                if user == metadata.black().as_str() {
+                    Player::Black
+                } else if user == metadata.white().as_str() {
+                    Player::White
+                } else {
+                    return Err(Error::Corrupt);
+                }
             };
             let usi: Option<String> = row.try_get("usi").map_err(corrupt)?;
             let action = match (row.try_get::<i32, _>("action").map_err(corrupt)?, usi) {
@@ -377,6 +422,7 @@ impl RecordRepository for PostgresGameRecords {
                     PublicAction::Move(usi.parse().map_err(corrupt)?)
                 }
                 (2, None) => PublicAction::Resign,
+                (3, None) => PublicAction::Timeout,
                 _ => return Err(Error::Corrupt),
             };
             let winner: Option<i32> = row.try_get("winner").map_err(corrupt)?;
@@ -388,14 +434,17 @@ impl RecordRepository for PostgresGameRecords {
                     return Err(Error::Corrupt);
                 }
                 match (&action, metadata.result().reason) {
-                    (PublicAction::Resign, FinishReason::Resignation)
+                    (PublicAction::Timeout, FinishReason::Timeout)
+                    | (PublicAction::Resign, FinishReason::Resignation)
                         if player.opponent() == metadata.result().winner => {}
                     (PublicAction::Move(_), FinishReason::Checkmate)
                         if player == metadata.result().winner
                             && row.try_get::<bool, _>("in_check").map_err(corrupt)? => {}
                     _ => return Err(Error::Corrupt),
                 }
-            } else if winner.is_some() || finish.is_some() || matches!(action, PublicAction::Resign)
+            } else if winner.is_some()
+                || finish.is_some()
+                || matches!(action, PublicAction::Resign | PublicAction::Timeout)
             {
                 return Err(Error::Corrupt);
             }

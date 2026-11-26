@@ -135,3 +135,23 @@ socket.send(JSON.stringify(pendingCommand));
 認証、マッチメイキング、WebSocket を同じオリジンで提供するリバースプロキシで HTTPS を終端する。
 `user-server`、`game-server`、ゲートウェイ、Valkey は内部ネットワークに置く。
 ゲートウェイとユーザーサービスの公開オリジンを HTTPS に設定し、両方のループバック HTTP フラグを無効にする。
+
+## 対局時計
+
+スナップショットには`time_control`、`clock`、`server_now_ms`が含まれる。
+値は整数ミリ秒であり、時刻はUTCエポックからの経過ミリ秒である。
+`clock.state`が`running`なら、`main_remaining_ms`は先手、後手の順に手番開始時の持ち時間を表す。
+`turn_started_at_ms`と`deadline_at_ms`で進行中の手番の経過と期限を示す。
+`stopped`なら`byoyomi_remaining_ms`と`stopped_at_ms`を含む最終値を保持する。
+
+表示には`server_now_ms`とローカルの単調時計から求めた時刻差を使う。
+着手と終局のイベントには確定後の`clock`と過去の`evaluated_at_ms`が含まれる。
+イベントが遅れて届いても、その判定時刻を現在時刻として使わない。
+`accepted`の時計は元の受理時点の値であり、完全一致再送でも変わらない。
+再接続時は新しいスナップショットで時刻差と局面を更新する。
+
+`seq`は着手、投了、システムによる時間切れを含む状態遷移の数である。
+時間切れの終局理由は`timeout`、通知の`origin`は`system`になる。
+期限は`判定時刻 >= 期限`で失効する。
+切断やサーバー停止でも時計は進む。
+時計表示は0で止め、勝敗にはスナップショットまたは終局イベントの保存済み結果を使う。

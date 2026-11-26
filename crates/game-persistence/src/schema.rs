@@ -107,7 +107,7 @@ pub(crate) async fn initialize(db: &DatabaseConnection) -> Result<(), SchemaErro
             || rows[0]
                 .try_get::<i64>("", "version")
                 .map_err(|_| SchemaError::Corrupt)?
-                != 8
+                != 9
         {
             return Err(SchemaError::Corrupt);
         }
@@ -157,7 +157,7 @@ async fn create_schema(tx: &DatabaseTransaction) -> Result<(), SchemaError> {
         Query::insert()
             .into_table(a("schema_version"))
             .columns([a("id"), a("version")])
-            .values_panic([0_i64.into(), 8_i64.into()]),
+            .values_panic([0_i64.into(), 9_i64.into()]),
     )
     .await?;
     tx.execute(
@@ -185,7 +185,55 @@ async fn create_schema(tx: &DatabaseTransaction) -> Result<(), SchemaError> {
             .and_where(Expr::col(a("finished_at")).is_not_null());
         tx.execute(&index).await?;
     }
+    tx.execute(
+        Index::create()
+            .name("games_deadlines")
+            .table(a("games"))
+            .col(a("clock_deadline"))
+            .and_where(Expr::col(a("winner")).is_null()),
+    )
+    .await?;
     Ok(())
+}
+
+fn clock_columns(table: &mut TableCreateStatement) {
+    for column in ["clock_black", "clock_white"] {
+        table.col(
+            ColumnDef::new(a(column))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a(column)).gte(0)),
+        );
+    }
+    for column in [
+        "clock_started",
+        "clock_deadline",
+        "clock_stopped",
+        "byoyomi_black",
+        "byoyomi_white",
+    ] {
+        table.col(
+            ColumnDef::new(a(column)).big_integer().check(
+                Expr::col(a(column))
+                    .is_null()
+                    .or(Expr::col(a(column)).gte(0)),
+            ),
+        );
+    }
+    table.check(
+        Expr::col(a("clock_started"))
+            .is_not_null()
+            .and(Expr::col(a("clock_deadline")).is_not_null())
+            .and(Expr::col(a("clock_stopped")).is_null())
+            .and(Expr::col(a("byoyomi_black")).is_null())
+            .and(Expr::col(a("byoyomi_white")).is_null())
+            .or(Expr::col(a("clock_started"))
+                .is_null()
+                .and(Expr::col(a("clock_deadline")).is_null())
+                .and(Expr::col(a("clock_stopped")).is_not_null())
+                .and(Expr::col(a("byoyomi_black")).is_not_null())
+                .and(Expr::col(a("byoyomi_white")).is_not_null())),
+    );
 }
 
 async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>, SchemaError> {
@@ -238,7 +286,8 @@ async fn schema_fingerprint(tx: &DatabaseTransaction) -> Result<BTreeSet<String>
 }
 
 fn games() -> TableCreateStatement {
-    Table::create()
+    let mut table = Table::create();
+    table
         .table(a("games"))
         .col(
             ColumnDef::new(a("id"))
@@ -293,13 +342,33 @@ fn games() -> TableCreateStatement {
                     .and(Expr::col(a("reason")).is_not_null())
                     .and(Expr::col(a("finished_at")).is_not_null())
                     .and(Expr::col(a("winner")).is_in([1, 2]))
-                    .and(Expr::col(a("reason")).is_in([1, 2]))),
+                    .and(Expr::col(a("reason")).is_in([1, 2, 3]))),
         )
-        .to_owned()
+        .col(
+            ColumnDef::new(a("initial_main_ms"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("initial_main_ms")).is_in([0, 600000])),
+        )
+        .col(
+            ColumnDef::new(a("byoyomi_ms"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("byoyomi_ms")).eq(30000)),
+        )
+        .col(
+            ColumnDef::new(a("created_at"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("created_at")).gte(0)),
+        );
+    clock_columns(&mut table);
+    table.to_owned()
 }
 
 fn journal() -> TableCreateStatement {
-    Table::create()
+    let mut table = Table::create();
+    table
         .table(a("journal"))
         .col(ColumnDef::new(a("game_id")).text().not_null())
         .col(
@@ -308,8 +377,8 @@ fn journal() -> TableCreateStatement {
                 .not_null()
                 .check(Expr::col(a("seq")).gt(0)),
         )
-        .col(ColumnDef::new(a("request_id")).text().not_null())
-        .col(ColumnDef::new(a("user_id")).text().not_null())
+        .col(ColumnDef::new(a("request_id")).text())
+        .col(ColumnDef::new(a("user_id")).text())
         .col(
             ColumnDef::new(a("expected_seq"))
                 .big_integer()
@@ -339,15 +408,40 @@ fn journal() -> TableCreateStatement {
                 .eq(1)
                 .and(Expr::col(a("usi")).is_not_null())
                 .or(Expr::col(a("action"))
-                    .eq(2)
+                    .is_in([2, 3])
                     .and(Expr::col(a("usi")).is_null())),
         )
         .check(result_pair())
-        .to_owned()
+        .col(
+            ColumnDef::new(a("evaluated_at"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("evaluated_at")).gte(0)),
+        )
+        .col(ColumnDef::new(a("loser")).integer())
+        .col(ColumnDef::new(a("deadline_at")).big_integer())
+        .check(
+            Expr::col(a("action"))
+                .is_in([1, 2])
+                .and(Expr::col(a("request_id")).is_not_null())
+                .and(Expr::col(a("user_id")).is_not_null())
+                .and(Expr::col(a("loser")).is_null())
+                .and(Expr::col(a("deadline_at")).is_null())
+                .or(Expr::col(a("action"))
+                    .eq(3)
+                    .and(Expr::col(a("request_id")).is_null())
+                    .and(Expr::col(a("user_id")).is_null())
+                    .and(Expr::col(a("loser")).is_in([1, 2]))
+                    .and(Expr::col(a("deadline_at")).is_not_null())
+                    .and(Expr::col(a("reason")).eq(3))),
+        );
+    clock_columns(&mut table);
+    table.to_owned()
 }
 
 fn outbox() -> TableCreateStatement {
-    Table::create()
+    let mut table = Table::create();
+    table
         .table(a("outbox_events"))
         .col(
             ColumnDef::new(a("id"))
@@ -364,8 +458,8 @@ fn outbox() -> TableCreateStatement {
                 .check(Expr::col(a("event_kind")).is_in([0, 1])),
         )
         .col(ColumnDef::new(a("encoding_version")).integer().not_null())
-        .col(ColumnDef::new(a("request_id")).text().not_null())
-        .col(ColumnDef::new(a("user_id")).text().not_null())
+        .col(ColumnDef::new(a("request_id")).text())
+        .col(ColumnDef::new(a("user_id")).text())
         .col(ColumnDef::new(a("usi")).text())
         .col(ColumnDef::new(a("in_check")).boolean())
         .col(ColumnDef::new(a("winner")).integer())
@@ -390,6 +484,20 @@ fn outbox() -> TableCreateStatement {
         )
         .check(result_pair())
         .check(
+            Expr::col(a("request_id"))
+                .is_null()
+                .and(Expr::col(a("user_id")).is_null())
+                .and(Expr::col(a("reason")).eq(3))
+                .or(Expr::col(a("request_id"))
+                    .is_not_null()
+                    .and(Expr::col(a("user_id")).is_not_null())
+                    .and(
+                        Expr::col(a("reason"))
+                            .is_null()
+                            .or(Expr::col(a("reason")).ne(3)),
+                    )),
+        )
+        .check(
             Expr::col(a("event_kind"))
                 .eq(0)
                 .and(Expr::col(a("usi")).is_not_null())
@@ -405,7 +513,14 @@ fn outbox() -> TableCreateStatement {
                     .and(Expr::col(a("in_check")).is_null())
                     .and(Expr::col(a("winner")).is_not_null())),
         )
-        .to_owned()
+        .col(
+            ColumnDef::new(a("evaluated_at"))
+                .big_integer()
+                .not_null()
+                .check(Expr::col(a("evaluated_at")).gte(0)),
+        );
+    clock_columns(&mut table);
+    table.to_owned()
 }
 
 fn result_pair() -> Expr {
@@ -416,5 +531,5 @@ fn result_pair() -> Expr {
             .is_not_null()
             .and(Expr::col(a("reason")).is_not_null())
             .and(Expr::col(a("winner")).is_in([1, 2]))
-            .and(Expr::col(a("reason")).is_in([1, 2])))
+            .and(Expr::col(a("reason")).is_in([1, 2, 3])))
 }

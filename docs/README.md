@@ -16,6 +16,8 @@ API のフィールドや型は OpenAPI、[対局プロトコル](../proto/game.
 
 ## 設計
 
+- [対局時計と時間切れの永続確定](design/game-clock.md)
+
 - [Google による本人確認とアプリケーションのセッションを分ける](design/browser-authentication.md)
 - [対局イベントの配信と永続処理](design/event-processing.md)
 - [拡張時の設計と運用上の検証課題](design/unfinished-work.md)

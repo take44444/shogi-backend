@@ -21,7 +21,7 @@ async fn distinct_ids_create_games_without_accounts_and_bindings_are_immutable()
                 .await,
             Err(Error::AlreadyExists)
         );
-        assert_eq!(service.snapshot(&id()).await.unwrap(), before);
+        assert_same_snapshot(service.snapshot(&id()).await.unwrap(), &before);
         let accepted = service
             .make_move(&id(), movement("first", 0, "black", "7g7f"))
             .await
@@ -79,6 +79,9 @@ async fn identifiers_with_nul_and_backslashes_round_trip_without_collisions() {
         record.participants,
         Participants::new(black, white).unwrap()
     );
-    assert_eq!(record.journal[0].request.request_id, command.request_id);
+    assert_eq!(
+        record.journal[0].request().unwrap().request_id,
+        command.request_id
+    );
     assert_eq!(restored.snapshot(&literal).await.unwrap().seq, 0);
 }

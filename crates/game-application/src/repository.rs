@@ -97,25 +97,90 @@ impl From<Resign> for MutationRequest {
 /// One accepted command and its original response. Rejections have no receipt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
+    /// Locked database decision time.
+    pub evaluated_at: crate::Timestamp,
     /// The original request, compared as one value during replay.
     pub request: MutationRequest,
     /// The original response; its sequence is `expected_seq + 1`.
     pub acceptance: Acceptance,
 }
 
+/// One durable transition, with no fabricated command identity for system finishes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JournalEntry {
+    /// An accepted user command and retained response.
+    UserCommand(Receipt),
+    /// A timeout, independently of any triggering request.
+    Timeout {
+        /// Previous durable sequence.
+        expected_seq: u64,
+        /// Side whose deadline expired.
+        loser: shogi_domain::Player,
+        /// Original persisted deadline.
+        deadline_at: crate::Timestamp,
+        /// Database time when adjudication ran.
+        evaluated_at: crate::Timestamp,
+        /// Frozen result and final clock.
+        acceptance: Acceptance,
+    },
+}
+impl JournalEntry {
+    /// Final response-shaped transition state.
+    pub fn acceptance(&self) -> Acceptance {
+        match self {
+            Self::UserCommand(r) => r.acceptance,
+            Self::Timeout { acceptance, .. } => *acceptance,
+        }
+    }
+    /// Previous durable version.
+    pub fn expected_seq(&self) -> u64 {
+        match self {
+            Self::UserCommand(r) => r.request.expected_seq,
+            Self::Timeout { expected_seq, .. } => *expected_seq,
+        }
+    }
+    /// Original user request, absent for system transitions.
+    pub fn request(&self) -> Option<&MutationRequest> {
+        match self {
+            Self::UserCommand(r) => Some(&r.request),
+            Self::Timeout { .. } => None,
+        }
+    }
+    /// Frozen database decision time.
+    pub fn evaluated_at(&self) -> crate::Timestamp {
+        match self {
+            Self::UserCommand(r) => r.evaluated_at,
+            Self::Timeout { evaluated_at, .. } => *evaluated_at,
+        }
+    }
+}
+impl From<Receipt> for JournalEntry {
+    fn from(value: Receipt) -> Self {
+        Self::UserCommand(value)
+    }
+}
+
 /// A coherent durable game record to restore by replay from [`shogi_domain::Game::new`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GameRecord {
+    /// Frozen time control.
+    pub time_control: crate::TimeControl,
+    /// Initial Black clock, retained for replay.
+    pub initial_clock: crate::ClockState,
+    /// Current durable clock.
+    pub clock: crate::ClockState,
+    /// Database time associated with this read.
+    pub server_now_ms: crate::Timestamp,
     /// The requested game ID.
     pub id: GameId,
     /// The immutable, distinct participant bindings.
     pub participants: Participants,
-    /// The accepted command count, equal to the final journal sequence.
+    /// The state transition count, equal to the final journal sequence.
     pub version: u64,
     /// The final result, which must match journal replay.
     pub result: Option<GameResult>,
-    /// All accepted receipts in ascending, contiguous sequence order, starting at one.
-    pub journal: Vec<Receipt>,
+    /// All user and system transitions in contiguous sequence order, starting at one.
+    pub journal: Vec<JournalEntry>,
 }
 
 /// Asynchronous durable operations required by [`crate::GameService`].
@@ -125,14 +190,11 @@ pub struct GameRecord {
 /// have version zero, no result, and an empty journal. Durable versions are bounded
 /// by `i64::MAX`. Reads must not fabricate a successful empty record for an unknown ID.
 ///
-/// [`Self::load_game`] must return one coherent view. [`Self::commit_change`] must atomically
-/// compare the version, advance metadata, insert exactly one receipt, and enqueue
-/// the supplied [`StagedGameChange::events`] in their existing order. An `Ok`
-/// result confirms durability. An error can follow a commit; callers must reconcile
-/// by loading durable history before publishing a candidate or accepting another mutation.
-/// The application stages legal commands and validates replay rather than trusting
-/// stored position strings. Repository implementations still enforce storage constraints
-/// and membership independently of the actor cache.
+/// [`Self::load_game`] returns one coherent view. Mutations begin with
+/// [`Self::begin_game_update`]. The application validates replay under its row lock,
+/// samples database time, then commits one frozen transition and its events through
+/// [`LockedGameUpdate::commit`]. Terminal transitions take the admission lock first.
+/// An uncertain commit is reconciled from durable history before responding.
 ///
 /// A game repository accepts user IDs from its caller and does not manage accounts.
 ///
@@ -145,6 +207,16 @@ pub struct GameRecord {
 /// ```
 #[async_trait]
 pub trait GameRepository: Send + Sync {
+    /// Locks a game and reads its coherent history, then obtains database time.
+    /// Terminal updates must acquire the shared admission lock before the game lock.
+    async fn begin_game_update(
+        &self,
+        id: &GameId,
+        terminal: bool,
+    ) -> Result<Box<dyn LockedGameUpdate>, ApplicationError>;
+    /// Bounded expired candidate scan; no transaction locks escape this call.
+    async fn expired_games(&self, limit: u32) -> Result<Vec<GameId>, ApplicationError>;
+
     /// Loads visibility, participants and history from one coherent database view.
     /// Implementations should hide inaccessible and absent games equally.
     async fn load_game_for_viewer(
@@ -177,22 +249,19 @@ pub trait GameRepository: Send + Sync {
     /// [`ApplicationError::Corrupt`] for invalid durable encoding, or
     /// [`ApplicationError::Unavailable`] for a failed read.
     async fn version(&self, id: &GameId) -> Result<u64, ApplicationError>;
-    /// Atomically persists the supplied receipt, events, and resulting metadata.
-    ///
-    /// Compares the current version with [`MutationRequest::expected_seq`], verifies
-    /// participant membership, and preserves per-game request and sequence uniqueness.
-    /// The updated version, result, receipt, and all supplied events must commit
-    /// together or not at all. The application generates events before calling this
-    /// method. Implementors persist them without deriving or changing the batch.
-    /// This operation is not itself an exact-retry API; the application reconciles
-    /// failures through [`Self::load_game`]. It supplies a legally staged change.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError::NotFound`] for an unknown game,
-    /// [`ApplicationError::SequenceMismatch`] for a competing version,
-    /// [`ApplicationError::NonParticipant`] for an unbound user, or
-    /// [`ApplicationError::Unavailable`] for storage failures, including constraint
-    /// or uncertain commit failures. An error does not prove rollback.
-    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), ApplicationError>;
+}
+
+/// An adapter-owned transaction. Dropping without commit rolls back.
+#[async_trait]
+pub trait LockedGameUpdate: Send {
+    /// State protected by this game's row lock.
+    fn locked_record(&self) -> &GameRecord;
+    /// Database time obtained after acquiring the row lock.
+    async fn decision_time(&mut self) -> Result<crate::Timestamp, ApplicationError>;
+    /// Whether the admission lock was acquired before the game lock.
+    fn terminal_allowed(&self) -> bool;
+    /// Saves a decision and all terminal side effects in the same transaction.
+    async fn commit(self: Box<Self>, change: &StagedGameChange) -> Result<(), ApplicationError>;
+    /// Explicit rollback before acquiring locks in terminal order.
+    async fn rollback(self: Box<Self>) -> Result<(), ApplicationError>;
 }

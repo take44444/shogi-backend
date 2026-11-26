@@ -47,6 +47,19 @@ pub(super) async fn count(db: &DatabaseConnection, table: &str) -> i64 {
 pub(super) struct Uncertain(pub(super) Arc<SeaOrmStore>);
 #[async_trait]
 impl GameRepository for Uncertain {
+    async fn expired_games(&self, limit: u32) -> Result<Vec<GameId>, Error> {
+        self.0.expired_games(limit).await
+    }
+    async fn begin_game_update(
+        &self,
+        id: &GameId,
+        terminal: bool,
+    ) -> Result<Box<dyn game_application::LockedGameUpdate>, Error> {
+        Ok(Box::new(UncertainUpdate(
+            self.0.begin_game_update(id, terminal).await?,
+        )))
+    }
+
     async fn load_game_for_viewer(
         &self,
         id: &GameId,
@@ -68,8 +81,25 @@ impl GameRepository for Uncertain {
     async fn version(&self, id: &GameId) -> Result<u64, Error> {
         self.0.version(id).await
     }
-    async fn commit_change(&self, change: &StagedGameChange) -> Result<(), Error> {
-        self.0.commit_change(change).await?;
+}
+
+struct UncertainUpdate(Box<dyn game_application::LockedGameUpdate>);
+#[async_trait]
+impl game_application::LockedGameUpdate for UncertainUpdate {
+    fn locked_record(&self) -> &GameRecord {
+        self.0.locked_record()
+    }
+    async fn decision_time(&mut self) -> Result<game_application::Timestamp, Error> {
+        self.0.decision_time().await
+    }
+    fn terminal_allowed(&self) -> bool {
+        self.0.terminal_allowed()
+    }
+    async fn rollback(self: Box<Self>) -> Result<(), Error> {
+        self.0.rollback().await
+    }
+    async fn commit(self: Box<Self>, change: &StagedGameChange) -> Result<(), Error> {
+        self.0.commit(change).await?;
         Err(Error::Unavailable)
     }
 }

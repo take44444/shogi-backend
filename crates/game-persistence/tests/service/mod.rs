@@ -14,3 +14,11 @@ use support::{id, movement, participants, resignation, setup};
 mod concurrent_commands;
 mod creation;
 mod replay;
+
+fn assert_same_snapshot(
+    mut actual: game_application::Snapshot,
+    expected: &game_application::Snapshot,
+) {
+    actual.server_now_ms = expected.server_now_ms;
+    assert_eq!(&actual, expected);
+}

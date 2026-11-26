@@ -82,7 +82,7 @@ fn paths_queries_and_error_contract_are_derived_from_routes() {
     for (name, values) in [
         ("RuleDto", json!(["standard"])),
         ("PlayerDto", json!(["black", "white"])),
-        ("ReasonDto", json!(["checkmate", "resignation"])),
+        ("ReasonDto", json!(["checkmate", "resignation", "timeout"])),
     ] {
         assert_eq!(d["components"]["schemas"][name]["enum"], values);
     }
@@ -144,7 +144,11 @@ fn response_schemas_preserve_flattened_actions_required_null_and_unsigned_intege
         json!(["seq", "player"])
     );
     let variants = schemas["ActionDto"]["oneOf"].as_array().unwrap();
-    assert_eq!(variants.len(), 2);
+    assert_eq!(variants.len(), 3);
+    assert_eq!(
+        variants[2]["properties"]["action"]["enum"],
+        json!(["timeout"])
+    );
     assert_eq!(variants[0]["required"], json!(["usi", "action"]));
     assert_eq!(variants[0]["properties"]["action"]["enum"], json!(["move"]));
     assert_eq!(variants[1]["required"], json!(["action"]));

@@ -185,6 +185,7 @@ pub(crate) fn command_reply(id: &str, result: Result<proto::Acceptance, Status>)
             CommandOutcome::Reply(json!({
                 "type": "accepted", "request_id": id, "seq": acceptance.seq.to_string(),
                 "in_check": acceptance.in_check, "result": result,
+                "clock": match clock_value(acceptance.clock.as_ref()) { Ok(value)=>value, Err(())=>return CommandOutcome::Close },
             }))
         }
         Err(status) => {
@@ -227,6 +228,7 @@ fn reason(value: i32) -> Result<&'static str, ()> {
     match proto::FinishReason::try_from(value).map_err(|_| ())? {
         proto::FinishReason::Checkmate => Ok("checkmate"),
         proto::FinishReason::Resignation => Ok("resignation"),
+        proto::FinishReason::Timeout => Ok("timeout"),
         _ => Err(()),
     }
 }
@@ -236,6 +238,46 @@ fn result_value(value: Option<&proto::GameResult>) -> Result<Value, ()> {
         Some(value) => {
             Ok(json!({ "winner": player(value.winner)?, "reason": reason(value.reason)? }))
         }
+    }
+}
+
+pub(crate) fn domain_clock_json(clock: game_application::ClockState) -> Value {
+    clock_value(Some(&clock.into())).expect("application clocks have valid nonnegative fields")
+}
+fn clock_value(value: Option<&proto::ClockState>) -> Result<Value, ()> {
+    use proto::clock_state::State;
+    match value.and_then(|v| v.state.as_ref()).ok_or(())? {
+        State::Running(c)
+            if [
+                c.black_main_remaining_ms,
+                c.white_main_remaining_ms,
+                c.turn_started_at_ms,
+                c.deadline_at_ms,
+            ]
+            .iter()
+            .all(|n| *n >= 0)
+                && c.deadline_at_ms >= c.turn_started_at_ms =>
+        {
+            Ok(
+                json!({ "state":"running", "main_remaining_ms":[c.black_main_remaining_ms,c.white_main_remaining_ms], "turn_started_at_ms":c.turn_started_at_ms,"deadline_at_ms":c.deadline_at_ms }),
+            )
+        }
+        State::Stopped(c)
+            if [
+                c.black_main_remaining_ms,
+                c.white_main_remaining_ms,
+                c.black_byoyomi_remaining_ms,
+                c.white_byoyomi_remaining_ms,
+                c.stopped_at_ms,
+            ]
+            .iter()
+            .all(|n| *n >= 0) =>
+        {
+            Ok(
+                json!({ "state":"stopped", "main_remaining_ms":[c.black_main_remaining_ms,c.white_main_remaining_ms],"byoyomi_remaining_ms":[c.black_byoyomi_remaining_ms,c.white_byoyomi_remaining_ms],"stopped_at_ms":c.stopped_at_ms }),
+            )
+        }
+        _ => Err(()),
     }
 }
 
@@ -270,7 +312,10 @@ pub(crate) fn snapshot_json(snapshot: &proto::Snapshot) -> Result<Value, ()> {
         Some(value) => json!({ "winner": player(value.winner)?, "reason": reason(value.reason)? }),
     };
     Ok(json!({
-        "type": "snapshot", "game_id": snapshot.game_id, "seq": snapshot.seq.to_string(),
+        "type": "snapshot",
+        "clock": clock_value(snapshot.clock.as_ref())?,
+        "time_control": { "initial_main_ms":snapshot.time_control.as_ref().ok_or(())?.initial_main_ms, "byoyomi_ms":snapshot.time_control.as_ref().ok_or(())?.byoyomi_ms },
+        "server_now_ms":snapshot.server_now_ms, "game_id": snapshot.game_id, "seq": snapshot.seq.to_string(),
         "board": board, "hands": hands, "turn": player(snapshot.turn)?, "in_check": snapshot.in_check,
         "result": result, "legal_moves": snapshot.legal_moves,
         "black_user_id": snapshot.black_user_id, "white_user_id": snapshot.white_user_id,

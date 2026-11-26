@@ -4,9 +4,17 @@ use super::*;
 fn canonical_move_mate_and_resignation_events() {
     let movement = "7g7f".parse().unwrap();
     let event = |event| CommittedEvent {
+        clock: crate::ClockState::start(
+            crate::TimeControl::for_pool(crate::rating::Pool::TenMinute30),
+            crate::Timestamp::new(0).unwrap(),
+        )
+        .unwrap(),
+        evaluated_at: crate::Timestamp::new(0).unwrap(),
         game_id: game(),
-        request_id: RequestId::new("request").unwrap(),
-        user_id: UserId::new("black").unwrap(),
+        origin: crate::EventOrigin::User {
+            request_id: RequestId::new("request").unwrap(),
+            user_id: UserId::new("black").unwrap(),
+        },
         seq: 1,
         event,
     };
@@ -77,6 +85,6 @@ fn staging_checks_sequence_bounds_before_continuity() {
     receipt.acceptance.seq = limit;
     let change = StagedGameChange::new(game(), receipt.clone()).unwrap();
     assert_eq!(change.game_id(), &game());
-    assert_eq!(change.receipt(), &receipt);
+    assert_eq!(change.entry(), &crate::JournalEntry::UserCommand(receipt));
     assert_eq!(change.events()[0].seq, limit);
 }

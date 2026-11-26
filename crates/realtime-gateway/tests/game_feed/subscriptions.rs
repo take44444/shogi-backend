@@ -11,9 +11,19 @@ async fn bounded_valkey_subscription_overflow_is_terminal() {
     for seq in 1..=8 {
         publisher
             .publish(&CommittedEvent {
+                clock: game_application::ClockState::start(
+                    game_application::TimeControl::for_pool(
+                        game_application::rating::Pool::TenMinute30,
+                    ),
+                    game_application::Timestamp::new(0).unwrap(),
+                )
+                .unwrap(),
+                evaluated_at: game_application::Timestamp::new(0).unwrap(),
                 game_id: game.clone(),
-                request_id: RequestId::new(format!("overflow-{seq}")).unwrap(),
-                user_id: UserId::new("black").unwrap(),
+                origin: game_application::EventOrigin::User {
+                    request_id: RequestId::new(format!("overflow-{seq}")).unwrap(),
+                    user_id: UserId::new("black").unwrap(),
+                },
                 seq,
                 event: DomainEvent::MoveCommitted {
                     movement: "7g7f".parse().unwrap(),

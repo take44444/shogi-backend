@@ -111,6 +111,8 @@ pub struct Resign {
 /// The original outcome of an accepted command, retained for exact replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Acceptance {
+    /// Clock frozen at original acceptance.
+    pub clock: crate::ClockState,
     /// The sequence of this accepted command, in `1..=i64::MAX`. Replay retains it.
     pub seq: u64,
     /// Whether the side to move in the retained position is checked.
@@ -122,11 +124,17 @@ pub struct Acceptance {
 /// An owned view of a game after checking its durable version.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
+    /// Immutable game time control.
+    pub time_control: crate::TimeControl,
+    /// Durable clock state.
+    pub clock: crate::ClockState,
+    /// Database time from the same durable view.
+    pub server_now_ms: crate::Timestamp,
     /// The game whose state is represented.
     pub game_id: GameId,
     /// The permanent bindings used to derive each caller's side.
     pub participants: Participants,
-    /// The accepted command count. New games start at zero; the limit is `i64::MAX`.
+    /// The state transition count, including timeouts. New games start at zero.
     pub seq: u64,
     /// The retained board and hands, including after game completion.
     pub position: PositionView,

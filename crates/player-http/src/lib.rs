@@ -69,6 +69,7 @@ enum PlayerDto {
 enum ReasonDto {
     Checkmate,
     Resignation,
+    Timeout,
 }
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -111,6 +112,7 @@ impl SearchQuery {
         let reason = self.reason.map(|r| match r {
             ReasonDto::Checkmate => FinishReason::Checkmate,
             ReasonDto::Resignation => FinishReason::Resignation,
+            ReasonDto::Timeout => FinishReason::Timeout,
         });
         Search::new(
             Filters {
@@ -295,10 +297,10 @@ impl From<Metadata> for MetadataDto {
             rule: RuleDto::Standard,
             result: ResultDto {
                 winner: player(m.result().winner),
-                reason: if m.result().reason == FinishReason::Checkmate {
-                    ReasonDto::Checkmate
-                } else {
-                    ReasonDto::Resignation
+                reason: match m.result().reason {
+                    FinishReason::Checkmate => ReasonDto::Checkmate,
+                    FinishReason::Resignation => ReasonDto::Resignation,
+                    FinishReason::Timeout => ReasonDto::Timeout,
                 },
             },
             finished_at: m.finished_at().get(),
@@ -326,6 +328,7 @@ impl From<Page> for PageDto {
 enum ActionDto {
     Move { usi: String },
     Resign,
+    Timeout,
 }
 #[derive(Serialize, ToSchema)]
 struct OperationDto {
@@ -353,6 +356,7 @@ impl From<Detail> for DetailDto {
                     action: match o.action {
                         PublicAction::Move(m) => ActionDto::Move { usi: m.to_string() },
                         PublicAction::Resign => ActionDto::Resign,
+                        PublicAction::Timeout => ActionDto::Timeout,
                     },
                 })
                 .collect(),

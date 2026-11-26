@@ -173,7 +173,7 @@ pub(super) fn resign(
     }
 }
 pub(super) async fn create(client: &mut Client, game: &str) -> proto::Snapshot {
-    client
+    let mut value = client
         .seed_game(SeedGame {
             game_id: game.into(),
             black_user_id: "black".into(),
@@ -181,16 +181,20 @@ pub(super) async fn create(client: &mut Client, game: &str) -> proto::Snapshot {
         })
         .await
         .unwrap()
-        .into_inner()
+        .into_inner();
+    value.server_now_ms = 0;
+    value
 }
 pub(super) async fn snapshot(client: &mut Client, game: &str) -> proto::Snapshot {
-    client
+    let mut value = client
         .get_snapshot(proto::GetSnapshotRequest {
             game_id: game.into(),
         })
         .await
         .unwrap()
-        .into_inner()
+        .into_inner();
+    value.server_now_ms = 0;
+    value
 }
 pub(super) fn hand(
     snapshot: &proto::Snapshot,

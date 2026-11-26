@@ -8,31 +8,25 @@
 //! Each game service registry runs one actor per game with a 64-command mailbox.
 //! Clones share that registry. Registry locks do not span database or channel waits.
 //! Unknown games do not retain actors; closed actors reload durable state on demand.
-//! Before each snapshot or mutation, the actor checks the durable version and
-//! reloads changed or invalidated state. Failed reads return errors even when a
-//! cached position exists. Dropping the last service closes its senders; actors
-//! drain queued commands and exit.
+//! Snapshots restore one coherent durable record. Mutations restore the record under
+//! its database row lock, validate membership and exact retries, then sample database
+//! time. Expired clocks finish before new command validation. Terminal updates acquire
+//! the shared admission lock before the game lock, rolling back and retrying if needed.
+//! Dropping the last service closes senders; actors drain queued commands and exit.
 //!
 //! # Sequences and retries
 //!
-//! Games start at sequence zero. Each accepted move or resignation advances the
-//! sequence once, up to `i64::MAX`. Only accepted mutations reserve request IDs,
-//! scoped to a game. After checking participant membership, exact retries match
-//! action kind, user, expected sequence, and typed move. They return the original
-//! [`Acceptance`] before stale-sequence or finished-game checks, even after restart.
-//! Rejected request IDs remain reusable. Matchmaking preserves durable ticket identities.
+//! Each accepted command or system timeout advances the state transition sequence.
+//! The final `i64::MAX` slot is reserved for a terminal transition. Only accepted user
+//! commands reserve request IDs. Exact retries match the whole request and return the
+//! original acceptance and clock, even after restart or a subsequent timeout.
+//! A timeout never reserves the triggering user's request ID.
 //!
-//! A command stages a cloned game and receipt. The actor constructs a
-//! [`StagedGameChange`] to generate and freeze events before persistence. The repository
-//! atomically saves that supplied receipt and event batch. The actor publishes the candidate
-//! only after [`GameRepository::commit_change`] confirms a commit. Every failed commit
-//! triggers a durable reload. A matching receipt yields its original acceptance; changed
-//! contents yield [`ApplicationError::RequestConflict`]. If commit reported a version
-//! conflict and no matching receipt exists, the actor returns
-//! [`ApplicationError::SequenceMismatch`] with the reloaded version. Other commit
-//! failures without a receipt yield [`ApplicationError::Unavailable`] and invalidate
-//! local state. Failed
-//! reconciliation also leaves state invalid; a later successful refresh can recover.
+//! The application freezes a journal entry, clock and canonical events. The locked
+//! repository transaction saves them with result, participation and rating job changes.
+//! An uncertain commit is reconciled by restoring durable history before responding.
+//! No cross-command position cache is retained, so separate processes always decide
+//! against the same locked record. Failed reads fail closed.
 //!
 //! Cancellation after enqueue does not cancel the actor's transaction. A lost
 //! response or `Unavailable` can mean the command committed. Retry identical
@@ -40,6 +34,8 @@
 #![warn(missing_docs)]
 
 mod actor;
+mod clock;
+pub use clock::*;
 mod events;
 pub use events::*;
 pub mod matchmaking;
@@ -171,6 +167,26 @@ impl GameService {
         command: Resign,
     ) -> Result<Acceptance, ApplicationError> {
         self.mutate(id, command.into()).await
+    }
+
+    /// Adjudicates bounded expired games, including games with no loaded actor.
+    pub async fn poll_timeouts(&self, limit: u32) -> Result<usize, ApplicationError> {
+        let ids = self.repository.expired_games(limit).await?;
+        let mut finished = 0;
+        let mut failure = None;
+        for id in ids {
+            match actor::update_game(&self.repository, &id, None).await {
+                Ok(Some(_)) => finished += 1,
+                Ok(None) => {}
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
+        }
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(finished),
+        }
     }
 
     async fn sender(&self, id: &GameId) -> Result<mpsc::Sender<Command>, ApplicationError> {

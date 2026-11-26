@@ -97,3 +97,62 @@ async fn serialized_response_accepts_one_mib_and_rejects_the_next_byte() {
         serde_json::json!({"error":"history_too_long"})
     );
 }
+
+#[tokio::test]
+async fn timeout_search_and_public_history_keep_the_distinct_finish_reason() {
+    struct Timeouts;
+    fn metadata() -> Metadata {
+        Metadata::new(
+            GameId::new("timeout").unwrap(),
+            UserId::new("black").unwrap(),
+            UserId::new("white").unwrap(),
+            Rule::Standard,
+            game_record_application::GameResult {
+                winner: Player::White,
+                reason: FinishReason::Timeout,
+            },
+            game_record_application::PreparedFinishTime::try_from(10_i64).unwrap(),
+            game_record_application::OperationSequence::try_from(1_u64).unwrap(),
+            game_record_application::MovePly::try_from(0_u64).unwrap(),
+        )
+        .unwrap()
+    }
+    #[async_trait::async_trait]
+    impl game_record_application::RecordRepository for Timeouts {
+        async fn search(&self, search: &Search) -> Result<Page, Error> {
+            assert_eq!(search.filters().reason, Some(FinishReason::Timeout));
+            Ok(Page {
+                items: vec![metadata()],
+                next_cursor: None,
+            })
+        }
+        async fn detail(&self, _: &GameId) -> Result<Detail, Error> {
+            Ok(Detail {
+                metadata: metadata(),
+                history: vec![game_record_application::PublicOperation {
+                    seq: game_record_application::OperationSequence::try_from(1_u64).unwrap(),
+                    player: Player::Black,
+                    action: PublicAction::Timeout,
+                }],
+            })
+        }
+    }
+    let app = router(GameRecords::new(Arc::new(Timeouts)), unused_ratings());
+    let response = request(app.clone(), "/game-records?from=0&to=100&reason=timeout").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["items"][0]["result"]["reason"], "timeout");
+    let body = request(app, "/game-records/timeout")
+        .await
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json["history"][0],
+        serde_json::json!({"seq":1,"player":"black","action":"timeout"})
+    );
+}
