@@ -4,7 +4,7 @@ Read the feature recipe before driving. This map is the maintained source of use
 
 ## Baseline
 
-Run `./scripts/verify-app.py FEATURE` from the repository root. Every invocation builds current sources, owns a dedicated Compose project and fresh data, runs doctor, drives the journey and cleans up. Native journeys launch game-server and player-server; `gateway` launches the public edge, gateway, example-only account service, game-server and real notification services. Evidence is printed under `target/verification/shogi-verify-<id>/`. No Google credentials or existing database are used. Install the browser dependency once as described in the skill before running `gateway`.
+Run `./scripts/verify-app.py FEATURE` from the repository root using an exclusive clean committed checkout. Follow the [checkout requirements](../SKILL.md#launch) throughout the run. Every invocation builds that revision, owns a dedicated Compose project and fresh data, runs doctor, drives the journey and cleans up. Native journeys launch game-server and player-server; `gateway` launches the public edge, gateway, example-only account service, game-server and real notification services. Evidence is printed under `target/verification/shogi-verify-<id>/`. No Google credentials or existing database are used. Install the browser dependency once as described in the skill before running `gateway`.
 
 ## Proof reporting
 

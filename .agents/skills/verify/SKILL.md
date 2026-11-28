@@ -9,7 +9,9 @@ Read [features/README.md](features/README.md), then the feature being checked. R
 
 ## Launch
 
-Prerequisites: Linux with `/proc`, Python 3.9+, the Rust toolchain pinned by `rust-toolchain.toml`, Cargo, Docker daemon, and Docker Compose v2. Registry access is needed when dependencies or `postgres:18` are uncached. No Google credentials are needed for the four automated journeys.
+Prerequisites: Linux with `/proc`, Python 3.9+, the Rust toolchain pinned by `rust-toolchain.toml`, Cargo, Docker daemon, and Docker Compose v2. Registry access is needed when dependencies or `postgres:18` are uncached. No Google credentials are needed for the automated journeys.
+
+Use a clean committed checkout exclusively for the run. Before any build or launch, the helper requires `git status --porcelain=v1 --untracked-files=all` to be empty. Commit or move staged, unstaged, and untracked changes yourself before rerunning. Ignored outputs such as `target/` are allowed. Keep the checkout unchanged until the command exits, including during cleanup. After cleanup, the helper requires the original HEAD and an empty status before finalizing success. A changed checkout fails the run and preserves its evidence. These checks cannot detect an edit reverted before the final check, so other agents and processes must also leave the checkout unchanged.
 
 ```sh
 ./scripts/verify-app.py play
@@ -25,7 +27,7 @@ The helper prints `Evidence: /.../target/verification/shogi-verify-<id>` before 
 
 Usable means application-role TCP login succeeds after init SQL, game-server owns its listener after schema initialization, player-server owns its listener, and a public record query succeeds with reader grants. A `pg_isready` success alone is insufficient. Expect `game-server listening on 127.0.0.1:<port>` and `player-server listening on 127.0.0.1:<port>` in retained logs. The helper automatically tears down after the journey, including failures and normal SIGINT/SIGTERM.
 
-Concurrent instances have separate DBs, ports, and identities. Cargo builds share `target` and may wait for its lock. If an ephemeral port is claimed before bind, the run fails and cleans up; rerun with a new instance. Use no pre-existing app or database for automated journeys.
+Concurrent instances have separate DBs, ports, and identities. Give each run its own clean checkout. If an ephemeral port is claimed before bind, the run fails and cleans up; rerun with a new instance. Use no pre-existing app or database for automated journeys.
 
 For the browser gateway journey, install the existing repository browser dependency and Chromium once:
 
@@ -45,7 +47,7 @@ The helper runs this read-only check before every drive and after each game-serv
 ./scripts/verify-app.py doctor target/verification/shogi-verify-<id>
 ```
 
-Replace the directory with the exact path printed by the active run. It checks the checkout, process executable and PID start token, ownership of the bound TCP ports, public OpenAPI identity, and a public database read. It prints the revision and endpoints. Run it first whenever a live instance looks wrong. After automatic cleanup it must fail because the processes are gone; inspect the saved `doctor.json` then. The helper builds current sources before launch; `worktree.json` captures tracked changes alongside the revision. Untracked source changes need separate evidence.
+Replace the directory with the exact path printed by the active run. It checks the recorded checkout path, process executable and PID start token, ownership of the bound TCP ports, public OpenAPI identity, and a public database read. It prints the recorded revision and endpoints. Run it first whenever a live instance looks wrong. Doctor remains read-only and works even if the checkout is dirty. After automatic cleanup it must fail because the processes are gone; inspect the saved `doctor.json` then.
 
 For `gateway`, doctor checks the recorded Compose project's running services, ownership of the published edge port, the account OpenAPI, and anonymous account/gateway denial. It uses the recorded origin, not shell-supplied Google settings. It also fails after cleanup.
 
@@ -63,9 +65,9 @@ Each invocation launches and cleans up its own stack. The gRPC clients are the r
 
 ## Evidence
 
-The printed `target/verification/shogi-verify-<id>/` contains command arguments, combined stdout/stderr and exit codes, service and database logs, `instance.json`, `doctor.json`, revision/diff, and `result.json`. HTTP proofs record method, complete URL, status, headers, and body. Persistence adds protobuf snapshots and original receipts under `persistence/`.
+The printed `target/verification/shogi-verify-<id>/` contains command arguments, combined stdout/stderr and exit codes, service and database logs, `instance.json` with the starting revision, `doctor.json`, and `result.json`. HTTP proofs record method, complete URL, status, headers, and body. Persistence adds protobuf snapshots and original receipts under `persistence/`.
 
-The gateway branch records sanitized HTTP requests/responses and WebSocket actions/messages in `browser-actions.json`, login-choice screenshots and actual `/me` response screenshots. It records no cookie values, HAR, browser traces or callback query strings. These API-page screenshots supplement the action transcript; the transcript proves the game state. Prefer a clean committed tree for attributable proof; a HEAD hash with untracked file names alone does not identify the code that ran.
+The gateway branch records sanitized HTTP requests/responses and WebSocket actions/messages in `browser-actions.json`, login-choice screenshots and actual `/me` response screenshots. It records no cookie values, HAR, browser traces or callback query strings. These API-page screenshots supplement the action transcript; the transcript proves the game state.
 
 Require a zero helper exit, `result.json` with `status: passed` and empty `cleanup_errors`, and the feature's expected observations. Verify the action and resulting state together: gRPC clients send actual matchmaking, moves and resignation, then read snapshots; HTTP detail/search cross-check persisted records; rating reads verify the worker's committed effects. Persistence compares snapshots and receipts across two real process restarts. A listening port or a build alone is not a proof. Use real APIs rather than setters or DB inserts. Mocks belong only at existing production boundaries; the supplied automated journeys use no mocks and no dry-run mode.
 
