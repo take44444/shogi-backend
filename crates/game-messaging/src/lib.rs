@@ -257,6 +257,9 @@ impl ValkeySubscription {
             .set_connection_timeout(Some(Duration::from_secs(5)))
             .set_response_timeout(Some(Duration::from_secs(5)))
             .set_push_sender(move |info: PushInfo| {
+                if info.kind == PushKind::Subscribe {
+                    return Ok(());
+                }
                 if sender.try_send(info).is_err() {
                     overflow_sender.send_replace(true);
                     return Err(redis::aio::SendError);
@@ -289,35 +292,29 @@ impl ValkeySubscription {
 
     /// Reads the next notification. A transport or decode failure is terminal.
     pub async fn next(&mut self) -> Result<Notification, PublishError> {
-        loop {
-            if *self.overflow.borrow() {
-                return Err(PublishError("Valkey subscription overflow".into()));
-            }
-            let info = tokio::select! {
-                biased;
-                _ = self.overflow.changed() => return Err(PublishError("Valkey subscription overflow".into())),
-                info = self.pushed.recv() => info.ok_or_else(|| PublishError("Valkey subscription closed".into()))?,
-            };
-            match info.kind {
-                PushKind::Message => {
-                    let [Value::BulkString(channel), Value::BulkString(payload)] =
-                        info.data.as_slice()
-                    else {
-                        return Err(PublishError("Invalid Valkey push message".into()));
-                    };
-                    if channel != self.channel.as_bytes() {
-                        return Err(PublishError("Wrong game channel".into()));
-                    }
-                    return decode_notification(payload, &self.game)
-                        .map_err(|_| PublishError("Invalid game notification".into()));
+        if *self.overflow.borrow() {
+            return Err(PublishError("Valkey subscription overflow".into()));
+        }
+        let info = tokio::select! {
+            biased;
+            _ = self.overflow.changed() => return Err(PublishError("Valkey subscription overflow".into())),
+            info = self.pushed.recv() => info.ok_or_else(|| PublishError("Valkey subscription closed".into()))?,
+        };
+        match info.kind {
+            PushKind::Message => {
+                let [Value::BulkString(channel), Value::BulkString(payload)] = info.data.as_slice()
+                else {
+                    return Err(PublishError("Invalid Valkey push message".into()));
+                };
+                if channel != self.channel.as_bytes() {
+                    return Err(PublishError("Wrong game channel".into()));
                 }
-                PushKind::Subscribe => {}
-                _ => {
-                    return Err(PublishError(
-                        "Valkey subscription changed or disconnected".into(),
-                    ));
-                }
+                decode_notification(payload, &self.game)
+                    .map_err(|_| PublishError("Invalid game notification".into()))
             }
+            _ => Err(PublishError(
+                "Valkey subscription changed or disconnected".into(),
+            )),
         }
     }
 }
