@@ -21,6 +21,19 @@ def require(ok, message):
         raise RuntimeError(message)
 
 
+def checkout_revision(expected=None):
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT, text=True)
+    require(expected is None or revision == expected,
+            f"HEAD changed during verification: expected {expected}, got {revision}. "
+            "Use an exclusive checkout and rerun without changing commits.")
+    require(not status,
+            "Verification requires a clean checkout. Commit or move staged, unstaged, and untracked "
+            "changes before rerunning, and keep the checkout unchanged during verification:\n" + status)
+    return revision
+
+
 def save(directory, name, value):
     (directory / name).write_text(json.dumps(value, indent=2) + "\n")
 
@@ -118,6 +131,7 @@ def doctor(directory):
 
 
 def run(feature):
+    revision = checkout_revision()
     run_id = "shogi-verify-" + uuid.uuid4().hex[:12]
     directory = ROOT / "target/verification" / run_id
     directory.mkdir(parents=True)
@@ -127,8 +141,8 @@ def run(feature):
     compose = ["docker", "compose", "--env-file", "/dev/null", "-f", str(ROOT / "compose.yaml"), "-p", run_id]
     processes = []
     state = {"root": str(ROOT), "project": run_id, "feature": feature,
-             "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-             "processes": {}}
+             "revision": revision, "processes": {}}
+    save(directory, "instance.json", state)
     result = {"feature": feature, "status": "failed"}
 
     def start(name, process_env, port=None):
@@ -176,7 +190,6 @@ def run(feature):
                          "PLAYER_BIND_ADDR": f"127.0.0.1:{player_port}"}
         game = start("game-server", app_env, game_port)
         start("player-server", app_env, player_port)
-        save(directory, "worktree.json", {"diff": subprocess.check_output(["git", "diff", "HEAD"], cwd=ROOT, text=True)})
         save(directory, "doctor.json", doctor(directory))
         grpc, base = state["grpc"], state["http"]
         if feature == "play":
@@ -247,7 +260,15 @@ def run(feature):
                 cleanup_errors.append(str(error))
         if cleanup_errors:
             result["status"] = "failed"
+        checkout_error = None
+        try:
+            checkout_revision(revision)
+        except Exception as error:
+            checkout_error = str(error)
+            result["status"] = "failed"
+            result["error"] = "; ".join(filter(None, [result.get("error"), checkout_error]))
         save(directory, "result.json", result | {"cleanup_errors": cleanup_errors})
+        require(checkout_error is None, checkout_error)
         require(not cleanup_errors, "cleanup failed: " + "; ".join(cleanup_errors))
         require((directory / "result.json").is_file(), "evidence did not survive cleanup")
         print(json.dumps(result), flush=True)
@@ -268,6 +289,7 @@ def gateway_compose(project):
 
 
 def gateway():
+    revision = checkout_revision()
     run_id = "shogi-verify-" + uuid.uuid4().hex[:12]
     directory = ROOT / "target/verification" / run_id
     directory.mkdir(parents=True)
@@ -276,11 +298,9 @@ def gateway():
     env = gateway_environment(origin)
     compose = gateway_compose(run_id)
     state = {"root": str(ROOT), "project": run_id, "feature": "gateway", "http": origin,
-             "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+             "revision": revision,
              "compose_files": ["compose.yaml", "compose.verification.yaml"]}
     save(directory, "instance.json", state)
-    save(directory, "worktree.json", {"diff": subprocess.check_output(["git", "diff", "HEAD"], cwd=ROOT, text=True),
-                                     "untracked": subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True).splitlines()})
     result = {"feature": "gateway", "status": "failed"}
     cleanup_errors = []
     try:
@@ -324,8 +344,16 @@ def gateway():
                 cleanup_errors.append(str(error))
         if cleanup_errors:
             result["status"] = "failed"
+        checkout_error = None
+        try:
+            checkout_revision(revision)
+        except Exception as error:
+            checkout_error = str(error)
+            result["status"] = "failed"
+            result["error"] = "; ".join(filter(None, [result.get("error"), checkout_error]))
         save(directory, "result.json", result | {"cleanup_errors": cleanup_errors})
         print(json.dumps(result | {"cleanup_errors": cleanup_errors}), flush=True)
+        require(checkout_error is None, checkout_error)
         require(not cleanup_errors, "cleanup failed: " + "; ".join(cleanup_errors))
 
 
