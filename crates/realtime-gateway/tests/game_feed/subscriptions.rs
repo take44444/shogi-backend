@@ -37,3 +37,35 @@ async fn bounded_valkey_subscription_overflow_is_terminal() {
     assert!(timeout(WAIT, subscription.next()).await.unwrap().is_err());
     assert!(timeout(WAIT, subscription.next()).await.unwrap().is_err());
 }
+
+#[traceability::targets(game_messaging::ValkeySubscription::subscribe)]
+#[tokio::test]
+async fn one_notification_fits_capacity_one_before_the_first_read() {
+    let mut services = Services::start().await;
+    let game = GameId::new(services.game.clone()).unwrap();
+    let mut subscription = ValkeySubscription::subscribe(&services.valkey_url, &game, 1)
+        .await
+        .unwrap();
+    services
+        .client
+        .make_move(proto::MakeMoveRequest {
+            game_id: services.game.clone(),
+            request_id: "single-buffer-slot".into(),
+            expected_seq: Some(0),
+            usi: "7g7f".into(),
+            user_id: services.black.id.clone(),
+        })
+        .await
+        .unwrap();
+    services.publish().await;
+    assert_eq!(
+        timeout(WAIT, subscription.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .0
+            .seq,
+        1
+    );
+    services.stop().await;
+}

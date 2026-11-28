@@ -33,8 +33,7 @@ fn same_sequence_checkmate_pair_and_conflicts() {
         },
     );
     let finish = event(1, DomainEvent::GameFinished { result });
-    let mut state = ConnectionState::Bootstrapping;
-    state.bootstrapped(0, false);
+    let mut state = Cursor::new(0, false);
     assert!(matches!(state.accept(&move_event), Decision::Deliver));
     assert!(matches!(state.accept(&move_event), Decision::Ignore));
     assert!(matches!(state.accept(&finish), Decision::Deliver));
@@ -52,8 +51,7 @@ fn same_sequence_checkmate_pair_and_conflicts() {
 
 #[test]
 fn gaps_and_unpaired_checkmate_finish_require_resync() {
-    let mut state = ConnectionState::Bootstrapping;
-    state.bootstrapped(3, false);
+    let mut state = Cursor::new(3, false);
     let result = GameResult {
         winner: Player::Black,
         reason: FinishReason::Checkmate,
@@ -91,8 +89,7 @@ fn standalone_system_timeout_delivers_once_and_preserves_final_clock() {
         },
     );
     notification.0.origin = game_application::EventOrigin::System;
-    let mut state = ConnectionState::Bootstrapping;
-    state.bootstrapped(3, false);
+    let mut state = Cursor::new(3, false);
     assert!(matches!(state.accept(&notification), Decision::Deliver));
     assert!(matches!(state.accept(&notification), Decision::Ignore));
     let value = event_json(&notification);

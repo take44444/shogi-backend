@@ -1,8 +1,5 @@
 pub(super) use futures_util::{SinkExt, StreamExt};
-pub(super) use game_application::{
-    CommittedEvent, DomainEvent, GameId, GameService, NotificationPublisher, OutboxPublisher,
-    RequestId, UserId,
-};
+pub(super) use game_application::{GameId, GameService, OutboxPublisher, UserId};
 pub(super) use game_grpc::{
     GameRpc,
     proto::{
@@ -11,7 +8,7 @@ pub(super) use game_grpc::{
         game_service_server::{GameService as GameRpcService, GameServiceServer},
     },
 };
-pub(super) use game_messaging::{ValkeyEventPublisher, ValkeySubscription, game_channel};
+pub(super) use game_messaging::ValkeyEventPublisher;
 pub(super) use game_persistence::{PostgresOutbox, SeaOrmStore};
 pub(super) use pg_test_support::TestDatabase;
 pub(super) use realtime_gateway::{Gateway, GatewayConfig, Limits};
@@ -75,9 +72,15 @@ pub(super) struct SnapshotHold {
     pub(super) release: oneshot::Receiver<()>,
 }
 
+pub(super) struct CommandHold {
+    pub(super) captured: oneshot::Sender<()>,
+    pub(super) release: oneshot::Receiver<()>,
+}
+
 pub(super) struct HeldSnapshotRpc {
     pub(super) inner: GameRpc,
     pub(super) hold: Mutex<Option<SnapshotHold>>,
+    pub(super) command_hold: Mutex<Option<CommandHold>>,
 }
 
 #[tonic::async_trait]
@@ -143,6 +146,11 @@ impl GameRpcService for HeldSnapshotRpc {
         &self,
         request: tonic::Request<proto::MakeMoveRequest>,
     ) -> Result<tonic::Response<proto::Acceptance>, tonic::Status> {
+        let hold = self.command_hold.lock().unwrap().take();
+        if let Some(hold) = hold {
+            let _ = hold.captured.send(());
+            let _ = hold.release.await;
+        }
         self.inner.make_move(request).await
     }
 
@@ -182,6 +190,14 @@ impl Services {
     }
 
     pub(super) async fn with_snapshot_hold(limits: Limits, hold: Option<SnapshotHold>) -> Self {
+        Self::with_holds(limits, hold, None).await
+    }
+
+    pub(super) async fn with_holds(
+        limits: Limits,
+        hold: Option<SnapshotHold>,
+        command_hold: Option<CommandHold>,
+    ) -> Self {
         let valkey_url =
             std::env::var("TEST_VALKEY_URL").expect("set TEST_VALKEY_URL to a real Valkey server");
         let user_database = TestDatabase::new().await;
@@ -211,6 +227,7 @@ impl Services {
         let service = GameServiceServer::new(HeldSnapshotRpc {
             inner: GameRpc::new(GameService::new(games.clone()), games.clone()),
             hold: Mutex::new(hold),
+            command_hold: Mutex::new(command_hold),
         });
         let game_task = tokio::spawn(async move {
             Server::builder()
