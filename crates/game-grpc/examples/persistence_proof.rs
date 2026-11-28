@@ -43,6 +43,11 @@ fn save(path: &Path, value: &impl Message) -> Result<()> {
 fn load<T: Message + Default>(path: &Path) -> Result<T> {
     Ok(T::decode(fs::read(path)?.as_slice())?)
 }
+fn assert_restored_snapshot(actual: proto::Snapshot, mut expected: proto::Snapshot) {
+    assert!(actual.server_now_ms >= expected.server_now_ms);
+    expected.server_now_ms = actual.server_now_ms;
+    assert_eq!(actual, expected);
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -88,7 +93,7 @@ async fn main() -> Result<()> {
             let identity: proto::Snapshot = load(&dir.join("identity.bin"))?;
             let game = &identity.game_id;
             let expected: proto::Snapshot = load(&dir.join("ongoing.bin"))?;
-            assert_eq!(snapshot(&mut client, game).await?, expected);
+            assert_restored_snapshot(snapshot(&mut client, game).await?, expected);
             let first: proto::Acceptance = load(&dir.join("first.bin"))?;
             assert_eq!(
                 client
@@ -134,7 +139,7 @@ async fn main() -> Result<()> {
             let identity: proto::Snapshot = load(&dir.join("identity.bin"))?;
             let game = &identity.game_id;
             let expected: proto::Snapshot = load(&dir.join("finished.bin"))?;
-            assert_eq!(snapshot(&mut client, game).await?, expected);
+            assert_restored_snapshot(snapshot(&mut client, game).await?, expected.clone());
             let first: proto::Acceptance = load(&dir.join("first.bin"))?;
             let finish: proto::Acceptance = load(&dir.join("resign.bin"))?;
             assert_eq!(
@@ -151,7 +156,7 @@ async fn main() -> Result<()> {
                     .into_inner(),
                 finish
             );
-            assert_eq!(snapshot(&mut client, game).await?, expected);
+            assert_restored_snapshot(snapshot(&mut client, game).await?, expected);
             println!(
                 "finished restart verified exact snapshot and both original receipts at sequence 6"
             );

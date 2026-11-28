@@ -30,6 +30,28 @@ Google のリダイレクト URI も合わせて変更すること。
 この手順では `realtime` プロファイルだけを使う。
 `auth` プロファイルは、ユーザーサービスに別のオリジンを設定する。
 
+## Google アカウントなしで公開経路を検証する
+
+検証用の認証プロバイダーを使い、公開入口からログイン、マッチング、着手、相手への通知、再接続、投了、ログアウトを自動検証する。
+Node.js、npm、Chromium の実行に必要なシステムライブラリーと、`!override` に対応した Docker Compose を用意する。
+ブラウザーの依存関係は最初に一度インストールする。
+
+```sh
+npm ci --prefix tools/traceability-viewer-tests
+./tools/traceability-viewer-tests/node_modules/.bin/playwright install chromium
+./scripts/verify-app.py gateway
+```
+
+実行ごとに専用の Compose プロジェクトと空のデータベースを作り、ループバックの公開入口を使う。
+検証専用の `verification-user-server` example が Alice と Bob のログインを受け付け、通常のアカウント処理がセッション Cookie を発行する。
+専用イメージと [Compose 上書き設定](../../compose.verification.yaml)で認証サービスだけを置き換える。
+通常の `user-server` とその配布イメージには検証用プロバイダーを含めない。
+Google の認証情報は不要となり、実際の Google 連携はこのコマンドの検証対象に含まれない。
+
+結果と操作記録は、コマンドが表示する `target/verification/shogi-verify-<id>/` に残る。
+成功・失敗のどちらでも専用のコンテナーとデータを削除し、証跡を保持する。
+確認項目と個別の認証拒否テストは[検証マップ](../../.agents/skills/verify/features/browser-realtime.md)を参照すること。
+
 ## ローカルのバイナリーを起動する
 
 次の順で依存サービス、ゲートウェイ、プロキシを起動する。
