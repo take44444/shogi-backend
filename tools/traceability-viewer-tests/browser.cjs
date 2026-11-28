@@ -59,6 +59,25 @@ async function scenario(name, run) {
     assert.equal(await page.locator('#graph').getByRole('button', {name:/^app → app:/}).count(), 0);
     await page.close();
   });
+  await scenario('closing source preserves focus moved before the queued close event', async () => {
+    const page = await open('graph');
+    await page.locator('#source-search').evaluate(e => { e.open = true; });
+    await page.locator('#search').fill('captured line 12');
+    await page.locator('#source-results button').first().click();
+    const focus = await page.evaluate(async () => {
+      const panel = document.getElementById('source-panel');
+      const closed = new Promise(resolve => panel.addEventListener('close', resolve, {once: true}));
+      panel.close();
+      document.getElementById('search').focus();
+      await closed;
+      return document.activeElement.id;
+    });
+    assert.equal(focus, 'search');
+    await page.locator('#search').fill('');
+    await selectComponent(page, 'app');
+    await selectBoundary(page, 'app', 'domain');
+    await page.close();
+  });
   await scenario('no-target filter and query reconcile selection, including zero matches', async () => {
     const page = await open('graph');
     await selectComponent(page, 'app');
