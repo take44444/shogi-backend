@@ -24,7 +24,7 @@ Preconditions:
 
 - Linux, Docker Compose with `!override` support, Node.js/npm and Chromium's system dependencies.
 - Run `npm ci --prefix tools/traceability-viewer-tests` and `./tools/traceability-viewer-tests/node_modules/.bin/playwright install chromium` once before the journey. Install dependencies before concurrent runs.
-- Use a clean committed tree for proof tied to a revision. No Google credentials or existing accounts are required for the verification-provider path.
+- Follow the [checkout requirements](../SKILL.md#launch) for proof tied to a revision. No Google credentials or existing accounts are required for the verification-provider path.
 
 - **Launch/doctor:** run `./scripts/verify-app.py gateway`. It builds current images, launches a fresh project with a loopback public origin, initializes the account/game databases and waits for the public account API and gateway session denial. `./scripts/verify-app.py doctor DIRECTORY` diagnoses an active run using its recorded project and origin.
 - **Login:** the driver opens two isolated browser contexts and requires anonymous `/me` and `/matchmaking/me` to return 401. Each context follows the normal start route, selects Alice or Bob in the actual verification page, and reaches `/me`. Require distinct application account IDs and the normal HttpOnly, SameSite=Lax session cookies. Cookie values are excluded from evidence.
