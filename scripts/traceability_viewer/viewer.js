@@ -79,7 +79,6 @@
   const pageLimits = new Map();
   let sourceSearchCache = {query: null, componentId: null, matches: []};
   let focusTargets = new Map();
-  let sourceReturnFocus = null;
   const node = (tag, value, className) => {
     const element = document.createElement(tag);
     if (value !== undefined) element.textContent = value;
@@ -103,7 +102,6 @@
   function showSource(location) {
     const file = snapshot.files[location.path];
     const panel = byId('source-panel');
-    sourceReturnFocus = document.activeElement;
     byId('source-title').textContent = `${location.path}:${location.line}`;
     byId('source-status').textContent = file ? file.status : 'This source file is unavailable in the snapshot.';
     byId('github').hidden = !file || !file.github_url;
@@ -393,7 +391,6 @@
   byId('component').addEventListener('change', event => { pageLimits.clear(); chooseComponent(event.target.value); });
   byId('test-kind').addEventListener('change', event => { state.testKind = event.target.value; pageLimits.delete('catalog-tests'); renderCatalog(); });
   byId('close-source').addEventListener('click', () => byId('source-panel').close());
-  byId('source-panel').addEventListener('close', () => { if (sourceReturnFocus?.isConnected) sourceReturnFocus.focus({preventScroll: true}); });
   const initial = [...boundaries.values()].find(boundary => boundary.apiIds.some(id => (testsByTarget.get(id) || []).length)) || boundaries.values().next().value;
   state.componentId = initial?.from || data.components[0]?.id || null;
   state.boundaryKey = initial?.key || null;
