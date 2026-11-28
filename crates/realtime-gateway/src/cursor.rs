@@ -3,13 +3,6 @@ use game_messaging::Notification;
 use serde_json::Value;
 
 #[derive(Clone)]
-pub(crate) enum ConnectionState {
-    Bootstrapping,
-    Live(Box<Cursor>),
-    Closing,
-}
-
-#[derive(Clone)]
 pub(crate) struct Cursor {
     boundary: u64,
     last_seq: u64,
@@ -24,27 +17,19 @@ pub(crate) enum Decision {
     Resync,
 }
 
-impl ConnectionState {
-    pub(crate) fn bootstrapped(&mut self, seq: u64, terminal: bool) {
-        *self = Self::Live(Box::new(Cursor {
+impl Cursor {
+    pub(crate) fn new(seq: u64, terminal: bool) -> Self {
+        Self {
             boundary: seq,
             last_seq: seq,
             move_event: None,
             finish_event: None,
             terminal,
-        }));
+        }
     }
 
     pub(crate) fn accept(&mut self, notification: &Notification) -> Decision {
-        let Self::Live(cursor) = self else {
-            return Decision::Resync;
-        };
-        cursor.accept(&notification.0)
-    }
-}
-
-impl Cursor {
-    fn accept(&mut self, event: &CommittedEvent) -> Decision {
+        let event = &notification.0;
         if event.seq <= self.boundary || event.seq < self.last_seq {
             return Decision::Ignore;
         }

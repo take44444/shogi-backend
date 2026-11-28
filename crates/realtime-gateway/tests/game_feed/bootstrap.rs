@@ -4,9 +4,14 @@ use super::*;
 async fn committed_move_during_initial_snapshot_arrives_after_the_frozen_snapshot() {
     let (captured, snapshot_ready) = oneshot::channel();
     let (release_snapshot, release) = oneshot::channel();
-    let mut services =
-        Services::with_snapshot_hold(Limits::default(), Some(SnapshotHold { captured, release }))
-            .await;
+    let mut services = Services::with_snapshot_hold(
+        Limits {
+            queue: 2,
+            ..Limits::default()
+        },
+        Some(SnapshotHold { captured, release }),
+    )
+    .await;
     let mut viewer = services.connect(&services.viewer).await;
     assert_eq!(timeout(WAIT, snapshot_ready).await.unwrap().unwrap(), 0);
     let mut broker = redis::Client::open(services.valkey_url.clone())
@@ -136,5 +141,59 @@ async fn lost_acceptance_replays_original_receipt_after_reconnect_without_a_seco
         !services.publisher.publish_next().await.unwrap(),
         "retry does not enqueue another event"
     );
+    services.stop().await;
+}
+
+#[tokio::test]
+async fn snapshot_hold_uses_one_bounded_notification_queue_and_overflow_requires_resync() {
+    let (captured, snapshot_ready) = oneshot::channel();
+    let (release_snapshot, release) = oneshot::channel();
+    let mut services = Services::with_snapshot_hold(
+        Limits {
+            queue: 2,
+            ..Limits::default()
+        },
+        Some(SnapshotHold { captured, release }),
+    )
+    .await;
+    let mut socket = services.connect(&services.viewer).await;
+    assert_eq!(timeout(WAIT, snapshot_ready).await.unwrap().unwrap(), 0);
+    let game = GameId::new(services.game.clone()).unwrap();
+    let mut observer = ValkeySubscription::subscribe(&services.valkey_url, &game, 8)
+        .await
+        .unwrap();
+    services
+        .client
+        .make_move(proto::MakeMoveRequest {
+            game_id: services.game.clone(),
+            request_id: "bootstrap-overflow".into(),
+            expected_seq: Some(0),
+            usi: "7g7f".into(),
+            user_id: services.black.id.clone(),
+        })
+        .await
+        .unwrap();
+    services.publish().await;
+    let event = observer.next().await.unwrap().0;
+    let mut publisher = ValkeyEventPublisher::connect(&services.valkey_url)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        publisher.publish(&event).await.unwrap();
+        assert_eq!(observer.next().await.unwrap().0, event);
+    }
+    assert!(
+        timeout(Duration::from_millis(50), socket.next())
+            .await
+            .is_err(),
+        "snapshot remains held while the subscription buffers three pushes"
+    );
+    release_snapshot.send(()).unwrap();
+    initial(&mut socket, &services.game, "0").await;
+    assert_eq!(
+        receive(&mut socket).await,
+        json!({"type":"resync_required","reason":"subscription_lost"})
+    );
+    closed(&mut socket).await;
     services.stop().await;
 }

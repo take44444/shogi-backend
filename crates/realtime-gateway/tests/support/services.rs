@@ -1,8 +1,5 @@
 pub(super) use futures_util::{SinkExt, StreamExt};
-pub(super) use game_application::{
-    CommittedEvent, DomainEvent, GameId, GameService, NotificationPublisher, OutboxPublisher,
-    RequestId, UserId,
-};
+pub(super) use game_application::{GameId, GameService, OutboxPublisher, UserId};
 pub(super) use game_grpc::{
     GameRpc,
     proto::{
@@ -11,7 +8,7 @@ pub(super) use game_grpc::{
         game_service_server::{GameService as GameRpcService, GameServiceServer},
     },
 };
-pub(super) use game_messaging::{ValkeyEventPublisher, ValkeySubscription, game_channel};
+pub(super) use game_messaging::ValkeyEventPublisher;
 pub(super) use game_persistence::{PostgresOutbox, SeaOrmStore};
 pub(super) use pg_test_support::TestDatabase;
 pub(super) use realtime_gateway::{Gateway, GatewayConfig, Limits};

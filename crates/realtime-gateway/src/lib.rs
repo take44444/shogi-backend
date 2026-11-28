@@ -15,11 +15,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use cursor::{ConnectionState, Decision, event_json};
+use cursor::{Cursor, Decision, event_json};
 use futures_util::{SinkExt, StreamExt};
 use game::{Command, CommandOutcome, Games, command_reply, parse_command, snapshot_json};
 use game_application::{GameId, UserId};
-use game_messaging::{Notification, ValkeySubscription};
+use game_messaging::ValkeySubscription;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -340,26 +340,26 @@ async fn upgrade(
 
 enum Outbound {
     Data(Value),
-    Resync(&'static str),
+    Resync(ResyncReason),
     Close,
     Pong(Vec<u8>),
 }
 async fn writer(
-    gateway: Arc<Gateway>,
-    game: GameId,
-    session: Session,
+    gateway: &Gateway,
+    game: &GameId,
+    session: &Session,
     mut sink: futures_util::stream::SplitSink<WebSocket, Message>,
     mut outgoing: mpsc::Receiver<Outbound>,
 ) {
     while let Some(item) = outgoing.recv().await {
-        if !gateway.recheck(&game, &session).await {
+        if !gateway.recheck(game, session).await {
             break;
         }
         let (message, stop) = match item {
             Outbound::Data(value) => (Message::Text(value.to_string().into()), false),
             Outbound::Resync(reason) => (
                 Message::Text(
-                    json!({"type":"resync_required","reason":reason})
+                    json!({"type":"resync_required","reason":reason.as_str()})
                         .to_string()
                         .into(),
                 ),
@@ -381,19 +381,6 @@ async fn writer(
     let _ = tokio::time::timeout(Duration::from_secs(1), sink.close()).await;
 }
 
-async fn pump(
-    mut subscription: ValkeySubscription,
-    notifications: mpsc::Sender<Result<Notification, ()>>,
-) {
-    loop {
-        let item = subscription.next().await.map_err(|_| ());
-        let failure = item.is_err();
-        if notifications.try_send(item).is_err() || failure {
-            break;
-        }
-    }
-}
-
 enum ReaderExit {
     Disconnected,
     Overflow,
@@ -403,7 +390,7 @@ async fn reader(
     commands: mpsc::Sender<(Command, OwnedSemaphorePermit)>,
     outgoing: mpsc::Sender<Outbound>,
     one_command: Arc<Semaphore>,
-    limits: Limits,
+    limits: &Limits,
 ) -> ReaderExit {
     let mut window = Instant::now();
     let mut count = 0;
@@ -470,16 +457,16 @@ async fn reader(
 }
 
 async fn command_worker(
-    gateway: Arc<Gateway>,
-    game: GameId,
-    session: Session,
+    gateway: &Gateway,
+    game: &GameId,
+    session: &Session,
     mut commands: mpsc::Receiver<(Command, OwnedSemaphorePermit)>,
     outgoing: mpsc::Sender<Outbound>,
-) -> bool {
+) -> WorkerExit {
     while let Some((command, _permit)) = commands.recv().await {
-        if !gateway.recheck(&game, &session).await {
+        if !gateway.recheck(game, session).await {
             let _ = outgoing.try_send(Outbound::Close);
-            return false;
+            return WorkerExit::Unauthorized;
         }
         let reply = command_reply(
             command.id(),
@@ -493,10 +480,58 @@ async fn command_worker(
             CommandOutcome::Close => Outbound::Close,
         };
         if outgoing.try_send(item).is_err() {
-            return true;
+            return WorkerExit::Overflow;
         }
     }
-    false
+    WorkerExit::CommandsClosed
+}
+
+enum WorkerExit {
+    CommandsClosed,
+    Unauthorized,
+    Overflow,
+}
+
+enum ConnectionEnd {
+    Shutdown,
+    ReaderFinished(ReaderExit),
+    WriterFinished,
+    WorkerFinished(WorkerExit),
+    Resync(ResyncReason),
+}
+
+impl ConnectionEnd {
+    fn resync_reason(self) -> Option<ResyncReason> {
+        match self {
+            Self::ReaderFinished(ReaderExit::Overflow) => Some(ResyncReason::InputOverflow),
+            Self::WorkerFinished(WorkerExit::Overflow) => Some(ResyncReason::CommandOverflow),
+            Self::Resync(reason) => Some(reason),
+            Self::Shutdown
+            | Self::ReaderFinished(ReaderExit::Disconnected)
+            | Self::WriterFinished
+            | Self::WorkerFinished(WorkerExit::CommandsClosed | WorkerExit::Unauthorized) => None,
+        }
+    }
+}
+
+enum ResyncReason {
+    InputOverflow,
+    CommandOverflow,
+    SubscriptionLost,
+    EventGap,
+    SlowClient,
+}
+
+impl ResyncReason {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::InputOverflow => "input_overflow",
+            Self::CommandOverflow => "command_overflow",
+            Self::SubscriptionLost => "subscription_lost",
+            Self::EventGap => "event_gap",
+            Self::SlowClient => "slow_client",
+        }
+    }
 }
 
 async fn run_connection(
@@ -511,116 +546,76 @@ async fn run_connection(
         return;
     }
     let (sink, stream) = socket.split();
-    let subscription = match tokio::select! {
+    let mut subscription = match tokio::select! {
         _ = shutdown.changed() => return,
         subscription = ValkeySubscription::subscribe(&gateway.valkey, &game, gateway.limits.queue) => subscription,
     } {
         Ok(subscription) => subscription,
         Err(_) => return,
     };
-    let (notify_tx, mut notify_rx) = mpsc::channel(gateway.limits.queue);
-    let pump = tokio::spawn(pump(subscription, notify_tx));
     let snapshot = tokio::select! {
-        _ = shutdown.changed() => { pump.abort(); return; },
+        _ = shutdown.changed() => return,
         snapshot = gateway.games.snapshot(game.as_str(), &session.user) => snapshot,
     };
     let Ok(snapshot) = snapshot else {
-        pump.abort();
         return;
     };
     if snapshot.game_id != game.as_str() {
-        pump.abort();
         return;
     }
     let Ok(value) = snapshot_json(&snapshot) else {
-        pump.abort();
         return;
     };
     if value.to_string().len() > gateway.limits.snapshot_bytes {
-        pump.abort();
         return;
     }
     let (out_tx, out_rx) = mpsc::channel(gateway.limits.queue);
-    let mut writer = tokio::spawn(writer(
-        gateway.clone(),
-        game.clone(),
-        session.clone(),
-        sink,
-        out_rx,
-    ));
+    let writer = writer(&gateway, &game, &session, sink, out_rx);
+    tokio::pin!(writer);
     if out_tx.try_send(Outbound::Data(value)).is_err() {
-        writer.abort();
-        pump.abort();
         return;
     }
-    let mut state = ConnectionState::Bootstrapping;
-    state.bootstrapped(snapshot.seq, snapshot.result.is_some());
-    let (cmd_tx, cmd_rx) = mpsc::channel(1);
-    let mut reader = tokio::spawn(reader(
-        stream,
-        cmd_tx,
-        out_tx.clone(),
-        Arc::new(Semaphore::new(1)),
-        gateway.limits.clone(),
-    ));
-    let mut worker = tokio::spawn(command_worker(
-        gateway.clone(),
-        game,
-        session,
-        cmd_rx,
-        out_tx.clone(),
-    ));
-    let mut resync = None;
-    let mut reader_done = false;
-    let mut writer_done = false;
-    let mut worker_done = false;
-    loop {
-        tokio::select! {
-            _ = shutdown.changed() => break,
-            result = &mut reader => { reader_done = true; if matches!(result, Ok(ReaderExit::Overflow)) { resync = Some("input_overflow"); } break; },
-            _ = &mut writer => { writer_done = true; break; },
-            result = &mut worker => { worker_done = true; if matches!(result, Ok(true)) { resync = Some("command_overflow"); } break; },
-            item = notify_rx.recv() => {
-                let Some(Ok(event)) = item else { resync = Some("subscription_lost"); break; };
-                match state.accept(&event) {
-                    Decision::Ignore => {},
-                    Decision::Resync => { resync = Some("event_gap"); break; },
-                    Decision::Deliver => {
-                        if out_tx.try_send(Outbound::Data(event_json(&event))).is_err() {
-                            resync = Some("slow_client"); break;
+    let mut cursor = Cursor::new(snapshot.seq, snapshot.result.is_some());
+    let end = {
+        let (cmd_tx, cmd_rx) = mpsc::channel(1);
+        let reader = reader(
+            stream,
+            cmd_tx,
+            out_tx.clone(),
+            Arc::new(Semaphore::new(1)),
+            &gateway.limits,
+        );
+        let worker = command_worker(&gateway, &game, &session, cmd_rx, out_tx.clone());
+        tokio::pin!(reader, worker);
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => break ConnectionEnd::Shutdown,
+                result = &mut reader => break ConnectionEnd::ReaderFinished(result),
+                _ = &mut writer => break ConnectionEnd::WriterFinished,
+                result = &mut worker => break ConnectionEnd::WorkerFinished(result),
+                item = subscription.next() => {
+                    let Ok(event) = item else {
+                        break ConnectionEnd::Resync(ResyncReason::SubscriptionLost);
+                    };
+                    match cursor.accept(&event) {
+                        Decision::Ignore => {},
+                        Decision::Resync => break ConnectionEnd::Resync(ResyncReason::EventGap),
+                        Decision::Deliver => {
+                            if out_tx.try_send(Outbound::Data(event_json(&event))).is_err() {
+                                break ConnectionEnd::Resync(ResyncReason::SlowClient);
+                            }
                         }
                     }
                 }
             }
         }
-    }
-    state = ConnectionState::Closing;
-    let _ = state;
-    if !reader_done {
-        reader.abort();
-        let _ = reader.await;
-    }
-    if !worker_done {
-        worker.abort();
-        let _ = worker.await;
-    }
-    pump.abort();
-    let _ = pump.await;
-    if let Some(reason) = resync
-        && !writer_done
+    };
+    drop(subscription);
+    if let Some(reason) = end.resync_reason()
         && out_tx.try_send(Outbound::Resync(reason)).is_ok()
     {
         drop(out_tx);
-        if tokio::time::timeout(Duration::from_secs(4), &mut writer)
-            .await
-            .is_err()
-        {
-            writer.abort();
-            let _ = writer.await;
-        }
-    } else if !writer_done {
-        writer.abort();
-        let _ = writer.await;
+        let _ = tokio::time::timeout(Duration::from_secs(4), &mut writer).await;
     }
 }
 
@@ -628,3 +623,14 @@ async fn run_connection(
 pub fn openapi() -> utoipa::openapi::OpenApi {
     matchmaking::openapi()
 }
+
+#[cfg(test)]
+extern crate self as realtime_gateway;
+
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/support/services.rs"]
+mod services_support;
+
+#[cfg(test)]
+mod tests;
