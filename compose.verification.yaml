@@ -1,0 +1,10 @@
+services:
+  realtime-user-server:
+    build:
+      context: .
+      dockerfile: deploy/verification.Dockerfile
+    entrypoint: ["verification-user-server"]
+    environment: !override
+      VERIFY_BIND_ADDR: 0.0.0.0:8080
+      VERIFY_PUBLIC_ORIGIN: ${REALTIME_PUBLIC_ORIGIN:?set a loopback HTTP public origin}
+      VERIFY_DATABASE_URL: postgres://shogi:shogi@postgres:5432/users

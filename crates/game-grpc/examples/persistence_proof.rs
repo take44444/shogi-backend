@@ -45,7 +45,6 @@ fn load<T: Message + Default>(path: &Path) -> Result<T> {
 }
 fn assert_restored_snapshot(actual: proto::Snapshot, mut expected: proto::Snapshot) {
     assert!(actual.server_now_ms >= expected.server_now_ms);
-    // Response time advances; the persisted clock and position must remain exact.
     expected.server_now_ms = actual.server_now_ms;
     assert_eq!(actual, expected);
 }

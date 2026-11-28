@@ -40,6 +40,21 @@ def main():
     edge_config = (ROOT / "deploy/realtime.Caddyfile").read_text()
     assert "/matchmaking/*" in edge_config and "/ws/games/*" in edge_config and "realtime-gateway:8082" in edge_config and "realtime-user-server:8080" in edge_config, "edge must route game WebSockets and auth on one origin"
 
+    verification = subprocess.run(
+        ["docker", "compose", "--env-file", "/dev/null", "-f", str(ROOT / "compose.yaml"),
+         "-f", str(ROOT / "compose.verification.yaml"), "--profile", "realtime", "config", "--format", "json"],
+        cwd=ROOT, env={**environment, "REALTIME_PUBLIC_ORIGIN": "http://127.0.0.1:58082",
+                       "GOOGLE_CLIENT_ID": "must-not-reach-verification", "GOOGLE_CLIENT_SECRET": "must-not-reach-verification"},
+        capture_output=True, text=True,
+    )
+    assert verification.returncode == 0, verification.stderr
+    verification_user = json.loads(verification.stdout)["services"]["realtime-user-server"]
+    assert verification_user["entrypoint"] == ["verification-user-server"]
+    assert verification_user["build"]["dockerfile"] == "deploy/verification.Dockerfile"
+    assert set(verification_user["environment"]) == {"VERIFY_BIND_ADDR", "VERIFY_PUBLIC_ORIGIN", "VERIFY_DATABASE_URL"}, "verification must not inherit Google credentials"
+    assert "verification-user-server" not in (ROOT / "Dockerfile").read_text(), "production image must not copy the verification example"
+    assert "GoogleProvider::discover" in (ROOT / "apps/user-server/src/main.rs").read_text(), "production user-server must retain its Google composition"
+
     def sql(user, database, statement, success=True):
         return run("exec", "-T", "postgres", "psql", "-U", user, "-d", database,
                    "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=sqlstate",

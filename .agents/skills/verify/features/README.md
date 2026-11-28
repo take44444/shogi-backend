@@ -4,7 +4,7 @@ Read the feature recipe before driving. This map is the maintained source of use
 
 ## Baseline
 
-Run `./scripts/verify-app.py FEATURE` from the repository root. It builds current sources, creates a fresh PostgreSQL database in a dedicated Compose project, starts game-server and player-server, runs doctor, drives the journey and cleans up. Every invocation gets new users and ports. Evidence is printed under `target/verification/shogi-verify-<id>/`. No credentials or existing database are used. Browser realtime has its own preconditions.
+Run `./scripts/verify-app.py FEATURE` from the repository root. Every invocation builds current sources, owns a dedicated Compose project and fresh data, runs doctor, drives the journey and cleans up. Native journeys launch game-server and player-server; `gateway` launches the public edge, gateway, example-only account service, game-server and real notification services. Evidence is printed under `target/verification/shogi-verify-<id>/`. No Google credentials or existing database are used. Install the browser dependency once as described in the skill before running `gateway`.
 
 ## Proof reporting
 
@@ -16,6 +16,6 @@ Pair commands/actions with read-back observations. Include feature ID, entry poi
 - [Resume after restart](persistence.md): in-progress and completed state, replaying original receipts.
 - [Read public records](records.md): filtered HTTP search, detail, missing records and invalid queries.
 - [Read committed ratings](ratings.md): initial state, worker application, separate rating pools.
-- [Accounts and browser realtime](browser-realtime.md): Google login, profile/logout, ticket lifecycle and authenticated WebSocket commands; requires real Google accounts and browser access.
+- [Accounts and browser realtime](browser-realtime.md): automated verification-provider login, profile/logout, ticket lifecycle and authenticated WebSocket commands. Actual Google login is a separate path requiring real accounts.
 
 Outbox failure/recovery also has an existing live harness, `scripts/prove-outbox.sh`, documented in the root README. It requires Valkey and uses its own Compose project; it is not run by `verify-app.py`. Natural clock timeout, full pagination, cancellation/expiry branches, spectating/access denial, and quarantined rating retry need additional journeys when those behaviors change. Never infer coverage for them from the four automated commands.

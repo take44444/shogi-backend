@@ -87,6 +87,21 @@ def http(directory, label, base, path, expected=200):
 def doctor(directory):
     state = json.loads((directory / "instance.json").read_text())
     require(state["root"] == str(ROOT), "instance belongs to another checkout")
+    if state["feature"] == "gateway":
+        compose = gateway_compose(state["project"])
+        env = gateway_environment(state["http"])
+        raw = subprocess.check_output(compose + ["ps", "--format", "json"], cwd=ROOT, env=env, text=True).strip()
+        containers = json.loads(raw) if raw.startswith("[") else [json.loads(line) for line in raw.splitlines()]
+        expected = {"postgres", "valkey", "game-server", "realtime-user-server", "realtime-gateway", "browser-edge", "outbox-publisher"}
+        running = {row["Service"] for row in containers if row["State"] == "running" and row["Project"] == state["project"]}
+        require(expected <= running, f"gateway project missing running services: {expected - running}")
+        published = subprocess.check_output(compose + ["port", "browser-edge", "8080"], cwd=ROOT, env=env, text=True).strip()
+        require("http://" + published == state["http"], "project does not own the public port")
+        schema = get(state["http"], "/openapi.json")
+        require(schema["status"] == 200 and "/auth/google/start" in json.loads(schema["body"])["paths"], "unexpected account API")
+        require(get(state["http"], "/me")["status"] == 401, "anonymous account request should be denied")
+        require(get(state["http"], "/matchmaking/me")["status"] == 401, "anonymous gateway request should be denied")
+        return {"healthy": True, **state, "services": sorted(running)}
     for name, process in state["processes"].items():
         pid = process["pid"]
         require(start_token(pid) == process["start_token"], f"{name}: PID was reused")
@@ -238,12 +253,88 @@ def run(feature):
         print(json.dumps(result), flush=True)
 
 
+def gateway_environment(origin):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("GOOGLE_", "USER_", "REALTIME_", "GATEWAY_", "COMPOSE_"))}
+    env.update(POSTGRES_PORT="0", GAME_SERVER_PORT="0", VALKEY_PORT="0",
+               REALTIME_PORT=origin.rsplit(":", 1)[1], REALTIME_PUBLIC_ORIGIN=origin,
+               REALTIME_ALLOW_LOOPBACK_HTTP="true")
+    return env
+
+
+def gateway_compose(project):
+    return ["docker", "compose", "--env-file", "/dev/null", "-f", str(ROOT / "compose.yaml"),
+            "-f", str(ROOT / "compose.verification.yaml"), "--profile", "realtime", "-p", project]
+
+
+def gateway():
+    run_id = "shogi-verify-" + uuid.uuid4().hex[:12]
+    directory = ROOT / "target/verification" / run_id
+    directory.mkdir(parents=True)
+    print(f"Evidence: {directory}", flush=True)
+    origin = f"http://127.0.0.1:{free_port()}"
+    env = gateway_environment(origin)
+    compose = gateway_compose(run_id)
+    state = {"root": str(ROOT), "project": run_id, "feature": "gateway", "http": origin,
+             "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+             "compose_files": ["compose.yaml", "compose.verification.yaml"]}
+    save(directory, "instance.json", state)
+    save(directory, "worktree.json", {"diff": subprocess.check_output(["git", "diff", "HEAD"], cwd=ROOT, text=True),
+                                     "untracked": subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True).splitlines()})
+    result = {"feature": "gateway", "status": "failed"}
+    cleanup_errors = []
+    try:
+        configuration = subprocess.check_output(compose + ["config", "--format", "json"], cwd=ROOT, env=env, text=True)
+        services = json.loads(configuration)["services"]
+        require(not any(key.startswith("GOOGLE_") for key in services["realtime-user-server"]["environment"]),
+                "verification user service must not receive Google configuration")
+        command(directory, "build", compose + ["build", "realtime-user-server", "realtime-gateway", "game-server", "outbox-publisher"], env, timeout=1800)
+        command(directory, "dependencies", compose + ["up", "-d", "--wait", "postgres", "valkey"], env)
+        def database_ready():
+            check = subprocess.run(compose + ["exec", "-T", "-e", "PGPASSWORD=shogi", "postgres", "psql", "-h", "127.0.0.1", "-U", "shogi", "-d", "users", "-Atc", "SELECT current_database()"],
+                                   cwd=ROOT, env=env, capture_output=True, text=True, timeout=10)
+            return check.returncode == 0 and check.stdout.strip() == "users"
+        wait_for(database_ready, "final account database TCP login")
+        command(directory, "launch", compose + ["up", "-d", "--no-build", "browser-edge", "outbox-publisher"], env)
+        def edge_ready():
+            try:
+                schema = get(origin, "/openapi.json")
+                anonymous = get(origin, "/matchmaking/me")
+                return schema["status"] == 200 and "/auth/google/start" in json.loads(schema["body"])["paths"] and anonymous["status"] == 401
+            except (OSError, ValueError):
+                return False
+        wait_for(edge_ready, "public edge account API and gateway session denial")
+        save(directory, "doctor.json", doctor(directory))
+        command(directory, "browser", ["node", "scripts/verify-gateway.cjs", origin, str(directory)], env, timeout=120)
+        result["status"] = "passed"
+    except BaseException as error:
+        result["error"] = str(error)
+        raise
+    finally:
+        for label, args in (("services", ["logs", "--no-color"]), ("cleanup", ["down", "--volumes", "--remove-orphans", "--rmi", "local"])):
+            try:
+                command(directory, label, compose + args, env)
+            except Exception as error:
+                cleanup_errors.append(str(error))
+        for kind, args in (("containers", ["docker", "ps", "-aq"]), ("volumes", ["docker", "volume", "ls", "-q"]), ("networks", ["docker", "network", "ls", "-q"])):
+            try:
+                remaining = subprocess.check_output(args + ["--filter", f"label=com.docker.compose.project={run_id}"], text=True).strip()
+                require(not remaining, f"run still owns {kind}: {remaining}")
+            except Exception as error:
+                cleanup_errors.append(str(error))
+        if cleanup_errors:
+            result["status"] = "failed"
+        save(directory, "result.json", result | {"cleanup_errors": cleanup_errors})
+        print(json.dumps(result | {"cleanup_errors": cleanup_errors}), flush=True)
+        require(not cleanup_errors, "cleanup failed: " + "; ".join(cleanup_errors))
+
+
 def main():
     def interrupted(signum, frame):
         raise KeyboardInterrupt(f"received signal {signum}")
     signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["play", "persistence", "records", "ratings", "doctor"])
+    parser.add_argument("action", choices=["play", "persistence", "records", "ratings", "gateway", "doctor"])
     parser.add_argument("directory", nargs="?", type=Path, help="live run directory for doctor")
     args = parser.parse_args()
     if args.action == "doctor":
@@ -252,7 +343,10 @@ def main():
         print(json.dumps(doctor(args.directory), indent=2))
     else:
         require(args.directory is None, "run directories are allocated automatically")
-        run(args.action)
+        if args.action == "gateway":
+            gateway()
+        else:
+            run(args.action)
 
 
 if __name__ == "__main__":
